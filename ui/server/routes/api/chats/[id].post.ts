@@ -1,0 +1,166 @@
+import type { UIMessage, TextUIPart } from 'ai'
+import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, smoothStream, stepCountIs, streamText } from 'ai'
+import { z } from 'zod'
+import type { AnthropicLanguageModelOptions } from '@ai-sdk/anthropic'
+import { anthropic } from '@ai-sdk/anthropic'
+import type { GoogleLanguageModelOptions } from '@ai-sdk/google'
+// import { google } from '@ai-sdk/google'
+import type { OpenAILanguageModelResponsesOptions } from '@ai-sdk/openai'
+import { openai } from '@ai-sdk/openai'
+import { useUserSession } from '../../../utils/session'
+import { useDrizzle, tables, eq, and } from '../../../utils/drizzle'
+import { defineHandler, HTTPError } from 'nitro'
+import { getValidatedRouterParams, readValidatedBody } from 'nitro/h3'
+import { weatherTool } from '../../../utils/tools/weather'
+import { chartTool } from '../../../utils/tools/chart'
+import { MODELS } from '../../../../shared/utils/models'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+
+
+export default defineHandler(async (event) => {
+  const session = await useUserSession(event)
+
+  const provider = createOpenAICompatible({
+    baseURL: 'http://localhost:11434/v1',
+    name: 'LocalLLM',
+    apiKey: '1234'
+  })
+
+  const { id } = await getValidatedRouterParams(event, z.object({
+    id: z.string()
+  }).parse)
+
+  const { model, messages } = await readValidatedBody(event, z.object({
+    model: z.string().refine(value => MODELS.some(m => m.value === value), {
+      message: 'Invalid model'
+    }),
+    messages: z.array(z.custom<UIMessage>())
+  }).parse)
+
+  const db = useDrizzle()
+
+  const chat = await db.query.chats.findFirst({
+    where: (chat, { eq }) => and(eq(chat.id, id as string), eq(chat.userId, session.data.user?.id || session.id!)),
+    with: {
+      messages: true
+    }
+  })
+  if (!chat) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Chat not found' })
+  }
+
+  if (!chat.title) {
+    const lastMessage = messages.at(-1)
+
+    if (lastMessage) {
+      const textPart = lastMessage.parts.find((part): part is TextUIPart => part.type === 'text')
+
+      let title: string | undefined
+      if (textPart) {
+        title = textPart.text.trim().slice(0, 15)
+      }
+
+      if (title) {
+        await db.update(tables.chats).set({ title }).where(eq(tables.chats.id, id as string))
+      }
+    }
+  }
+
+  const lastMessage = messages[messages.length - 1]
+  if (lastMessage?.role === 'user' && messages.length > 1) {
+    await db.insert(tables.messages).values({
+      id: lastMessage.id,
+      chatId: id as string,
+      role: 'user',
+      parts: lastMessage.parts
+    }).onConflictDoUpdate({ target: tables.messages.id, set: { parts: lastMessage.parts } })
+  }
+
+  const abortController = new AbortController()
+  event.runtime?.node?.req?.on('close', () => abortController.abort())
+
+  const stream = createUIMessageStream({
+    execute: async ({ writer }) => {
+      const result = streamText({
+        abortSignal: abortController.signal,
+        model: provider.chatModel('Qwen3.6-27B'),
+        system: `You are a knowledgeable and helpful AI assistant. ${session.data.user?.username ? `The user's name is ${session.data.user.username}.` : ''} Your goal is to provide clear, accurate, and well-structured responses.
+
+**FORMATTING RULES (CRITICAL):**
+- ABSOLUTELY NO MARKDOWN HEADINGS: Never use #, ##, ###, ####, #####, or ######
+- NO underline-style headings with === or ---
+- Use **bold text** for emphasis and section labels instead
+- Examples:
+  * Instead of "## Usage", write "**Usage:**" or just "Here's how to use it:"
+  * Instead of "# Complete Guide", write "**Complete Guide**" or start directly with content
+- Start all responses with content, never with a heading
+
+**WEB SEARCH:**
+- You have access to a web search tool to find current, up-to-date information
+- Only use it when the user explicitly asks about recent events, real-time data, or current facts
+- Do NOT search proactively — rely on your knowledge first
+- Cite your sources when providing information from web search results
+
+**RESPONSE QUALITY:**
+- Be concise yet comprehensive
+- Use examples when helpful
+- Break down complex topics into digestible parts
+- Maintain a friendly, professional tone`,
+        messages: await convertToModelMessages(messages),
+        tools: {
+          chart: chartTool,
+          weather: weatherTool,
+          ...(model.startsWith('anthropic/') && { web_search: anthropic.tools.webSearch_20250305() }),
+          ...(model.startsWith('openai/') && { web_search: openai.tools.webSearch() })
+          // TODO: enable once AI SDK supports combining provider-defined tools with custom tools
+          // ...(model.startsWith('google/') && { google_search: google.tools.googleSearch({}) })
+        },
+        providerOptions: {
+          anthropic: {
+            thinking: {
+              type: 'enabled',
+              budgetTokens: 2048
+            }
+          } satisfies AnthropicLanguageModelOptions,
+          google: {
+            thinkingConfig: {
+              includeThoughts: true,
+              thinkingLevel: 'low'
+            }
+          } satisfies GoogleLanguageModelOptions,
+          openai: {
+            reasoningEffort: 'low',
+            reasoningSummary: 'detailed'
+          } satisfies OpenAILanguageModelResponsesOptions
+        },
+        stopWhen: stepCountIs(5),
+        experimental_transform: smoothStream()
+      })
+
+      if (!chat.title) {
+        writer.write({
+          type: 'data-chat-title',
+          data: { message: 'Generating title...' },
+          transient: true
+        })
+      }
+
+      writer.merge(result.toUIMessageStream({
+        sendSources: true,
+        sendReasoning: true
+      }))
+    },
+    onFinish: async ({ messages }) => {
+      await db.insert(tables.messages).values(messages.map(message => ({
+        id: message.id,
+        chatId: chat.id,
+        role: message.role as 'user' | 'assistant',
+        parts: message.parts
+      }))).onConflictDoNothing()
+    }
+  })
+
+  return createUIMessageStreamResponse({
+    stream
+  })
+})
