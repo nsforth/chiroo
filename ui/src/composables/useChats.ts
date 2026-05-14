@@ -2,7 +2,17 @@ import { isToday, isYesterday, subMonths } from 'date-fns'
 import { computed, ref } from 'vue'
 import { createSharedComposable } from '@vueuse/core'
 import { $fetch } from 'ofetch'
-import type { Chat as ChatData } from '~/server/utils/drizzle'
+
+interface ChatsResponse {
+  chats: ChatResponse[]
+}
+
+interface ChatResponse {
+  id: string,
+  title?: string,
+  userId: string,
+  createdAt: string
+}
 
 interface Chat {
   id: string
@@ -16,7 +26,7 @@ export const useChats = createSharedComposable(() => {
   const chats = ref<Chat[]>([])
 
   const fetchChats = async () => {
-    chats.value = await $fetch('/api/chats').then((data: ChatData[]) => data.map(chat => ({
+    chats.value = await $fetch('/api/chats').then((data: ChatsResponse) => data.chats.map(chat => ({
       id: chat.id,
       label: chat.title || 'Untitled',
       to: `/chat/${chat.id}`,
