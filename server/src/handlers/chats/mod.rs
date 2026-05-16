@@ -1,5 +1,6 @@
 use serde::Serialize;
 mod get_chats;
+mod ui_messages;
 pub use get_chats::get_chats;
 
 #[derive(Debug, Clone, Serialize)]
