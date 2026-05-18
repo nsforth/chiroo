@@ -1,8 +1,4 @@
-use crate::handlers::{
-    chats::get_chats,
-    posts::{create_post, get_post, list_posts},
-    session::get_session,
-};
+use crate::handlers::{chats::create_chat, chats::get_chats, session::get_session};
 use crate::AppState;
 use axum::{
     http::StatusCode,
@@ -16,7 +12,8 @@ pub fn app_router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/api/session", get(get_session))
         .route("/api/chats", get(get_chats))
-        .nest("/v1/posts", posts_routes(state.clone()))
+        .route("/api/chats", post(create_chat))
+        //.nest("/v1/posts", posts_routes(state.clone()))
         .fallback(handler_404)
         .with_state(state)
 }
@@ -34,8 +31,8 @@ async fn handler_404() -> impl IntoResponse {
 
 fn posts_routes(state: AppState) -> Router<AppState> {
     Router::new()
-        .route("/", post(create_post))
-        .route("/", get(list_posts))
-        .route("/{id}", get(get_post))
+        //.route("/", post(create_post))
+        //.route("/", get(list_posts))
+        //.route("/{id}", get(get_post))
         .with_state(state)
 }

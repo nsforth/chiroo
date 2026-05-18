@@ -1,2 +1,4 @@
-pub mod chats;
-pub mod post;
+pub mod chat;
+pub mod messages;
+pub mod user;
+pub mod votes;

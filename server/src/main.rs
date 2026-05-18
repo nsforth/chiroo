@@ -11,12 +11,14 @@ mod errors;
 mod handlers;
 mod infra;
 mod routes;
+mod services;
 mod state;
 mod utils;
 
 use crate::config::config;
 use crate::errors::{internal_error, AppError};
 use crate::routes::app_router;
+use crate::services::chat_service::ChatService;
 use crate::state::AppState;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
@@ -37,7 +39,9 @@ async fn main() {
         return;
     }
 
-    let state = AppState { pool };
+    let state = AppState {
+        chat_service: ChatService::new(pool),
+    };
 
     let app = app_router(state.clone());
 

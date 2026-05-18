@@ -1,10 +1,11 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    posts (id) {
+    chats (id) {
         id -> Uuid,
-        title -> Varchar,
-        body -> Text,
-        published -> Bool,
+        title -> Nullable<Varchar>,
+        owner -> Uuid,
+        public -> Bool,
+        created_at -> Timestamptz,
     }
 }
