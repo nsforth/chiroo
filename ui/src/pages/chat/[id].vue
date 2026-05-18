@@ -55,7 +55,7 @@ const chat = new Chat({
   }),
   onData: (dataPart) => {
     if (dataPart.type === 'data-chat-title') {
-      fetchChats()
+      fetchChats().catch(() => {})
     }
   },
   onError(error) {

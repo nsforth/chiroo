@@ -25,17 +25,15 @@ interface Chat {
 export const useChats = createSharedComposable(() => {
   const chats = ref<Chat[]>([])
 
-  const fetchChats = async () => {
-    chats.value = await $fetch('/api/chats').then((data: ChatsResponse) => data.chats.map(chat => ({
+ const fetchChats = async () => {
+    const data = await $fetch('/api/chats') as ChatsResponse
+    chats.value = data.chats.map(chat => ({
       id: chat.id,
       label: chat.title || 'Untitled',
       to: `/chat/${chat.id}`,
       icon: 'i-lucide-message-circle',
       createdAt: String(chat.createdAt)
-    }) as Chat)).catch(error => {
-      console.error(error)
-      return []
-    })
+    }) as Chat)
   }
 
   const updateChat = (id: string, partial: Partial<Chat>) => {

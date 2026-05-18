@@ -10,6 +10,7 @@ import Navbar from '../components/Navbar.vue'
 const { fetchChats } = useChats()
 const { csrf, headerName } = useCsrf()
 const { user } = useUserSession()
+const toast = useToast()
 const input = ref('')
 const loading = ref(false)
 const router = useRouter()
@@ -28,14 +29,24 @@ const greeting = computed(() => {
 async function createChat(prompt: string) {
   input.value = prompt
   loading.value = true
-  const chat = await $fetch('/api/chats', {
-    method: 'POST',
-    headers: { [headerName]: csrf() },
-    body: { input: prompt }
-  })
+  try {
+    const chat = await $fetch('/api/chats', {
+      method: 'POST',
+      headers: { [headerName]: csrf() },
+      body: { input: prompt }
+    })
 
-  await fetchChats()
-  router.push(`/chat/${chat?.id}`)
+    await fetchChats()
+    router.push(`/chat/${chat?.id}`)
+  } catch {
+    toast.add({
+      description: 'Failed to create chat',
+      icon: 'i-lucide-alert-circle',
+      color: 'error'
+    })
+  } finally {
+    loading.value = false
+  }
 }
 
 function onSubmit() {

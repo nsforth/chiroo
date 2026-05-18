@@ -8,18 +8,27 @@ import { useChatActions } from '../composables/useChatActions'
 
 const router = useRouter()
 const route = useRoute()
+const toast = useToast()
 const { loggedIn, openInPopup, fetchSession } = useUserSession()
 const { groups, fetchChats } = useChats()
 const { renameChat, deleteChat } = useChatActions()
 
 await fetchSession()
-await fetchChats()
+try {
+  await fetchChats()
+} catch {
+  toast.add({
+    description: 'Failed to load chats',
+    icon: 'i-lucide-alert-circle',
+    color: 'error'
+  })
+}
 
 const sidebarOpen = ref(false)
 const searchOpen = ref(false)
 
 watch(loggedIn, () => {
-  fetchChats()
+  fetchChats().catch((error) => {console.log("error loading chats on login: " + error)})
 
   sidebarOpen.value = false
 })
