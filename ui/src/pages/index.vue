@@ -106,6 +106,7 @@ const quickChats = computed(() => [
         <UChatPrompt
           v-model="input"
           :status="loading ? 'streaming' : 'ready'"
+          placeholder="Type something..."
           class="[view-transition-name:chat-prompt]"
           variant="subtle"
           :ui="{ base: 'px-1.5' }"

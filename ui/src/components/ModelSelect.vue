@@ -8,10 +8,14 @@ const { model, models } = useModels()
   <USelectMenu
     v-model="model"
     :items="models"
-    size="sm"
+    size="sm"    
     :icon="models.find(m => m.value === model)?.icon"
     variant="ghost"
     value-key="value"
+    :search-input="{
+      placeholder: 'Filter...',
+      icon: 'i-lucide-search'
+    }"
     class="data-[state=open]:bg-elevated"
     :ui="{
       trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200'
