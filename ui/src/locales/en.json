@@ -1,0 +1,87 @@
+{
+  "errors": {
+    "failedToLoadChats": "Failed to load chats",
+    "failedToCreateChat": "Failed to create chat",
+    "failedToUpdateMessage": "Failed to update message",
+    "failedToRegenerateMessage": "Failed to regenerate message",
+    "failedToSaveVote": "Failed to save vote",
+    "failedToUpdateVisibility": "Failed to update visibility",
+    "failedToRenameChat": "Failed to rename chat",
+    "failedToDeleteChat": "Failed to delete chat"
+  },
+  "buttons": {
+    "newChat": "New chat",
+    "search": "Search",
+    "rename": "Rename",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel",
+    "copyLink": "Copy link",
+    "copied": "Copied!",
+    "backToHome": "Back to home",
+    "loginWithGitHub": "Login with GitHub"
+  },
+  "greeting": {
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening"
+  },
+  "groups": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "lastWeek": "Last week",
+    "lastMonth": "Last month"
+  },
+  "chat": {
+    "untitled": "Untitled",
+    "notFound": "Chat not found",
+    "thinking": "Thinking...",
+    "searchPlaceholder": "Search chats..."
+  },
+  "visibility": {
+    "private": "Keep private",
+    "privateDesc": "Only you have access",
+    "shared": "Shared",
+    "sharedDesc": "Anyone with the link can view",
+    "modalTitleShared": "Chat shared",
+    "modalTitlePrivate": "Share chat",
+    "modalDescShared": "Anyone with the link can view this chat.",
+    "modalDescPrivate": "Only you can view this chat.",
+    "failedToUpdate": "Failed to update visibility"
+  },
+  "toast": {
+    "chatDeleted": "Chat deleted",
+    "chatDeletedDesc": "Your chat has been deleted"
+  },
+  "modal": {
+    "deleteTitle": "Delete chat",
+    "deleteDesc": "Are you sure you want to delete this chat? This cannot be undone.",
+    "renameTitle": "Rename chat",
+    "renameDesc": "Choose a new title for this chat.",
+    "chatTitlePlaceholder": "Chat title"
+  },
+  "userMenu": {
+    "theme": "Theme",
+    "primary": "Primary",
+    "neutral": "Neutral",
+    "appearance": "Appearance",
+    "light": "Light",
+    "dark": "Dark",
+    "templates": "Templates",
+    "starter": "Starter",
+    "dashboard": "Dashboard",
+    "chat": "Chat",
+    "documentation": "Documentation",
+    "githubRepo": "GitHub repository",
+    "logout": "Log out"
+  },
+  "quick": {
+    "nuxtUI": "Why use Nuxt UI?",
+    "vueComposable": "Help me create a Vue composable",
+    "unjs": "Tell me more about UnJS",
+    "vueUse": "Why should I consider VueUse?",
+    "tailwindCSS": "Tailwind CSS best practices",
+    "weather": "What is the weather in Bordeaux?",
+    "chart": "Show me a chart of sales data"
+  }
+}

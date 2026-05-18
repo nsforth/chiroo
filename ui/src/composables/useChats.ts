@@ -1,6 +1,7 @@
 import { isToday, isYesterday, subMonths } from 'date-fns'
 import { computed, ref } from 'vue'
 import { createSharedComposable } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { $fetch } from 'ofetch'
 
 interface ChatsResponse {
@@ -24,12 +25,13 @@ interface Chat {
 
 export const useChats = createSharedComposable(() => {
   const chats = ref<Chat[]>([])
+  const { t } = useI18n()
 
  const fetchChats = async () => {
     const data = await $fetch('/api/chats') as ChatsResponse
     chats.value = data.chats.map(chat => ({
       id: chat.id,
-      label: chat.title || 'Untitled',
+      label: chat.title || t('chat.untitled'),
       to: `/chat/${chat.id}`,
       icon: 'i-lucide-message-circle',
       createdAt: String(chat.createdAt)
@@ -68,7 +70,8 @@ export const useChats = createSharedComposable(() => {
         lastMonth.push(chat)
       } else {
         // Format: "January 2023", "February 2023", etc.
-        const monthYear = chatDate.toLocaleDateString('en-US', {
+        const i18nLocale = ['ru', 'en'].includes(navigator.language.slice(0, 2)) ? navigator.language : 'en-US'
+        const monthYear = chatDate.toLocaleDateString(i18nLocale, {
           month: 'long',
           year: 'numeric'
         })
@@ -99,7 +102,7 @@ export const useChats = createSharedComposable(() => {
     if (today.length) {
       formattedGroups.push({
         id: 'today',
-        label: 'Today',
+        label: t('groups.today'),
         items: today
       })
     }
@@ -107,7 +110,7 @@ export const useChats = createSharedComposable(() => {
     if (yesterday.length) {
       formattedGroups.push({
         id: 'yesterday',
-        label: 'Yesterday',
+        label: t('groups.yesterday'),
         items: yesterday
       })
     }
@@ -115,7 +118,7 @@ export const useChats = createSharedComposable(() => {
     if (lastWeek.length) {
       formattedGroups.push({
         id: 'last-week',
-        label: 'Last week',
+        label: t('groups.lastWeek'),
         items: lastWeek
       })
     }
@@ -123,7 +126,7 @@ export const useChats = createSharedComposable(() => {
     if (lastMonth.length) {
       formattedGroups.push({
         id: 'last-month',
-        label: 'Last month',
+        label: t('groups.lastMonth'),
         items: lastMonth
       })
     }

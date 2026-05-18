@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useChatActions } from '../../composables/useChatActions'
 
@@ -14,8 +15,9 @@ const emit = defineEmits<{
 }>()
 
 const { renameChat, deleteChat } = useChatActions()
+const { t } = useI18n()
 
-const displayTitle = computed(() => props.title || 'Untitled')
+const displayTitle = computed(() => props.title || t('chat.untitled'))
 
 async function rename() {
   const newTitle = await renameChat(props.chatId, props.title)
@@ -24,13 +26,13 @@ async function rename() {
 
 const items = computed<DropdownMenuItem[][]>(() => [[
   {
-    label: 'Rename',
+    label: t('buttons.rename'),
     icon: 'i-lucide-pencil',
     onSelect: rename
   }
 ], [
   {
-    label: 'Delete',
+    label: t('buttons.delete'),
     icon: 'i-lucide-trash',
     color: 'error' as const,
     onSelect: () => deleteChat(props.chatId)

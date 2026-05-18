@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { $fetch } from 'ofetch'
 import { useChats } from '../composables/useChats'
 import { useCsrf } from '../composables/useCsrf'
@@ -11,15 +12,16 @@ const { fetchChats } = useChats()
 const { csrf, headerName } = useCsrf()
 const { user } = useUserSession()
 const toast = useToast()
+const { t } = useI18n()
 const input = ref('')
 const loading = ref(false)
 const router = useRouter()
 
 const greeting = computed(() => {
   const hour = new Date().getHours()
-  let timeGreeting = 'Good evening'
-  if (hour < 12) timeGreeting = 'Good morning'
-  else if (hour < 18) timeGreeting = 'Good afternoon'
+  let timeGreeting = t('greeting.evening')
+  if (hour < 12) timeGreeting = t('greeting.morning')
+  else if (hour < 18) timeGreeting = t('greeting.afternoon')
 
   const name = user.value?.name?.split(' ')[0] || user.value?.username
 
@@ -40,7 +42,7 @@ async function createChat(prompt: string) {
     router.push(`/chat/${chat?.id}`)
   } catch {
     toast.add({
-      description: 'Failed to create chat',
+      description: t('errors.failedToCreateChat'),
       icon: 'i-lucide-alert-circle',
       color: 'error'
     })
@@ -53,36 +55,36 @@ function onSubmit() {
   createChat(input.value)
 }
 
-const quickChats = [
+const quickChats = computed(() => [
   {
-    label: 'Why use Nuxt UI?',
+    label: t('quick.nuxtUI'),
     icon: 'i-logos-nuxt-icon'
   },
   {
-    label: 'Help me create a Vue composable',
+    label: t('quick.vueComposable'),
     icon: 'i-logos-vue'
   },
   {
-    label: 'Tell me more about UnJS',
+    label: t('quick.unjs'),
     icon: 'i-logos-unjs'
   },
   {
-    label: 'Why should I consider VueUse?',
+    label: t('quick.vueUse'),
     icon: 'i-logos-vueuse'
   },
   {
-    label: 'Tailwind CSS best practices',
+    label: t('quick.tailwindCSS'),
     icon: 'i-logos-tailwindcss-icon'
   },
   {
-    label: 'What is the weather in Bordeaux?',
+    label: t('quick.weather'),
     icon: 'i-lucide-sun'
   },
   {
-    label: 'Show me a chart of sales data',
+    label: t('quick.chart'),
     icon: 'i-lucide-line-chart'
   }
-]
+])
 </script>
 
 <template>

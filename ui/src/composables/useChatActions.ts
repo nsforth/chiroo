@@ -1,5 +1,6 @@
 import { defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { $fetch } from 'ofetch'
 import { useChats } from './useChats'
 import { useCsrf } from './useCsrf'
@@ -12,14 +13,15 @@ export function useChatActions() {
   const router = useRouter()
   const toast = useToast()
   const overlay = useOverlay()
+  const { t } = useI18n()
   const { csrf, headerName } = useCsrf()
   const { updateChat, removeChat } = useChats()
 
   const renameModal = overlay.create(ModalRename)
   const deleteModal = overlay.create(ModalConfirm, {
     props: {
-      title: 'Delete chat',
-      description: 'Are you sure you want to delete this chat? This cannot be undone.',
+      title: t('modal.deleteTitle'),
+      description: t('modal.deleteDesc'),
       color: 'error'
     }
   })
@@ -42,7 +44,7 @@ export function useChatActions() {
       return result
     } catch {
       toast.add({
-        description: 'Failed to rename chat',
+        description: t('errors.failedToRenameChat'),
         icon: 'i-lucide-alert-circle',
         color: 'error'
       })
@@ -64,8 +66,8 @@ export function useChatActions() {
       })
 
       toast.add({
-        title: 'Chat deleted',
-        description: 'Your chat has been deleted',
+        title: t('toast.chatDeleted'),
+        description: t('toast.chatDeletedDesc'),
         icon: 'i-lucide-trash'
       })
 
@@ -78,7 +80,7 @@ export function useChatActions() {
       return true
     } catch {
       toast.add({
-        description: 'Failed to delete chat',
+        description: t('errors.failedToDeleteChat'),
         icon: 'i-lucide-alert-circle',
         color: 'error'
       })

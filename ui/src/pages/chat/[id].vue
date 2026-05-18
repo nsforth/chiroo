@@ -4,6 +4,7 @@ import { $fetch } from 'ofetch'
 import { Chat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import type { UIMessage } from 'ai'
+import { useI18n } from 'vue-i18n'
 import { useModels } from '../../composables/useModels'
 import { useChats } from '../../composables/useChats'
 import { useCsrf } from '../../composables/useCsrf'
@@ -18,6 +19,7 @@ import type { Vote } from '../../../server/utils/drizzle'
 
 const route = useRoute<'/chat/[id]'>()
 const toast = useToast()
+const { t } = useI18n()
 const { model } = useModels()
 const { fetchChats, chats } = useChats()
 const { csrf, headerName } = useCsrf()
@@ -108,7 +110,7 @@ async function saveEdit(message: UIMessage, text: string) {
     })
   } catch {
     toast.add({
-      description: 'Failed to update message',
+      description: t('errors.failedToUpdateMessage'),
       icon: 'i-lucide-alert-circle',
       color: 'error'
     })
@@ -128,7 +130,7 @@ async function regenerateMessage(message: UIMessage) {
     })
   } catch {
     toast.add({
-      description: 'Failed to regenerate message',
+      description: t('errors.failedToRegenerateMessage'),
       icon: 'i-lucide-alert-circle',
       color: 'error'
     })
@@ -165,7 +167,7 @@ async function vote(message: UIMessage, isUpvoted: boolean) {
   } catch {
     votes.value = snapshot
     toast.add({
-      description: 'Failed to save vote',
+      description: t('errors.failedToSaveVote'),
       icon: 'i-lucide-alert-circle',
       color: 'error'
     })
@@ -220,7 +222,7 @@ onMounted(() => {
               <ChatIndicator />
 
               <UChatShimmer
-                text="Thinking..."
+                :text="t('chat.thinking')"
                 class="text-sm"
               />
             </div>
@@ -281,14 +283,14 @@ onMounted(() => {
     class="flex-1 flex flex-col gap-4 sm:gap-6"
   >
     <UError
-      :error="{ statusMessage: 'Chat not found', statusCode: 404 }"
+      :error="{ statusMessage: t('chat.notFound'), statusCode: 404 }"
       class="min-h-full"
     >
       <template #links>
         <UButton
           to="/"
           size="lg"
-          label="Back to home"
+          :label="t('buttons.backToHome')"
         />
       </template>
     </UError>

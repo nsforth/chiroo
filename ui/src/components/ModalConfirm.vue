@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 defineProps<{
   title: string
   description: string
@@ -6,6 +8,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{ close: [boolean] }>()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -21,13 +24,13 @@ const emit = defineEmits<{ close: [boolean] }>()
     <template #footer>
       <UButton
         :color="color"
-        label="Delete"
+        :label="t('buttons.delete')"
         @click="emit('close', true)"
       />
       <UButton
         color="neutral"
         variant="ghost"
-        label="Cancel"
+        :label="t('buttons.cancel')"
         @click="emit('close', false)"
       />
     </template>

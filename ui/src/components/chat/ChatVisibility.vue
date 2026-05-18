@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { $fetch } from 'ofetch'
+import { useI18n } from 'vue-i18n'
 import { useClipboard } from '@vueuse/core'
 import { useCsrf } from '../../composables/useCsrf'
 
@@ -14,6 +15,7 @@ const emit = defineEmits<{
 }>()
 
 const toast = useToast()
+const { t } = useI18n()
 const { csrf, headerName } = useCsrf()
 const clipboard = useClipboard()
 
@@ -25,14 +27,14 @@ const shareUrl = computed(() => `${window.location.origin}/chat/${props.chatId}`
 const options = [
   {
     value: 'private' as const,
-    label: 'Keep private',
-    description: 'Only you have access',
+    label: t('visibility.private'),
+    description: t('visibility.privateDesc'),
     icon: 'i-lucide-lock'
   },
   {
     value: 'public' as const,
-    label: 'Shared',
-    description: 'Anyone with the link can view',
+    label: t('visibility.shared'),
+    description: t('visibility.sharedDesc'),
     icon: 'i-lucide-globe'
   }
 ]
@@ -53,7 +55,7 @@ async function updateVisibility(value: 'public' | 'private') {
   } catch {
     emit('update:visibility', previous)
     toast.add({
-      description: 'Failed to update visibility',
+      description: t('visibility.failedToUpdate'),
       icon: 'i-lucide-alert-circle',
       color: 'error'
     })
@@ -75,8 +77,8 @@ function copyLink() {
 
 <template>
   <UModal
-    :title="isShared ? 'Chat shared' : 'Share chat'"
-    :description="isShared ? 'Anyone with the link can view this chat.' : 'Only you can view this chat.'"
+    :title="isShared ? t('visibility.modalTitleShared') : t('visibility.modalTitlePrivate')"
+    :description="isShared ? t('visibility.modalDescShared') : t('visibility.modalDescPrivate')"
     close
   >
     <UTooltip text="Share chat">
@@ -133,7 +135,7 @@ function copyLink() {
         </a>
 
         <UButton
-          :label="copied ? 'Copied!' : 'Copy link'"
+          :label="copied ? t('buttons.copied') : t('buttons.copyLink')"
           size="sm"
           color="neutral"
           :variant="copied ? 'soft' : 'solid'"

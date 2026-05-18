@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useChats } from '../composables/useChats'
 import { useUserSession } from '../composables/useUserSession'
@@ -9,6 +10,7 @@ import { useChatActions } from '../composables/useChatActions'
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
+const { t } = useI18n()
 const { loggedIn, openInPopup, fetchSession } = useUserSession()
 const { groups, fetchChats } = useChats()
 const { renameChat, deleteChat } = useChatActions()
@@ -18,7 +20,7 @@ try {
   await fetchChats()
 } catch {
   toast.add({
-    description: 'Failed to load chats',
+    description: t('errors.failedToLoadChats'),
     icon: 'i-lucide-alert-circle',
     color: 'error'
   })
@@ -48,13 +50,13 @@ const items = computed(() => groups.value?.flatMap((group) => {
 function getChatActions(item: { id: string, label: string }): DropdownMenuItem[][] {
   return [[
     {
-      label: 'Rename',
+      label: t('buttons.rename'),
       icon: 'i-lucide-pencil',
       onSelect: () => renameChat(item.id, item.label === 'Untitled' ? '' : item.label)
     }
   ], [
     {
-      label: 'Delete',
+      label: t('buttons.delete'),
       icon: 'i-lucide-trash',
       color: 'error' as const,
       onSelect: () => deleteChat(item.id)
@@ -98,12 +100,12 @@ defineShortcuts({
       <template #default="{ collapsed }">
         <UNavigationMenu
           :items="[{
-            label: 'New chat',
+            label: t('buttons.newChat'),
             to: '/',
             kbds: ['meta', 'o'],
             icon: 'i-lucide-circle-plus'
           }, {
-            label: 'Search',
+            label: t('buttons.search'),
             icon: 'i-lucide-search',
             kbds: ['meta', 'k'],
             onSelect: () => {
@@ -168,7 +170,7 @@ defineShortcuts({
         />
         <UButton
           v-else
-          :label="collapsed ? '' : 'Login with GitHub'"
+          :label="collapsed ? '' : t('buttons.loginWithGitHub')"
           icon="i-simple-icons:github"
           color="neutral"
           variant="ghost"
@@ -180,11 +182,11 @@ defineShortcuts({
 
     <UDashboardSearch
       v-model:open="searchOpen"
-      placeholder="Search chats..."
+      :placeholder="t('chat.searchPlaceholder')"
       :groups="[{
         id: 'links',
         items: [{
-          label: 'New chat',
+          label: t('buttons.newChat'),
           to: '/',
           icon: 'i-lucide-circle-plus'
         }]

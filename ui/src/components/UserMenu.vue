@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useColorMode } from '@vueuse/core'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useUserSession } from '../composables/useUserSession'
 
@@ -13,6 +14,7 @@ const router = useRouter()
 const colorMode = useColorMode()
 const appConfig = useAppConfig()
 const { user, clearSession } = useUserSession()
+const { t } = useI18n()
 
 const colors = ['red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose']
 const neutrals = ['slate', 'gray', 'zinc', 'neutral', 'stone']
@@ -25,10 +27,10 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
     alt: user.value?.name
   }
 }], [{
-  label: 'Theme',
+  label: t('userMenu.theme'),
   icon: 'i-lucide-palette',
   children: [{
-    label: 'Primary',
+    label: t('userMenu.primary'),
     slot: 'chip',
     chip: appConfig.ui.colors.primary,
     content: {
@@ -48,7 +50,7 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
       }
     }))
   }, {
-    label: 'Neutral',
+    label: t('userMenu.neutral'),
     slot: 'chip',
     chip: appConfig.ui.colors.neutral === 'neutral' ? 'old-neutral' : appConfig.ui.colors.neutral,
     content: {
@@ -69,21 +71,21 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
     }))
   }]
 }, {
-  label: 'Appearance',
-  icon: 'i-lucide-sun-moon',
-  children: [{
-    label: 'Light',
-    icon: 'i-lucide-sun',
-    type: 'checkbox',
-    checked: colorMode.value === 'light',
-    onSelect(e: Event) {
-      e.preventDefault()
+   label: t('userMenu.appearance'),
+   icon: 'i-lucide-sun-moon',
+   children: [{
+     label: t('userMenu.light'),
+     icon: 'i-lucide-sun',
+     type: 'checkbox',
+     checked: colorMode.value === 'light',
+     onSelect(e: Event) {
+       e.preventDefault()
 
-      colorMode.value = 'light'
-    }
-  }, {
-    label: 'Dark',
-    icon: 'i-lucide-moon',
+       colorMode.value = 'light'
+     }
+   }, {
+     label: t('userMenu.dark'),
+     icon: 'i-lucide-moon',
     type: 'checkbox',
     checked: colorMode.value === 'dark',
     onUpdateChecked(checked: boolean) {
@@ -96,33 +98,33 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
     }
   }]
 }], [{
-  label: 'Templates',
-  icon: 'i-lucide-layout-template',
-  children: [{
-    label: 'Starter',
-    to: 'https://starter-vue-template.nuxt.dev/'
-  }, {
-    label: 'Dashboard',
-    to: 'https://dashboard-vue-template.nuxt.dev/'
-  }, {
-    label: 'Chat',
+   label: t('userMenu.templates'),
+   icon: 'i-lucide-layout-template',
+   children: [{
+     label: t('userMenu.starter'),
+     to: 'https://starter-vue-template.nuxt.dev/'
+   }, {
+     label: t('userMenu.dashboard'),
+     to: 'https://dashboard-vue-template.nuxt.dev/'
+   }, {
+     label: t('userMenu.chat'),
     to: 'https://chat-vue-template.nuxt.dev/',
     color: 'primary',
     checked: true,
     type: 'checkbox'
   }]
 }], [{
-  label: 'Documentation',
-  icon: 'i-lucide-book-open',
-  to: 'https://ui.nuxt.com/docs/getting-started/installation/vue',
-  target: '_blank'
+   label: t('userMenu.documentation'),
+   icon: 'i-lucide-book-open',
+   to: 'https://ui.nuxt.com/docs/getting-started/installation/vue',
+   target: '_blank'
 }, {
-  label: 'GitHub repository',
-  icon: 'i-simple-icons:github',
-  to: 'https://github.com/nuxt-ui-templates/chat-vue',
-  target: '_blank'
+   label: t('userMenu.githubRepo'),
+   icon: 'i-simple-icons:github',
+   to: 'https://github.com/nuxt-ui-templates/chat-vue',
+   target: '_blank'
 }], [{
-  label: 'Log out',
+   label: t('userMenu.logout'),
   icon: 'i-lucide-log-out',
   onSelect() {
     clearSession()

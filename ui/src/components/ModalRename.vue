@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   title?: string
 }>()
 
 const emit = defineEmits<{ close: [string | false] }>()
+const { t } = useI18n()
 
 const value = ref(props.title ?? '')
 
@@ -19,8 +21,8 @@ function submit() {
 
 <template>
   <UModal
-    title="Rename chat"
-    description="Choose a new title for this chat."
+    :title="t('modal.renameTitle')"
+    :description="t('modal.renameDesc')"
     :ui="{
       footer: 'flex-row-reverse justify-start'
     }"
@@ -31,7 +33,7 @@ function submit() {
         v-model="value"
         autofocus
         size="lg"
-        placeholder="Chat title"
+        :placeholder="t('modal.chatTitlePlaceholder')"
         class="w-full"
         :ui="{ root: 'w-full' }"
         @keydown.enter.prevent="submit"
@@ -40,14 +42,14 @@ function submit() {
 
     <template #footer>
       <UButton
-        label="Save"
+        :label="t('buttons.save')"
         :disabled="!trimmed"
         @click="submit"
       />
       <UButton
         color="neutral"
         variant="ghost"
-        label="Cancel"
+        :label="t('buttons.cancel')"
         @click="emit('close', false)"
       />
     </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { UIMessage } from 'ai'
 
 const props = defineProps<{
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const editingText = ref(props.text)
+const { t } = useI18n()
 </script>
 
 <template>
@@ -32,12 +34,12 @@ const editingText = ref(props.text)
         size="sm"
         variant="soft"
         color="neutral"
-        label="Cancel"
+        :label="t('buttons.cancel')"
         @click="emit('cancel')"
       />
       <UButton
         size="sm"
-        label="Save"
+        :label="t('buttons.save')"
         :disabled="!editingText.trim() || editingText === text"
         @click="emit('save', message, editingText)"
       />

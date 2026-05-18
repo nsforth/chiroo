@@ -1,0 +1,87 @@
+{
+  "errors": {
+    "failedToLoadChats": "Не удалось загрузить чаты",
+    "failedToCreateChat": "Не удалось создать чат",
+    "failedToUpdateMessage": "Не удалось обновить сообщение",
+    "failedToRegenerateMessage": "Не удалось перегенерировать сообщение",
+    "failedToSaveVote": "Не удалось сохранить голос",
+    "failedToUpdateVisibility": "Не удалось изменить видимость",
+    "failedToRenameChat": "Не удалось переименовать чат",
+    "failedToDeleteChat": "Не удалось удалить чат"
+  },
+  "buttons": {
+    "newChat": "Новый чат",
+    "search": "Поиск",
+    "rename": "Переименовать",
+    "delete": "Удалить",
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "copyLink": "Скопировать ссылку",
+    "copied": "Скопировано!",
+    "backToHome": "На главную",
+    "loginWithGitHub": "Войти через GitHub"
+  },
+  "greeting": {
+    "morning": "Доброе утро",
+    "afternoon": "Добрый день",
+    "evening": "Добрый вечер"
+  },
+  "groups": {
+    "today": "Сегодня",
+    "yesterday": "Вчера",
+    "lastWeek": "На этой неделе",
+    "lastMonth": "В этом месяце"
+  },
+  "chat": {
+    "untitled": "Без названия",
+    "notFound": "Чат не найден",
+    "thinking": "Думаю...",
+    "searchPlaceholder": "Поиск чатов..."
+  },
+  "visibility": {
+    "private": "Оставить приватным",
+    "privateDesc": "Только у вас есть доступ",
+    "shared": "Общий",
+    "sharedDesc": "Любой со ссылкой может просмотреть",
+    "modalTitleShared": "Чат общий",
+    "modalTitlePrivate": "Поделиться чатом",
+    "modalDescShared": "Любой со ссылкой может просмотреть этот чат.",
+    "modalDescPrivate": "Только вы можете просмотреть этот чат.",
+    "failedToUpdate": "Не удалось изменить видимость"
+  },
+  "toast": {
+    "chatDeleted": "Чат удалён",
+    "chatDeletedDesc": "Ваш чат был удалён"
+  },
+  "modal": {
+    "deleteTitle": "Удалить чат",
+    "deleteDesc": "Вы уверены, что хотите удалить этот чат? Это действие нельзя отменить.",
+    "renameTitle": "Переименовать чат",
+    "renameDesc": "Придумайте новое название для чата.",
+    "chatTitlePlaceholder": "Название чата"
+  },
+  "userMenu": {
+    "theme": "Тема",
+    "primary": "Основной",
+    "neutral": "Нейтральный",
+    "appearance": "Оформление",
+    "light": "Светлая",
+    "dark": "Тёмная",
+    "templates": "Шаблоны",
+    "starter": "Starter",
+    "dashboard": "Dashboard",
+    "chat": "Chat",
+    "documentation": "Документация",
+    "githubRepo": "GitHub репозиторий",
+    "logout": "Выйти"
+  },
+  "quick": {
+    "nuxtUI": "Зачем использовать Nuxt UI?",
+    "vueComposable": "Помоги создать Vue composable",
+    "unjs": "Расскажи больше о UnJS",
+    "vueUse": "Почему стоит рассмотреть VueUse?",
+    "tailwindCSS": "Лучшие практики Tailwind CSS",
+    "weather": "Какая погода в Бордо?",
+    "chart": "Покажи график продаж"
+  }
+}

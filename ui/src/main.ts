@@ -9,6 +9,7 @@ import { createHead } from '@unhead/vue/client'
 import ui from '@nuxt/ui/vue-plugin'
 
 import App from './App.vue'
+import { i18n } from './plugins/i18n'
 
 const app = createApp(App)
 
@@ -21,6 +22,7 @@ const router = createRouter({
 app.use(head)
 app.use(router)
 app.use(ui)
+app.use(i18n)
 
 app.mount('#app')
 
