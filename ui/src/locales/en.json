@@ -49,6 +49,10 @@
     "modalDescPrivate": "Only you can view this chat.",
     "failedToUpdate": "Failed to update visibility"
   },
+  "placeholders": {
+    "modelSelectSearch": "Search...",
+    "chatInputPrompt": "Type your message here..."
+  },
   "toast": {
     "chatDeleted": "Chat deleted",
     "chatDeletedDesc": "Your chat has been deleted"

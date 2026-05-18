@@ -49,6 +49,10 @@
     "modalDescPrivate": "Только вы можете просмотреть этот чат.",
     "failedToUpdate": "Не удалось изменить видимость"
   },
+  "placeholders": {
+    "modelSelectSearch": "Поиск...",
+    "chatInputPrompt": "Спросите что-нибудь..."
+  },
   "toast": {
     "chatDeleted": "Чат удалён",
     "chatDeletedDesc": "Ваш чат был удалён"
