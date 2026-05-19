@@ -15,7 +15,7 @@ import ChatVisibility from '../../components/chat/ChatVisibility.vue'
 import ChatTitle from '../../components/chat/ChatTitle.vue'
 import ChatIndicator from '../../components/chat/Indicator.vue'
 import Navbar from '../../components/Navbar.vue'
-import type { Vote } from '../../../server/utils/drizzle'
+import type { Vote } from '../../types/vote'
 
 const route = useRoute<'/chat/[id]'>()
 const toast = useToast()

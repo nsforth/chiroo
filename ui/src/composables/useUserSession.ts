@@ -1,6 +1,6 @@
 import { createSharedComposable } from '@vueuse/core'
 import { ref, computed } from 'vue'
-import type { UserSession } from '../../server/utils/session'
+import type { UserSession } from '../types/session'
 import { $fetch } from 'ofetch'
 import { useCsrf } from './useCsrf'
 

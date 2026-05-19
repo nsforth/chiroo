@@ -9,8 +9,8 @@ import ChatToolSources from '../tool/Sources.vue'
 import ChatMessageEdit from './MessageEdit.vue'
 import { getMergedParts } from '../../../utils/ai'
 import { getSearchQuery, getSources } from '../../../utils/tool'
-import type { WeatherUIToolInvocation } from '../../../../server/utils/tools/weather'
-import type { ChartUIToolInvocation } from '../../../../server/utils/tools/chart'
+import type { WeatherUIToolInvocation } from '../../../tools/weather'
+import type { ChartUIToolInvocation } from '../../../tools/chart'
 
 defineProps<{
   message: UIMessage

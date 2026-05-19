@@ -19,7 +19,6 @@ export const chartTool = tool({
     yLabel: z.string().optional().describe('Optional label for y-axis')
   }),
   execute: async ({ title, data, xKey, series, xLabel, yLabel }) => {
-    // Create a delay to simulate the input-available state
     await new Promise(resolve => setTimeout(resolve, 1500))
 
     return {
