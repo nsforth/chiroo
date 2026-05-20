@@ -19,6 +19,8 @@ use crate::config::config;
 use crate::errors::{internal_error, AppError};
 use crate::routes::app_router;
 use crate::services::chat_service::ChatService;
+use crate::services::message_service::MessageService;
+use crate::services::vote_service::VoteService;
 use crate::state::AppState;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
@@ -40,7 +42,9 @@ async fn main() {
     }
 
     let state = AppState {
-        chat_service: ChatService::new(pool),
+        chat_service: ChatService::new(pool.clone()),
+        message_service: MessageService::new(pool.clone()),
+        vote_service: VoteService::new(pool.clone()),
     };
 
     let app = app_router(state.clone());

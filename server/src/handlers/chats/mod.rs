@@ -1,9 +1,16 @@
 use serde::Deserialize;
 use serde::Serialize;
+
 mod chats;
+mod messages;
 mod ui_messages;
-pub use chats::create_chat;
-pub use chats::get_chats;
+mod votes;
+
+pub use chats::{
+    create_chat, delete_chat, get_chat, get_chats, update_title, update_visibility,
+};
+pub use messages::{delete_messages_after, get_messages};
+pub use votes::{delete_vote, get_votes, upsert_vote};
 
 use crate::domain::models::chat::Chat;
 
