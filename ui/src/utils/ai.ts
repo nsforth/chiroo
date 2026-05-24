@@ -20,3 +20,10 @@ export function getMergedParts(parts: UIMessage['parts']): UIMessage['parts'] {
   }
   return result
 }
+
+export function getMessageText(message: UIMessage): string {
+  return message.parts
+    .filter(part => part.type === 'text')
+    .map(part => (part as { text: string }).text)
+    .join('\n\n')
+}

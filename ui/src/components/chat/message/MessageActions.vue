@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import type { UIMessage } from 'ai'
 import { isFileUIPart } from 'ai'
 import { useClipboard } from '@vueuse/core'
-import { getTextFromMessage } from '@nuxt/ui/utils/ai'
+import { getMessageText } from '../../../utils/ai'
 
 const props = defineProps<{
   message: UIMessage & { createdAt?: string | Date }
@@ -37,7 +37,7 @@ const clipboard = useClipboard()
 const copied = ref(false)
 
 function copy() {
-  clipboard.copy(getTextFromMessage(props.message))
+  clipboard.copy(getMessageText(props.message))
 
   copied.value = true
 
