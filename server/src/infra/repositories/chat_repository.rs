@@ -54,7 +54,10 @@ pub async fn get_all(pool: &deadpool_diesel::postgres::Pool) -> Result<Vec<ChatD
     let res = conn
         .interact(move |conn| {
             let query = chats::table.into_boxed::<diesel::pg::Pg>();
-            query.select(ChatDb::as_select()).load::<ChatDb>(conn)
+            query
+                .select(ChatDb::as_select())
+                .order_by(chats::created_at.desc())
+                .load::<ChatDb>(conn)
         })
         .await
         .map_err(InfraError::from)?
