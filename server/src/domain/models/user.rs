@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+#[derive(Clone, Copy)]
 pub struct UserId(pub Uuid);
 
 pub struct User {

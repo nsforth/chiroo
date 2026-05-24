@@ -1,6 +1,7 @@
 use chrono::NaiveDateTime;
+use diesel::deserialize::Queryable;
 use diesel::{
-    ExpressionMethods, Insertable, PgTextExpressionMethods, QueryDsl, Queryable, RunQueryDsl,
+    BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl,
     Selectable, SelectableHelper,
 };
 use serde::{Deserialize, Serialize};
@@ -32,7 +33,7 @@ pub struct NewChatDb {
 pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     new_chat: NewChatDb,
-) -> Result<Chat, InfraError> {
+) -> Result<ChatDb, InfraError> {
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
         .interact(|conn| {
@@ -45,10 +46,10 @@ pub async fn insert(
         .map_err(InfraError::from)?
         .map_err(InfraError::from)?;
 
-    Ok(res.into())
+    Ok(res)
 }
 
-pub async fn get_all(pool: &deadpool_diesel::postgres::Pool) -> Result<Vec<Chat>, InfraError> {
+pub async fn get_all(pool: &deadpool_diesel::postgres::Pool) -> Result<Vec<ChatDb>, InfraError> {
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
         .interact(move |conn| {
@@ -59,9 +60,87 @@ pub async fn get_all(pool: &deadpool_diesel::postgres::Pool) -> Result<Vec<Chat>
         .map_err(InfraError::from)?
         .map_err(InfraError::from)?;
 
-    let chats: Vec<Chat> = res.into_iter().map(Into::into).collect();
+    Ok(res)
+}
 
-    Ok(chats)
+pub async fn get_by_id(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: ChatId,
+) -> Result<Option<ChatDb>, InfraError> {
+    let conn = pool.get().await.map_err(InfraError::from)?;
+    let res = conn
+        .interact(move |conn| {
+            chats::table
+                .find(id.0)
+                .select(ChatDb::as_select())
+                .get_result::<ChatDb>(conn)
+                .optional()
+        })
+        .await
+        .map_err(InfraError::from)?
+        .map_err(InfraError::from)?;
+
+    Ok(res)
+}
+
+pub async fn delete(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: ChatId,
+    user_id: UserId,
+) -> Result<bool, InfraError> {
+    let conn = pool.get().await.map_err(InfraError::from)?;
+    let res = conn
+        .interact(move |conn| {
+            diesel::delete(chats::table.filter(chats::id.eq(id.0).and(chats::owner.eq(user_id.0))))
+                .execute(conn)
+        })
+        .await
+        .map_err(InfraError::from)?
+        .map_err(InfraError::from)?;
+
+    Ok(res > 0)
+}
+
+pub async fn update_title(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: ChatId,
+    user_id: UserId,
+    title: String,
+) -> Result<ChatDb, InfraError> {
+    let conn = pool.get().await.map_err(InfraError::from)?;
+    let res = conn
+        .interact(move |conn| {
+            diesel::update(chats::table.filter(chats::id.eq(id.0).and(chats::owner.eq(user_id.0))))
+                .set(chats::title.eq(Some(title)))
+                .returning(ChatDb::as_returning())
+                .get_result(conn)
+        })
+        .await
+        .map_err(InfraError::from)?
+        .map_err(InfraError::from)?;
+
+    Ok(res)
+}
+
+pub async fn update_visibility(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: ChatId,
+    user_id: UserId,
+    is_public: bool,
+) -> Result<ChatDb, InfraError> {
+    let conn = pool.get().await.map_err(InfraError::from)?;
+    let res = conn
+        .interact(move |conn| {
+            diesel::update(chats::table.filter(chats::id.eq(id.0).and(chats::owner.eq(user_id.0))))
+                .set(chats::public.eq(is_public))
+                .returning(ChatDb::as_returning())
+                .get_result(conn)
+        })
+        .await
+        .map_err(InfraError::from)?
+        .map_err(InfraError::from)?;
+
+    Ok(res)
 }
 
 impl Into<Chat> for ChatDb {

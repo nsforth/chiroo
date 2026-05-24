@@ -6,6 +6,7 @@ use serde_json::json;
 #[derive(Debug)]
 pub enum AppError {
     InternalServerError,
+    NotFound(String),
     BodyParsingError(String),
 }
 
@@ -21,6 +22,7 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 String::from("Internal Server Error"),
             ),
+            Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::BodyParsingError(message) => (
                 StatusCode::BAD_REQUEST,
                 format!("Bad request error: {message}"),

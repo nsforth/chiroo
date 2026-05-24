@@ -1,7 +1,9 @@
 use crate::domain::models::user::UserId;
 use chrono::NaiveDateTime;
+use serde::Deserialize;
 use uuid::Uuid;
 
+#[derive(Clone, Copy, Deserialize)]
 pub struct ChatId(pub Uuid);
 
 pub struct Chat {
