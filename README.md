@@ -33,6 +33,7 @@ chiroo/
 - **Фреймворк:** Axum (Tokio)
 - **ORM:** Diesel
 - **База данных:** PostgreSQL
+- **AI-клиент:** async-openai (стриминг + tool calls)
 - **Архитектура:** Domain-Driven Design (DDD)
 
 ## Быстрый старт
@@ -49,7 +50,6 @@ chiroo/
 # Frontend
 cd ui
 pnpm install
-pnpm db:migrate
 
 # Backend
 cd server
@@ -96,6 +96,9 @@ SESSION_SECRET=<секрет, минимум 32 символа>
 DATABASE_URL=postgres://user:password@localhost/your_db_name
 SERVER_HOST=127.0.0.1
 SERVER_PORT=3000
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
 ```
 
 ## Лицензия

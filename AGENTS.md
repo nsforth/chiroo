@@ -133,3 +133,63 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - CSRF: frontend sends `x-csrf-token` header, backend does NOT validate it. Do not try to fix this, it's in TODO list.
 - Auth: user UUID is hardcoded (`b78f01ac-5225-11f1-a097-e71b54ed4087`). Also do not try to fix it.
 
+## AI service (`services/ai_service.rs`)
+
+### Dependencies
+
+`async-openai = { version = "0.40", features = ["chat-completion", "byot"] }`
+
+`AiService` owns `Client<OpenAIConfig>` and a model name. It spawns a tokio task per request: LLM loop with tool execution, event accumulation, SSE forwarding. Handler only maps `StreamEvent → SseChunk → SSE`.
+
+### `byot` (Bring Your Own Types)
+
+async-openai's standard `ChatCompletionStreamResponseDelta` does **not** include vendor-specific fields like `reasoning_content` (Qwen, DeepSeek). `byot` feature generates `create_stream_byot<T, R>` — you provide your **own** response type `R: DeserializeOwned + MaybeSend + 'static`:
+
+```rust
+#[derive(Deserialize)]
+struct CustomDelta {
+    content: Option<String>,
+    #[serde(rename = "reasoning_content", default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ChatCompletionMessageToolCallChunk>>,
+}
+
+#[derive(Deserialize)]
+struct CustomChoice {
+    delta: CustomDelta,
+    finish_reason: Option<FinishReason>,
+}
+
+#[derive(Deserialize)]
+struct CustomChunk {
+    choices: Vec<CustomChoice>,
+}
+
+type CustomStream = Pin<Box<dyn Stream<Item = Result<CustomChunk, OpenAIError>> + Send>>;
+
+let mut stream: CustomStream = client.chat().create_stream_byot(request).await?;
+```
+
+**Critical**: `create_stream` (non-byot) forces `stream: Some(true)` on the request before sending. `create_stream_byot` does NOT — the request param is generic `T0: Serialize`. You MUST call `.stream(true)` on the request builder explicitly.
+
+### Tool-call loop
+
+Uses a labeled `'step: for _step in 0..max_steps` loop. The `continue 'step;` label is required because `continue` inside nested `for choice` / `while stream` would only continue the innermost loop. Without the label, control falls through to `return Ok(())` after the inner stream exhausts, silently terminating the LLM loop after one tool call.
+
+### Control flow
+
+```
+AiService.stream(chat_id, user_text) → mpsc channel → tokio::spawn:
+  └─ build OpenAI request with tools
+  └─ 'step: loop (max_steps)
+       └─ send LlmCallStart
+       └─ create_stream_byot → iterate chunks
+            ├─ reasoning_content → ReasoningDelta
+            ├─ content → TextDelta
+            ├─ tool_calls → ToolCallStart/Delta
+            └─ finish_reason:
+                 ├─ ToolCalls → execute tools → continue 'step
+                 └─ Stop → send LlmCallFinish → return
+```
+
