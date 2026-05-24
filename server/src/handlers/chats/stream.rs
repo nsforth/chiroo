@@ -3,11 +3,14 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::stream::{self, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
-use std::time::Duration;
 use uuid::Uuid;
 
+use crate::domain::models::chat::ChatId;
+use crate::domain::models::stream_event::StreamEvent;
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
+
+// ── Wire-format chunk types ──
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
@@ -17,10 +20,8 @@ pub enum SseChunk {
         #[serde(skip_serializing_if = "Option::is_none", rename = "messageId")]
         message_id: Option<String>,
     },
-
     #[serde(rename = "start-step")]
     StartStep,
-
     #[serde(rename = "finish-step")]
     FinishStep,
 
@@ -76,43 +77,18 @@ pub enum SseChunk {
         error_text: String,
     },
 
-    #[serde(rename = "source-url")]
-    SourceUrl {
-        #[serde(rename = "sourceId")]
-        source_id: String,
-        url: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-    },
-    #[serde(rename = "source-document")]
-    SourceDocument {
-        #[serde(rename = "sourceId")]
-        source_id: String,
-        #[serde(rename = "mediaType")]
-        media_type: String,
-        title: String,
-    },
-
-    #[serde(rename = "file")]
-    File {
-        url: String,
-        #[serde(rename = "mediaType")]
-        media_type: String,
-    },
-
-    #[serde(rename = "data-chat-title")]
-    DataChatTitle {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
-        data: serde_json::Value,
-    },
-
     #[serde(rename = "finish")]
     Finish {
         #[serde(skip_serializing_if = "Option::is_none", rename = "finishReason")]
         finish_reason: Option<String>,
     },
+
+    #[serde(rename = "error")]
+    #[allow(non_snake_case)]
+    ErrorChunk { errorText: String },
 }
+
+// ── Request type ──
 
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
@@ -131,202 +107,136 @@ pub struct SendMessageRequest {
     pub model: Option<String>,
 }
 
-fn ms(ms: u64) -> Duration {
-    Duration::from_millis(ms)
-}
-
-fn chunk(chunk: SseChunk, delay_ms: u64) -> (Duration, SseChunk) {
-    (ms(delay_ms), chunk)
-}
-
-fn build_mock_response() -> Vec<(Duration, SseChunk)> {
-    vec![
-        chunk(SseChunk::Start { message_id: None }, 100),
-        chunk(SseChunk::StartStep, 200),
-        // --- reasoning ---
-        chunk(
-            SseChunk::ReasoningStart {
-                id: "rsn_0".into(),
-            },
-            300,
-        ),
-        chunk(
-            SseChunk::ReasoningDelta {
-                id: "rsn_0".into(),
-                delta: "I should look up the weather".into(),
-            },
-            200,
-        ),
-        chunk(
-            SseChunk::ReasoningDelta {
-                id: "rsn_0".into(),
-                delta: " and then summarize the results.".into(),
-            },
-            200,
-        ),
-        chunk(SseChunk::ReasoningEnd { id: "rsn_0".into() }, 100),
-        // --- text step 0 ---
-        chunk(
-            SseChunk::TextStart {
-                id: "txt_0".into(),
-            },
-            200,
-        ),
-        chunk(
-            SseChunk::TextDelta {
-                id: "txt_0".into(),
-                delta: "Let me ".into(),
-            },
-            150,
-        ),
-        chunk(
-            SseChunk::TextDelta {
-                id: "txt_0".into(),
-                delta: "check that for you.".into(),
-            },
-            150,
-        ),
-        chunk(SseChunk::TextEnd { id: "txt_0".into() }, 100),
-        chunk(SseChunk::FinishStep, 200),
-        // --- step 1: weather tool ---
-        chunk(SseChunk::StartStep, 200),
-        chunk(
-            SseChunk::ToolInputStart {
-                tool_call_id: "call_w".into(),
-                tool_name: "weather".into(),
-                title: Some("Fetching weather".into()),
-            },
-            300,
-        ),
-        chunk(
-            SseChunk::ToolInputDelta {
-                tool_call_id: "call_w".into(),
-                input_text_delta: r#"{"loc"#.into(),
-            },
-            100,
-        ),
-        chunk(
-            SseChunk::ToolInputDelta {
-                tool_call_id: "call_w".into(),
-                input_text_delta: r#"ation":"London"}"#.into(),
-            },
-            100,
-        ),
-        chunk(
-            SseChunk::ToolInputAvailable {
-                tool_call_id: "call_w".into(),
-                tool_name: "weather".into(),
-                input: serde_json::json!({"location": "London"}),
-            },
-            200,
-        ),
-        chunk(
-            SseChunk::ToolOutputAvailable {
-                tool_call_id: "call_w".into(),
-                output: serde_json::json!({
-                    "location": "London",
-                    "temperature": 18,
-                    "temperatureHigh": 22,
-                    "temperatureLow": 12,
-                    "condition": {
-                        "text": "Cloudy",
-                        "icon": "i-lucide-cloud"
-                    },
-                    "humidity": 72,
-                    "windSpeed": 15,
-                    "dailyForecast": [
-                        {"day": "Today", "high": 22, "low": 14, "condition": {"text": "Cloudy", "icon": "i-lucide-cloud"}},
-                        {"day": "Thu", "high": 24, "low": 16, "condition": {"text": "Sunny", "icon": "i-lucide-sun"}},
-                        {"day": "Fri", "high": 20, "low": 11, "condition": {"text": "Rainy", "icon": "i-lucide-cloud-rain"}}
-                    ]
-                }),
-            },
-            500,
-        ),
-        chunk(SseChunk::FinishStep, 200),
-        // --- step 2: final answer + sources + file ---
-        chunk(SseChunk::StartStep, 200),
-        chunk(
-            SseChunk::TextStart {
-                id: "txt_1".into(),
-            },
-            200,
-        ),
-        chunk(
-            SseChunk::TextDelta {
-                id: "txt_1".into(),
-                delta: "The weather in ".into(),
-            },
-            150,
-        ),
-        chunk(
-            SseChunk::TextDelta {
-                id: "txt_1".into(),
-                delta: "London is 18°C ".into(),
-            },
-            150,
-        ),
-        chunk(
-            SseChunk::TextDelta {
-                id: "txt_1".into(),
-                delta: "and cloudy with 72% humidity.".into(),
-            },
-            150,
-        ),
-        chunk(SseChunk::TextEnd { id: "txt_1".into() }, 100),
-        chunk(
-            SseChunk::SourceUrl {
-                source_id: "src_1".into(),
-                url: "https://weather.example.com/london".into(),
-                title: Some("Weather Service".into()),
-            },
-            150,
-        ),
-        chunk(
-            SseChunk::SourceDocument {
-                source_id: "doc_1".into(),
-                media_type: "text/html".into(),
-                title: "London Weather Report".into(),
-            },
-            150,
-        ),
-        chunk(
-            SseChunk::File {
-                url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect fill='%234285f4' width='100' height='100'/%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%A4%EF%B8%8F%3C/text%3E%3C/svg%3E".into(),
-                media_type: "image/svg+xml".into(),
-            },
-            150,
-        ),
-        chunk(
-            SseChunk::DataChatTitle {
-                id: Some("title_1".into()),
-                data: serde_json::json!({"title": "Weather in London"}),
-            },
-            150,
-        ),
-        chunk(SseChunk::FinishStep, 100),
-        chunk(
-            SseChunk::Finish {
-                finish_reason: Some("stop".into()),
-            },
-            50,
-        ),
-    ]
-}
+// ── Handler ──
 
 #[axum::debug_handler]
 pub async fn send_message(
-    State(_state): State<AppState>,
-    PathExtractor(_chat_id): PathExtractor<Uuid>,
-    JsonExtractor(_body): JsonExtractor<SendMessageRequest>,
+    State(state): State<AppState>,
+    PathExtractor(chat_id): PathExtractor<Uuid>,
+    JsonExtractor(body): JsonExtractor<SendMessageRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>> + Send> {
-    let events = build_mock_response();
+    let chat_id = ChatId(chat_id);
+    let user_text = extract_last_user_text(&body.messages);
 
-    let stream = stream::iter(events).then(|(delay, chunk)| async move {
-        tokio::time::sleep(delay).await;
-        let json = serde_json::to_string(&chunk).unwrap_or_default();
-        Ok(Event::default().data(json))
+    let domain_stream = state.ai_service.stream(chat_id, &user_text);
+    let mut started = false;
+
+    let sse_stream = domain_stream.flat_map(move |event| {
+        let chunks = domain_to_sse_chunks(&event, &mut started);
+        stream::iter(chunks.into_iter().map(|chunk| {
+            let json = serde_json::to_string(&chunk).unwrap_or_default();
+            Ok(Event::default().data(json))
+        }))
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(sse_stream).keep_alive(KeepAlive::default())
+}
+
+// ── Helpers ──
+
+fn extract_last_user_text(messages: &[serde_json::Value]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| {
+            m.get("parts")
+                .and_then(|p| p.as_array())
+                .and_then(|parts| {
+                    parts
+                        .iter()
+                        .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
+                        .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("")
+                        .into()
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn domain_to_sse_chunks(event: &StreamEvent, started: &mut bool) -> Vec<SseChunk> {
+    match event {
+        StreamEvent::LlmCallStart => {
+            if !*started {
+                *started = true;
+                vec![
+                    SseChunk::Start { message_id: None },
+                    SseChunk::StartStep,
+                ]
+            } else {
+                vec![SseChunk::StartStep]
+            }
+        }
+        StreamEvent::TextStart { id } => vec![SseChunk::TextStart { id: id.clone() }],
+        StreamEvent::TextDelta { id, delta } => vec![SseChunk::TextDelta {
+            id: id.clone(),
+            delta: delta.clone(),
+        }],
+        StreamEvent::TextEnd { id } => vec![SseChunk::TextEnd { id: id.clone() }],
+        StreamEvent::ReasoningStart { id } => {
+            vec![SseChunk::ReasoningStart { id: id.clone() }]
+        }
+        StreamEvent::ReasoningDelta { id, delta } => {
+            vec![SseChunk::ReasoningDelta {
+                id: id.clone(),
+                delta: delta.clone(),
+            }]
+        }
+        StreamEvent::ReasoningEnd { id } => {
+            vec![SseChunk::ReasoningEnd { id: id.clone() }]
+        }
+        StreamEvent::ToolCallStart {
+            tool_call_id,
+            tool_name,
+            title,
+        } => vec![SseChunk::ToolInputStart {
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            title: title.clone(),
+        }],
+        StreamEvent::ToolCallDelta {
+            tool_call_id,
+            input_text_delta,
+        } => vec![SseChunk::ToolInputDelta {
+            tool_call_id: tool_call_id.clone(),
+            input_text_delta: input_text_delta.clone(),
+        }],
+        StreamEvent::ToolCallAvailable {
+            tool_call_id,
+            tool_name,
+            input,
+        } => vec![SseChunk::ToolInputAvailable {
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            input: input.clone(),
+        }],
+        StreamEvent::ToolResult {
+            tool_call_id,
+            output,
+        } => vec![SseChunk::ToolOutputAvailable {
+            tool_call_id: tool_call_id.clone(),
+            output: output.clone(),
+        }],
+        StreamEvent::ToolError {
+            tool_call_id,
+            error_text,
+        } => vec![SseChunk::ToolOutputError {
+            tool_call_id: tool_call_id.clone(),
+            error_text: error_text.clone(),
+        }],
+        StreamEvent::LlmCallFinish {
+            finish_reason,
+            message: _,
+        } if finish_reason == "stop" => vec![
+            SseChunk::FinishStep,
+            SseChunk::Finish {
+                finish_reason: Some("stop".into()),
+            },
+        ],
+        StreamEvent::LlmCallFinish { .. } => vec![SseChunk::FinishStep],
+        StreamEvent::Error { error_text } => vec![SseChunk::ErrorChunk {
+            errorText: error_text.clone(),
+        }],
+    }
 }

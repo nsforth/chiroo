@@ -4,8 +4,17 @@ use diesel::{BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExten
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::models::messages::Role;
 use crate::infra::db::schema::messages;
 use crate::infra::errors::InfraError;
+
+pub fn message_role_to_db_role(role: &Role) -> &'static str {
+    match role {
+        Role::User => "user",
+        Role::Assistant => "assistant",
+        Role::System => "system",
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Selectable, Queryable)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

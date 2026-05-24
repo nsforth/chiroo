@@ -20,6 +20,7 @@ suspicious = { level = "deny", priority = -1 }
 complexity = { level = "warn", priority = -1 }
 
 [dependencies]
+async-openai = { version = "0.40", features = ["chat-completion", "byot"] }
 axum = { version = "0.8", features = ["macros", "tokio"] }
 axum-macros = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
@@ -28,9 +29,11 @@ diesel_migrations = "2.3"
 deadpool-diesel = { version = "0.6", features = ["postgres"] }
 dotenvy = "0.15"
 futures = "0.3"
+secrecy = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.49", features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.23", features = ["fast-rng", "v4", "serde"] }

@@ -18,6 +18,7 @@ mod utils;
 use crate::config::config;
 use crate::errors::{internal_error, AppError};
 use crate::routes::app_router;
+use crate::services::ai_service::AiService;
 use crate::services::chat_service::ChatService;
 use crate::services::message_service::MessageService;
 use crate::services::vote_service::VoteService;
@@ -42,9 +43,10 @@ async fn main() {
     }
 
     let state = AppState {
-        chat_service: ChatService::new(pool.clone()),
+        chat_service: ChatService::new(pool.clone(), MessageService::new(pool.clone())),
         message_service: MessageService::new(pool.clone()),
         vote_service: VoteService::new(pool.clone()),
+        ai_service: AiService::new(&app_config.openai),
     };
 
     let app = app_router(state.clone());

@@ -1,35 +1,58 @@
 use std::env;
 
 use dotenvy::dotenv;
+use secrecy::{SecretBox, SecretString};
 use tokio::sync::OnceCell;
 
 #[derive(Debug)]
-struct ServerConfig {
+pub struct ServerConfig {
     host: String,
     port: u16,
 }
 
 #[derive(Debug)]
-struct DatabaseConfig {
+pub struct DatabaseConfig {
     url: String,
 }
 
 #[derive(Debug)]
+pub struct OpenAiConfig {
+    base_url: String,
+    api_key: SecretString,
+    model: String,
+}
+
+impl OpenAiConfig {
+    pub fn base_url(&self) -> String {
+        self.base_url.clone()
+    }
+
+    pub fn api_key(&self) -> &SecretBox<str> {
+        &self.api_key
+    }
+
+    pub fn model(&self) -> String {
+        self.model.clone()
+    }
+}
+
+#[derive(Debug)]
 pub struct Config {
-    server: ServerConfig,
-    db: DatabaseConfig,
+    pub server: ServerConfig,
+    pub db: DatabaseConfig,
+    pub openai: OpenAiConfig,
 }
 
 impl Config {
-    pub fn db_url(&self) -> &str {
-        &self.db.url
+    pub fn db_url(&self) -> String {
+        self.db.url.clone()
     }
 
-    pub fn server_host(&self) -> &str {
-        &self.server.host
+    pub fn server_host(&self) -> String {
+        self.server.host.clone()
     }
 
-    pub const fn server_port(&self) -> u16 {
+    pub fn server_port(&self) -> u16 {
         self.server.port
     }
 }
@@ -50,9 +73,21 @@ async fn init_config() -> Config {
         url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
     };
 
+    let openai_config = OpenAiConfig {
+        base_url: env::var("OPENAI_BASE_URL")
+            .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
+        api_key: SecretString::new(
+            env::var("OPENAI_API_KEY")
+                .unwrap_or_else(|_| "sk-no-key".into())
+                .into_boxed_str(),
+        ),
+        model: env::var("OPENAI_MODEL").unwrap_or_else(|_| "LLM".into()),
+    };
+
     Config {
         server: server_config,
         db: database_config,
+        openai: openai_config,
     }
 }
 

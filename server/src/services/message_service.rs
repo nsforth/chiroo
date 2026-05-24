@@ -1,6 +1,7 @@
+use crate::domain::models::messages::Message;
 use crate::errors::AppError;
 use crate::infra::repositories::message_repository;
-use crate::infra::repositories::message_repository::{MessageDb, NewMessageDb};
+use crate::infra::repositories::message_repository::{MessageDb, NewMessageDb, message_role_to_db_role};
 use deadpool_diesel::postgres::Pool;
 
 #[derive(Clone)]
@@ -31,6 +32,22 @@ impl MessageService {
         message_repository::insert(&self.pool, new_message)
             .await
             .map_err(|_| AppError::InternalServerError)
+    }
+
+    /// Insert a domain Message and return the DB row.
+    pub async fn insert_message(
+        &self,
+        message: &Message,
+    ) -> Result<MessageDb, AppError> {
+        let parts_json = serde_json::to_value(&message.parts).unwrap_or_default();
+        let role = message_role_to_db_role(&message.role);
+
+        self.insert(NewMessageDb {
+            chat_id: message.chat_id.0,
+            role: role.into(),
+            parts: parts_json,
+        })
+        .await
     }
 
     /// Delete all messages created after the given message_id for a specific chat.

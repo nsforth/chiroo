@@ -11,6 +11,7 @@ pub struct UIMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum MessageRole {
     System,
     User,

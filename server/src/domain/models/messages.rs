@@ -1,46 +1,92 @@
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::votes::Vote;
 use chrono::NaiveDateTime;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
-pub struct Messages {
-    pub chat_id: ChatId,
-    pub messages: Vec<Message>,
-}
+const MAX_TITLE_CHARS: usize = 15;
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy)]
 pub struct MessageId(pub Uuid);
 
+impl MessageId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
 pub struct Message {
-    message_id: MessageId,
-    created_at: NaiveDateTime,
-    message: MessageType,
+    pub id: MessageId,
+    pub chat_id: ChatId,
+    pub role: Role,
+    pub created_at: NaiveDateTime,
+    pub parts: Vec<MessagePart>,
 }
 
-pub enum MessageType {
-    User(UserMessage),
-    Assistant(AssistantMessage),
+impl Message {
+    pub fn new(chat_id: ChatId, role: Role) -> Self {
+        Self {
+            id: MessageId::new(),
+            chat_id,
+            role,
+            created_at: chrono::Utc::now().naive_utc(),
+            parts: Vec::new(),
+        }
+    }
+
+    pub fn make_title(text: &str) -> String {
+        if text.chars().count() > MAX_TITLE_CHARS {
+            format!(
+                "{}...",
+                text.chars().take(MAX_TITLE_CHARS).collect::<String>()
+            )
+        } else {
+            text.to_string()
+        }
+    }
 }
 
-pub struct UserMessage {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Role {
+    User,
+    Assistant,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum MessagePart {
+    #[serde(rename = "text")]
+    Text(TextBlock),
+    #[serde(rename = "reasoning")]
+    Reasoning(ReasoningBlock),
+    ToolCall(ToolCallBlock),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningBlock {
     pub text: String,
 }
 
-pub struct AssistantMessage {
-    pub parts: Vec<AssistantParts>,
-    pub vote: Option<Vote>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextBlock {
+    pub text: String,
 }
 
-pub enum AssistantParts {
-    AssistantText(AssistantText),
-    AssistantReasoning(AssistantReasoning),
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallBlock {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub input: Value,
+    pub output: Option<Value>,
+    pub error: Option<String>,
+    pub state: ToolCallState,
 }
 
-pub struct AssistantText {
-    text: String,
-}
-
-pub struct AssistantReasoning {
-    reasoning: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolCallState {
+    InputStreaming,
+    InputAvailable,
+    OutputAvailable,
+    OutputError,
 }

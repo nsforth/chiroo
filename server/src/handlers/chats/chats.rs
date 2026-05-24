@@ -7,7 +7,6 @@ use uuid::Uuid;
 use crate::domain::models::user::UserId;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
 use crate::handlers::chats::{ChatResponse, ChatsResponse, CreateChatRequest};
-use crate::infra::repositories::message_repository::NewMessageDb;
 use crate::utils::PathExtractor;
 use crate::utils::JsonExtractor;
 use crate::AppState;
@@ -24,23 +23,11 @@ pub async fn create_chat(
     JsonExtractor(new_chat): JsonExtractor<CreateChatRequest>,
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
     let owner = Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap();
-    let result = state
+    let chat = state
         .chat_service
-        .create_chat(new_chat.first_message.clone(), UserId(owner))
+        .create_chat(new_chat.first_message, UserId(owner))
         .await?;
-
-    if let Some(text) = new_chat.first_message {
-        let _ = state
-            .message_service
-            .insert(NewMessageDb {
-                chat_id: result.id.0,
-                role: "user".into(),
-                parts: serde_json::json!([{"type": "text", "text": text, "state": "done"}]),
-            })
-            .await;
-    }
-
-    Ok(Json(From::from(&result)))
+    Ok(Json(From::from(&chat)))
 }
 
 /// Response for a single chat including messages.
