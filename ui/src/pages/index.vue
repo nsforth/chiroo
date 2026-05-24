@@ -35,7 +35,7 @@ async function createChat(prompt: string) {
     const chat = await $fetch('/api/chats', {
       method: 'POST',
       headers: { [headerName]: csrf() },
-      body: { input: prompt }
+      body: { firstMessage: prompt }
     })
 
     await fetchChats()

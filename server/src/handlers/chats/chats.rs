@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::domain::models::user::UserId;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
 use crate::handlers::chats::{ChatResponse, ChatsResponse, CreateChatRequest};
+use crate::infra::repositories::message_repository::NewMessageDb;
 use crate::utils::PathExtractor;
 use crate::utils::JsonExtractor;
 use crate::AppState;
@@ -18,7 +19,6 @@ pub async fn get_chats(
     Ok(Json(From::from(chats)))
 }
 
-//#[axum::debug_handler]
 pub async fn create_chat(
     State(state): State<AppState>,
     JsonExtractor(new_chat): JsonExtractor<CreateChatRequest>,
@@ -26,8 +26,20 @@ pub async fn create_chat(
     let owner = Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap();
     let result = state
         .chat_service
-        .create_chat(new_chat.title, UserId(owner))
+        .create_chat(new_chat.first_message.clone(), UserId(owner))
         .await?;
+
+    if let Some(text) = new_chat.first_message {
+        let _ = state
+            .message_service
+            .insert(NewMessageDb {
+                chat_id: result.id.0,
+                role: "user".into(),
+                parts: serde_json::json!([{"type": "text", "text": text, "state": "done"}]),
+            })
+            .await;
+    }
+
     Ok(Json(From::from(&result)))
 }
 
@@ -167,7 +179,6 @@ fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
 
     // Fallback: wrap the entire JSON value as a text part
     vec![UIMessagePart::Text(crate::handlers::chats::ui_messages::TextUIPart {
-        type_: "text".to_string(),
         text: serde_json::to_string(parts).unwrap_or_default(),
         state: Some(crate::handlers::chats::ui_messages::TextState::Done),
     })]

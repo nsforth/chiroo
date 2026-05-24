@@ -1,9 +1,6 @@
 use chrono::NaiveDateTime;
-use diesel::deserialize::Queryable;
-use diesel::{
-    BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl,
-    Selectable, SelectableHelper,
-};
+use diesel::prelude::*;
+use diesel::{BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl, Selectable, SelectableHelper};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

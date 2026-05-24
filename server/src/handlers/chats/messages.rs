@@ -91,7 +91,6 @@ fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
 
     // Fallback: wrap the entire JSON value as a text part
     vec![UIMessagePart::Text(crate::handlers::chats::ui_messages::TextUIPart {
-        type_: "text".to_string(),
         text: serde_json::to_string(parts).unwrap_or_default(),
         state: Some(crate::handlers::chats::ui_messages::TextState::Done),
     })]

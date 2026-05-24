@@ -1,6 +1,6 @@
 use crate::handlers::chats::{
-    create_chat, delete_chat, delete_messages_after, get_chat, get_chats, get_votes, update_title,
-    update_visibility, vote,
+    create_chat, delete_chat, delete_messages_after, get_chat, get_chats, get_votes, send_message,
+    update_title, update_visibility, vote,
 };
 use crate::handlers::session::get_session;
 use crate::AppState;
@@ -27,6 +27,7 @@ fn chat_router() -> Router<AppState> {
         .route("/", get(get_chats))
         .route("/", post(create_chat))
         .route("/{id}", get(get_chat))
+        .route("/{id}", post(send_message))
         .route("/{id}", delete(delete_chat))
         .route("/title/{id}", patch(update_title))
         .route("/visibility/{id}", patch(update_visibility))

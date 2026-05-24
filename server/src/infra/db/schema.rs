@@ -12,8 +12,9 @@ diesel::table! {
     messages (id) {
         id -> Uuid,
         chat_id -> Uuid,
+        #[max_length = 20]
         role -> Varchar,
-        parts -> Jsonb,
+        parts -> Json,
         created_at -> Timestamptz,
     }
 }
@@ -26,4 +27,8 @@ diesel::table! {
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(chats, messages, votes);
+diesel::joinable!(messages -> chats (chat_id));
+diesel::joinable!(votes -> chats (chat_id));
+diesel::joinable!(votes -> messages (message_id));
+
+diesel::allow_tables_to_appear_in_same_query!(chats, messages, votes,);
