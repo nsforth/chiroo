@@ -142,7 +142,7 @@ async fn run_stream(
     })];
 
     let max_steps: usize = 5;
-    for _step in 0..max_steps {
+    'step: for _step in 0..max_steps {
         let _ = tx.send(StreamEvent::LlmCallStart).await;
 
         let request = CreateChatCompletionRequestArgs::default()
@@ -161,7 +161,6 @@ async fn run_stream(
             let response = result?;
 
             for choice in response.choices {
-                println!("{:?}", choice);
                 // ── reasoning ──
                 if let Some(rc) = &choice.delta.reasoning_content {
                     if !rc.is_empty() {
@@ -340,7 +339,7 @@ async fn run_stream(
                                 }
                             }
                             // продолжить цикл LLM-вызовов
-                            continue;
+                            continue 'step;
                         },
                         FinishReason::Stop => {
                             let assistant_msg = assistant_message_without_tools(&message);
