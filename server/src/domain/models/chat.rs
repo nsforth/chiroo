@@ -3,7 +3,7 @@ use chrono::NaiveDateTime;
 use serde::Deserialize;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 pub struct ChatId(pub Uuid);
 
 pub struct Chat {

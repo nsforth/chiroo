@@ -85,8 +85,8 @@ pub struct ToolCallBlock {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToolCallState {
-    InputStreaming,
-    InputAvailable,
-    OutputAvailable,
-    OutputError,
+    Invoked,
+    Executing,
+    Done,
+    Error,
 }

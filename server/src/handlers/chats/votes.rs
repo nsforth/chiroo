@@ -1,6 +1,6 @@
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{ErrorResponse, IntoResponse};
+use axum::response::ErrorResponse;
 use axum::Json;
 use uuid::Uuid;
 
@@ -11,8 +11,6 @@ use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;
 
-/// Request body for upserting a vote.
-/// Frontend sends: { messageId, isUpvoted? } where isUpvoted can be null to remove vote.
 #[derive(serde::Deserialize)]
 pub struct VoteRequest {
     #[serde(rename = "messageId")]
@@ -21,7 +19,6 @@ pub struct VoteRequest {
     pub is_upvoted: Option<bool>,
 }
 
-/// Response for a single vote.
 #[derive(serde::Serialize)]
 pub struct VoteResponse {
     #[serde(rename = "chatId")]
@@ -34,16 +31,14 @@ pub struct VoteResponse {
 
 pub async fn get_votes(
     State(state): State<AppState>,
-    PathExtractor(chat_id): PathExtractor<Uuid>,
+    PathExtractor(chat_id): PathExtractor<ChatId>,
 ) -> Result<Json<Vec<VoteResponse>>, ErrorResponse> {
-    let db_votes = state
-        .vote_service
-        .get_votes_for_chat(ChatId(chat_id))
-        .await?;
+    let votes = state.vote_service.get_votes_for_chat(chat_id).await?;
 
-    let votes: Vec<VoteResponse> = db_votes
+    let votes_responses: Vec<VoteResponse> = votes
         .into_iter()
         .map(|v| VoteResponse {
+            // TODO: Make constructor or From::from
             chat_id: v.chat_id.0.to_string(),
             message_id: v.message_id.0.to_string(),
             is_upvoted: match v.vote_type {
@@ -53,7 +48,7 @@ pub async fn get_votes(
         })
         .collect();
 
-    Ok(Json(votes))
+    Ok(Json(votes_responses))
 }
 
 pub async fn vote(

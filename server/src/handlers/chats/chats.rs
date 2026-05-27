@@ -2,14 +2,78 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{ErrorResponse, IntoResponse};
 use axum::Json;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::models::chat::Chat;
 use crate::domain::models::user::UserId;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
-use crate::handlers::chats::{ChatResponse, ChatsResponse, CreateChatRequest};
-use crate::utils::PathExtractor;
 use crate::utils::JsonExtractor;
+use crate::utils::PathExtractor;
 use crate::AppState;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateChatRequest {
+    #[serde(rename = "firstMessage")]
+    pub first_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatsResponse {
+    chats: Vec<ChatResponse>,
+}
+
+impl From<Vec<Chat>> for ChatsResponse {
+    fn from(value: Vec<Chat>) -> Self {
+        let chats_responses = value.iter().map(From::from).collect();
+        ChatsResponse {
+            chats: chats_responses,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatResponse {
+    pub id: String,
+    pub title: Option<String>,
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    pub visibility: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+impl From<&Chat> for ChatResponse {
+    fn from(value: &Chat) -> Self {
+        let visibility = if value.public {
+            String::from("public")
+        } else {
+            String::from("private")
+        };
+        Self {
+            id: value.id.0.to_string(),
+            title: value.title.clone(),
+            user_id: value.owner.0.to_string(),
+            visibility,
+            created_at: value.created_at.and_utc().to_rfc3339(),
+        }
+    }
+}
+
+/// Response for a single chat including messages.
+#[derive(serde::Serialize)]
+pub struct ChatDetailResponse {
+    pub id: String,
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    pub title: Option<String>,
+    pub visibility: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    pub messages: Vec<UIMessage>,
+    #[serde(rename = "isOwner")]
+    pub is_owner: bool,
+}
 
 pub async fn get_chats(
     State(state): State<AppState>,
@@ -30,37 +94,25 @@ pub async fn create_chat(
     Ok(Json(From::from(&chat)))
 }
 
-/// Response for a single chat including messages.
-#[derive(serde::Serialize)]
-pub struct ChatDetailResponse {
-    pub id: String,
-    #[serde(rename = "userId")]
-    pub user_id: String,
-    pub title: Option<String>,
-    pub visibility: String,
-    #[serde(rename = "createdAt")]
-    pub created_at: String,
-    pub messages: Vec<UIMessage>,
-    #[serde(rename = "isOwner")]
-    pub is_owner: bool,
-}
-
-/// Get a single chat by ID including its messages.
 pub async fn get_chat(
     State(state): State<AppState>,
     PathExtractor(id): PathExtractor<Uuid>,
 ) -> Result<Json<ChatDetailResponse>, ErrorResponse> {
     let chat_id = crate::domain::models::chat::ChatId(id);
 
-    // Get chat details
+    // TODO: Incapsulate chat with messages into service
     let chat = match state.chat_service.get_chat(&chat_id).await? {
         Some(chat) => chat,
-        None => return Err((StatusCode::NOT_FOUND, "Chat not found").into_response().into()),
+        None => {
+            return Err((StatusCode::NOT_FOUND, "Chat not found")
+                .into_response()
+                .into())
+        },
     };
 
-    // Get messages for this chat
     let db_messages = state.message_service.get_messages_for_chat(id).await?;
 
+    // TODO: Make convenient converter
     let messages: Vec<UIMessage> = db_messages
         .into_iter()
         .map(|msg| {
@@ -81,16 +133,18 @@ pub async fn get_chat(
         })
         .collect();
 
-    // Check if current user is the owner (hardcoded for now)
+    // TODO: Move to chat_service
     let hardcoded_user = Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap();
     let is_owner = chat.owner.0 == hardcoded_user;
 
+    // TODO: Move to converter
     let visibility = if chat.public {
         "public".to_string()
     } else {
         "private".to_string()
     };
 
+    // TODO: Make converter and constructor
     Ok(Json(ChatDetailResponse {
         id: chat.id.0.to_string(),
         user_id: chat.owner.0.to_string(),
@@ -111,7 +165,9 @@ pub async fn delete_chat(
     let chat_id = crate::domain::models::chat::ChatId(id);
     match state.chat_service.delete_chat(&chat_id, &user_id).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
-        Err(_) => Err((StatusCode::NOT_FOUND, "Chat not found").into_response().into()),
+        Err(_) => Err((StatusCode::NOT_FOUND, "Chat not found")
+            .into_response()
+            .into()),
     }
 }
 
@@ -123,7 +179,11 @@ pub async fn update_title(
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
     let user_id = UserId(Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap());
     let chat_id = crate::domain::models::chat::ChatId(id);
-    match state.chat_service.update_title(&chat_id, &user_id, body.title).await? {
+    match state
+        .chat_service
+        .update_title(&chat_id, &user_id, body.title)
+        .await?
+    {
         chat => Ok(Json(From::from(&chat))),
     }
 }
@@ -136,7 +196,11 @@ pub async fn update_visibility(
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
     let user_id = UserId(Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap());
     let chat_id = crate::domain::models::chat::ChatId(id);
-    match state.chat_service.update_visibility(&chat_id, &user_id, body.is_public).await? {
+    match state
+        .chat_service
+        .update_visibility(&chat_id, &user_id, body.is_public)
+        .await?
+    {
         chat => Ok(Json(From::from(&chat))),
     }
 }
@@ -152,7 +216,7 @@ pub struct UpdateVisibilityRequest {
     pub is_public: bool,
 }
 
-/// Convert the JSONB parts payload to a Vec of UIMessagePart.
+// TODO: Investigate what is this AI generated shit
 fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
     // Try deserializing as an array of UI parts first
     if let Ok(ui_parts) = serde_json::from_value::<Vec<UIMessagePart>>(parts.clone()) {
@@ -165,8 +229,10 @@ fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
     }
 
     // Fallback: wrap the entire JSON value as a text part
-    vec![UIMessagePart::Text(crate::handlers::chats::ui_messages::TextUIPart {
-        text: serde_json::to_string(parts).unwrap_or_default(),
-        state: Some(crate::handlers::chats::ui_messages::TextState::Done),
-    })]
+    vec![UIMessagePart::Text(
+        crate::handlers::chats::ui_messages::TextUIPart {
+            text: serde_json::to_string(parts).unwrap_or_default(),
+            state: Some(crate::handlers::chats::ui_messages::TextState::Done),
+        },
+    )]
 }

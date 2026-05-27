@@ -1,7 +1,9 @@
 use crate::domain::models::messages::Message;
 use crate::errors::AppError;
 use crate::infra::repositories::message_repository;
-use crate::infra::repositories::message_repository::{MessageDb, NewMessageDb, message_role_to_db_role};
+use crate::infra::repositories::message_repository::{
+    message_role_to_db_role, MessageDb, NewMessageDb,
+};
 use deadpool_diesel::postgres::Pool;
 
 #[derive(Clone)]
@@ -9,6 +11,7 @@ pub struct MessageService {
     pool: Pool,
 }
 
+// TODO: Full review, has some shit
 impl MessageService {
     pub fn new(pool: Pool) -> Self {
         Self { pool }
@@ -25,20 +28,14 @@ impl MessageService {
     }
 
     /// Insert a new message and return it.
-    pub async fn insert(
-        &self,
-        new_message: NewMessageDb,
-    ) -> Result<MessageDb, AppError> {
+    pub async fn insert(&self, new_message: NewMessageDb) -> Result<MessageDb, AppError> {
         message_repository::insert(&self.pool, new_message)
             .await
             .map_err(|_| AppError::InternalServerError)
     }
 
     /// Insert a domain Message and return the DB row.
-    pub async fn insert_message(
-        &self,
-        message: &Message,
-    ) -> Result<MessageDb, AppError> {
+    pub async fn insert_message(&self, message: &Message) -> Result<MessageDb, AppError> {
         let parts_json = serde_json::to_value(&message.parts).unwrap_or_default();
         let role = message_role_to_db_role(&message.role);
 

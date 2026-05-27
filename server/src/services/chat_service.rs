@@ -12,6 +12,7 @@ pub struct ChatService {
     message_service: MessageService,
 }
 
+// TODO: Full review, has some shit
 impl ChatService {
     pub fn new(pool: Pool, message_service: MessageService) -> Self {
         Self {
@@ -45,9 +46,7 @@ impl ChatService {
         first_message: Option<String>,
         user_id: UserId,
     ) -> Result<Chat, AppError> {
-        let title = first_message
-            .as_deref()
-            .map(Message::make_title);
+        let title = first_message.as_deref().map(Message::make_title);
 
         let new_chat = chat_repository::NewChatDb {
             owner: user_id.0,
@@ -69,11 +68,7 @@ impl ChatService {
     }
 
     /// Delete a chat by ID (only owner can delete).
-    pub async fn delete_chat(
-        &self,
-        chat_id: &ChatId,
-        user_id: &UserId,
-    ) -> Result<(), AppError> {
+    pub async fn delete_chat(&self, chat_id: &ChatId, user_id: &UserId) -> Result<(), AppError> {
         match chat_repository::delete(&self.pool, *chat_id, *user_id).await {
             Ok(false) => Err(AppError::NotFound("Chat not found".into())),
             Ok(true) => Ok(()),
@@ -92,7 +87,7 @@ impl ChatService {
             Ok(chat) => Ok(chat.into()),
             Err(crate::infra::errors::InfraError::NotFound) => {
                 Err(AppError::NotFound("Chat not found".into()))
-            }
+            },
             Err(_) => Err(AppError::InternalServerError),
         }
     }
@@ -108,7 +103,7 @@ impl ChatService {
             Ok(chat) => Ok(chat.into()),
             Err(crate::infra::errors::InfraError::NotFound) => {
                 Err(AppError::NotFound("Chat not found".into()))
-            }
+            },
             Err(_) => Err(AppError::InternalServerError),
         }
     }

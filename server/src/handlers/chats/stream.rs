@@ -6,11 +6,9 @@ use std::convert::Infallible;
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::stream_event::StreamEvent;
+use crate::domain::models::stream_event::MessageStreamEvent;
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
-
-// ── Wire-format chunk types ──
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
@@ -88,17 +86,15 @@ pub enum SseChunk {
     ErrorChunk { errorText: String },
 }
 
-// ── Request type ──
-
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
     #[allow(dead_code)]
     pub id: Uuid,
     #[allow(dead_code)]
-    pub messages: Vec<serde_json::Value>,
+    pub messages: Vec<serde_json::Value>, // TODO: Change to UIMessage
     #[allow(dead_code)]
     #[serde(default)]
-    pub trigger: Option<String>,
+    pub trigger: Option<String>, // TODO: Investigate what trigger is?
     #[allow(dead_code)]
     #[serde(default, rename = "messageId")]
     pub message_id: Option<Uuid>,
@@ -132,61 +128,56 @@ pub async fn send_message(
     Sse::new(sse_stream).keep_alive(KeepAlive::default())
 }
 
-// ── Helpers ──
-
+// TODO: Replace with UIMessage converter
 fn extract_last_user_text(messages: &[serde_json::Value]) -> String {
     messages
         .iter()
         .rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .and_then(|m| {
-            m.get("parts")
-                .and_then(|p| p.as_array())
-                .and_then(|parts| {
-                    parts
-                        .iter()
-                        .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
-                        .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("")
-                        .into()
-                })
+            m.get("parts").and_then(|p| p.as_array()).and_then(|parts| {
+                parts
+                    .iter()
+                    .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
+                    .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("")
+                    .into()
+            })
         })
         .unwrap_or_default()
 }
 
-fn domain_to_sse_chunks(event: &StreamEvent, started: &mut bool) -> Vec<SseChunk> {
+// TODO: replace with struct + state machine and full rewrite
+fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<SseChunk> {
     match event {
-        StreamEvent::LlmCallStart => {
+        MessageStreamEvent::LlmCallStart => {
             if !*started {
                 *started = true;
-                vec![
-                    SseChunk::Start { message_id: None },
-                    SseChunk::StartStep,
-                ]
+                vec![SseChunk::Start { message_id: None }, SseChunk::StartStep]
             } else {
                 vec![SseChunk::StartStep]
             }
-        }
-        StreamEvent::TextStart { id } => vec![SseChunk::TextStart { id: id.clone() }],
-        StreamEvent::TextDelta { id, delta } => vec![SseChunk::TextDelta {
+        },
+        MessageStreamEvent::TextStart { id } => vec![SseChunk::TextStart { id: id.clone() }],
+        MessageStreamEvent::TextDelta { id, delta } => vec![SseChunk::TextDelta {
             id: id.clone(),
             delta: delta.clone(),
         }],
-        StreamEvent::TextEnd { id } => vec![SseChunk::TextEnd { id: id.clone() }],
-        StreamEvent::ReasoningStart { id } => {
+        MessageStreamEvent::TextEnd { id } => vec![SseChunk::TextEnd { id: id.clone() }],
+        MessageStreamEvent::ReasoningStart { id } => {
             vec![SseChunk::ReasoningStart { id: id.clone() }]
-        }
-        StreamEvent::ReasoningDelta { id, delta } => {
+        },
+        MessageStreamEvent::ReasoningDelta { id, delta } => {
             vec![SseChunk::ReasoningDelta {
                 id: id.clone(),
                 delta: delta.clone(),
             }]
-        }
-        StreamEvent::ReasoningEnd { id } => {
+        },
+        MessageStreamEvent::ReasoningEnd { id } => {
             vec![SseChunk::ReasoningEnd { id: id.clone() }]
-        }
-        StreamEvent::ToolCallStart {
+        },
+        MessageStreamEvent::ToolCallStart {
             tool_call_id,
             tool_name,
             title,
@@ -195,14 +186,14 @@ fn domain_to_sse_chunks(event: &StreamEvent, started: &mut bool) -> Vec<SseChunk
             tool_name: tool_name.clone(),
             title: title.clone(),
         }],
-        StreamEvent::ToolCallDelta {
+        MessageStreamEvent::ToolCallDelta {
             tool_call_id,
             input_text_delta,
         } => vec![SseChunk::ToolInputDelta {
             tool_call_id: tool_call_id.clone(),
             input_text_delta: input_text_delta.clone(),
         }],
-        StreamEvent::ToolCallAvailable {
+        MessageStreamEvent::ToolCallAvailable {
             tool_call_id,
             tool_name,
             input,
@@ -211,21 +202,21 @@ fn domain_to_sse_chunks(event: &StreamEvent, started: &mut bool) -> Vec<SseChunk
             tool_name: tool_name.clone(),
             input: input.clone(),
         }],
-        StreamEvent::ToolResult {
+        MessageStreamEvent::ToolResult {
             tool_call_id,
             output,
         } => vec![SseChunk::ToolOutputAvailable {
             tool_call_id: tool_call_id.clone(),
             output: output.clone(),
         }],
-        StreamEvent::ToolError {
+        MessageStreamEvent::ToolError {
             tool_call_id,
             error_text,
         } => vec![SseChunk::ToolOutputError {
             tool_call_id: tool_call_id.clone(),
             error_text: error_text.clone(),
         }],
-        StreamEvent::LlmCallFinish {
+        MessageStreamEvent::LlmCallFinish {
             finish_reason,
             message: _,
         } if finish_reason == "stop" => vec![
@@ -234,8 +225,8 @@ fn domain_to_sse_chunks(event: &StreamEvent, started: &mut bool) -> Vec<SseChunk
                 finish_reason: Some("stop".into()),
             },
         ],
-        StreamEvent::LlmCallFinish { .. } => vec![SseChunk::FinishStep],
-        StreamEvent::Error { error_text } => vec![SseChunk::ErrorChunk {
+        MessageStreamEvent::LlmCallFinish { .. } => vec![SseChunk::FinishStep],
+        MessageStreamEvent::Error { error_text } => vec![SseChunk::ErrorChunk {
             errorText: error_text.clone(),
         }],
     }
