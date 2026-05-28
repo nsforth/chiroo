@@ -6,7 +6,7 @@ use std::convert::Infallible;
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::stream_event::MessageStreamEvent;
+use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
 
@@ -219,13 +219,15 @@ fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<S
         MessageStreamEvent::LlmCallFinish {
             finish_reason,
             message: _,
-        } if finish_reason == "stop" => vec![
-            SseChunk::FinishStep,
-            SseChunk::Finish {
-                finish_reason: Some("stop".into()),
-            },
-        ],
-        MessageStreamEvent::LlmCallFinish { .. } => vec![SseChunk::FinishStep],
+        } => match finish_reason {
+            FinishReason::Stop => vec![
+                SseChunk::FinishStep,
+                SseChunk::Finish {
+                    finish_reason: Some("stop".into()),
+                },
+            ],
+            _ => vec![SseChunk::FinishStep],
+        },
         MessageStreamEvent::Error { error_text } => vec![SseChunk::ErrorChunk {
             errorText: error_text.clone(),
         }],

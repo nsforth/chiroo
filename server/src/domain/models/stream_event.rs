@@ -1,6 +1,16 @@
 use crate::domain::models::messages::Message;
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    Error,
+    Other,
+}
+
 pub enum MessageStreamEvent {
     ReasoningStart {
         id: String,
@@ -49,7 +59,7 @@ pub enum MessageStreamEvent {
 
     LlmCallStart,
     LlmCallFinish {
-        finish_reason: String,
+        finish_reason: FinishReason,
         message: Message,
     },
 
