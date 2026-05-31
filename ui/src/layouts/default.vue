@@ -43,16 +43,25 @@ const items = computed(() => groups.value?.flatMap((group) => {
     ...item,
     slot: 'chat' as const,
     icon: undefined,
-    class: item.label === 'Untitled' ? 'text-muted' : ''
+    label: item.label ?? t('chat.untitled'),
+    class: !item.label ? 'text-muted' : ''
   }))]
 }))
 
-function getChatActions(item: { id: string, label: string }): DropdownMenuItem[][] {
+const searchGroups = computed(() => groups.value?.map(group => ({
+  ...group,
+  items: group.items.map(item => ({
+    ...item,
+    label: item.label ?? t('chat.untitled')
+  }))
+})) ?? [])
+
+function getChatActions(item: { id: string, label: string | null }): DropdownMenuItem[][] {
   return [[
     {
       label: t('buttons.rename'),
       icon: 'i-lucide-pencil',
-      onSelect: () => renameChat(item.id, item.label === 'Untitled' ? '' : item.label)
+      onSelect: () => renameChat(item.id, item.label ?? '')
     }
   ], [
     {
@@ -145,7 +154,7 @@ defineShortcuts({
         >
           <template #chat-trailing="{ item }">
             <UDropdownMenu
-              :items="getChatActions(item as { id: string, label: string })"
+              :items="getChatActions(item as { id: string, label: string | null })"
               :content="{ align: 'end' }"
             >
               <UButton
@@ -191,7 +200,7 @@ defineShortcuts({
           to: '/',
           icon: 'i-lucide-circle-plus'
         }]
-      }, ...groups]"
+      }, ...searchGroups]"
     />
 
     <div class="flex-1 flex m-4 lg:ml-0 rounded-lg ring ring-default bg-default/75 shadow min-w-0 overflow-hidden">

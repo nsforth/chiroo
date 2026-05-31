@@ -17,7 +17,7 @@ interface ChatResponse {
 
 interface Chat {
   id: string
-  label: string
+  label: string | null
   to: string
   icon: string
   createdAt: string
@@ -31,7 +31,7 @@ export const useChats = createSharedComposable(() => {
     const data = await $fetch('/api/chats') as ChatsResponse
     chats.value = data.chats.map(chat => ({
       id: chat.id,
-      label: chat.title || t('chat.untitled'),
+      label: chat.title ?? null,
       to: `/chat/${chat.id}`,
       icon: 'i-lucide-message-circle',
       createdAt: String(chat.createdAt)

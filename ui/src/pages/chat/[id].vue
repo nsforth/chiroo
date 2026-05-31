@@ -31,7 +31,7 @@ const visibility = ref<'public' | 'private'>(data?.visibility ?? 'private')
 const title = ref<string | null>(data?.title ?? null)
 
 watch(() => chats.value.find(c => c.id === data?.id)?.label, (label) => {
-  if (label && label !== 'Untitled') {
+  if (label) {
     title.value = label
   }
 })
