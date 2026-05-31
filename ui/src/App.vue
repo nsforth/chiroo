@@ -4,7 +4,7 @@ import { useHead } from '@unhead/vue'
 import { useColorMode } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getNuxtUiLocale } from './plugins/i18n'
-import { useStorageSyncRef } from './composables/useSyncRef'
+import { useStorageSyncRef } from './composables/useStorageSyncRef'
 
 const colorMode = useColorMode()
 const themeColor = computed(() => colorMode.value === 'dark' ? '#09090b' : '#fafafa')
