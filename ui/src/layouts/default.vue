@@ -44,7 +44,7 @@ const items = computed(() => groups.value?.flatMap((group) => {
     slot: 'chat' as const,
     icon: undefined,
     label: item.label ?? t('chat.untitled'),
-    class: !item.label ? 'text-muted' : ''
+    class: item.label ? '' : 'text-muted'
   }))]
 }))
 

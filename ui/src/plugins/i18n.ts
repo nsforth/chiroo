@@ -14,9 +14,14 @@ type LocaleCode = keyof typeof localeConfig
 const browserCode = navigator.language.slice(0, 2)
 const defaultLocale: LocaleCode = (browserCode in localeConfig ? browserCode : 'en') as LocaleCode
 
+const saved = localStorage.getItem('locale')
+const initialLocale: LocaleCode = saved && saved in localeConfig
+  ? saved as LocaleCode
+  : defaultLocale
+
 export const i18n = createI18n({
   legacy: false,
-  locale: defaultLocale,
+  locale: initialLocale,
   fallbackLocale: 'en',
   messages: Object.fromEntries(
     Object.entries(localeConfig).map(([k, v]) => [k, v.messages])
