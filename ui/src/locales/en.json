@@ -85,6 +85,7 @@
   },
   "userMenu": {
     "theme": "Theme",
+    "language": "Language",
     "primary": "Primary",
     "neutral": "Neutral",
     "appearance": "Appearance",

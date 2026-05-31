@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useUserSession } from '../composables/useUserSession'
+import { getLocales } from '../plugins/i18n'
 
 defineProps<{
   collapsed?: boolean
@@ -14,7 +15,7 @@ const router = useRouter()
 const colorMode = useColorMode()
 const appConfig = useAppConfig()
 const { user, clearSession } = useUserSession()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const colors = ['red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose']
 const neutrals = ['slate', 'gray', 'zinc', 'neutral', 'stone']
@@ -70,6 +71,18 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
       }
     }))
   }]
+}, {
+  label: t('userMenu.language'),
+  icon: 'i-lucide-languages',
+  children: getLocales().map(({ code, name }) => ({
+    label: name,
+    type: 'checkbox' as const,
+    checked: locale.value === code,
+    onSelect(e: Event) {
+      e.preventDefault()
+      locale.value = code
+    }
+  }))
 }, {
    label: t('userMenu.appearance'),
    icon: 'i-lucide-sun-moon',

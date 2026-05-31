@@ -85,6 +85,7 @@
   },
   "userMenu": {
     "theme": "Тема",
+    "language": "Язык",
     "primary": "Основной",
     "neutral": "Нейтральный",
     "appearance": "Оформление",

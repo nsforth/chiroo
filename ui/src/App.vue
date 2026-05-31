@@ -9,6 +9,7 @@ const colorMode = useColorMode()
 const themeColor = computed(() => colorMode.value === 'dark' ? '#09090b' : '#fafafa')
 
 const { locale } = useI18n()
+const nuxtUiLocale = computed(() => getNuxtUiLocale(locale.value))
 
 useHead({
   meta: [
@@ -20,7 +21,7 @@ useHead({
 <template>
   <Suspense>
     <UApp
-      :locale="getNuxtUiLocale(locale)"
+      :locale="nuxtUiLocale"
       :toaster="{ position: 'top-right' }"
     >
       <RouterView />

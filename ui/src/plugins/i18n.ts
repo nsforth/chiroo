@@ -5,17 +5,14 @@ import enMsg from '../locales/en.json'
 import ruMsg from '../locales/ru.json'
 
 const localeConfig = {
-  en: { messages: enMsg, nuxtUi: uiEn },
-  ru: { messages: ruMsg, nuxtUi: uiRu }
+  en: { messages: enMsg, nuxtUi: uiEn, name: 'English' },
+  ru: { messages: ruMsg, nuxtUi: uiRu, name: 'Русский' }
 } as const
 
-export type LocaleCode = keyof typeof localeConfig
-export const localeCodes = Object.keys(localeConfig) as LocaleCode[]
+type LocaleCode = keyof typeof localeConfig
 
 const browserCode = navigator.language.slice(0, 2)
-const defaultLocale: LocaleCode = localeCodes.includes(browserCode as LocaleCode)
-  ? (browserCode as LocaleCode)
-  : 'en'
+const defaultLocale: LocaleCode = (browserCode in localeConfig ? browserCode : 'en') as LocaleCode
 
 export const i18n = createI18n({
   legacy: false,
@@ -25,6 +22,13 @@ export const i18n = createI18n({
     Object.entries(localeConfig).map(([k, v]) => [k, v.messages])
   )
 })
+
+export function getLocales() {
+  return Object.entries(localeConfig).map(([code, config]) => ({
+    code,
+    name: config.name
+  }))
+}
 
 export function getNuxtUiLocale(code: string) {
   return localeConfig[code as LocaleCode]?.nuxtUi ?? uiEn
