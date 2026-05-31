@@ -1,5 +1,5 @@
 import { defineComarkComponent } from '@comark/vue'
-import highlight from '@comark/vue/plugins/highlight'
+/*import highlight from '@comark/vue/plugins/highlight'
 import html from '@shikijs/langs/html'
 import css from '@shikijs/langs/css'
 import python from '@shikijs/langs/python'
@@ -17,15 +17,15 @@ import diff from '@shikijs/langs/diff'
 import dockerfile from '@shikijs/langs/dockerfile'
 import xml from '@shikijs/langs/xml'
 import toml from '@shikijs/langs/toml'
-import graphql from '@shikijs/langs/graphql'
+import graphql from '@shikijs/langs/graphql'*/
 import SourceLink from './SourceLink.vue'
 
 export default defineComarkComponent({
   name: 'ChatComark',
   plugins: [
-    highlight({
-      languages: [html, css, python, sql, go, rust, java, c, cpp, ruby, php, swift, kotlin, diff, dockerfile, xml, toml, graphql]
-    })
+    //highlight({
+    //  languages: [html, css, python, sql, go, rust, java, c, cpp, ruby, php, swift, kotlin, diff, dockerfile, xml, toml, graphql]
+    //})
   ],
   components: {
     'source-link': SourceLink
