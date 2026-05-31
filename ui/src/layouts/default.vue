@@ -155,7 +155,7 @@ defineShortcuts({
                 variant="link"
                 size="sm"
                 class="rounded-[5px] hover:bg-accented/50 focus-visible:bg-accented/50 data-[state=open]:bg-accented/50"
-                aria-label="Chat actions"
+                :aria-label="t('chatActions.chatActions')"
                 tabindex="-1"
                 @click.stop.prevent
               />

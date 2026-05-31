@@ -49,6 +49,25 @@
     "modalDescPrivate": "Только вы можете просмотреть этот чат.",
     "failedToUpdate": "Не удалось изменить видимость"
   },
+  "chatActions": {
+    "copyResponse": "Копировать ответ",
+    "goodResponse": "Хороший ответ",
+    "badResponse": "Плохой ответ",
+    "regenerate": "Перегенерировать",
+    "editMessage": "Редактировать сообщение",
+    "shareChat": "Поделиться чатом",
+    "chatActions": "Действия с чатом"
+  },
+  "toolStatus": {
+    "searching": "Ищу в интернете...",
+    "searched": "Нашёл в интернете",
+    "generatingChart": "Генерирую график...",
+    "chartError": "Не удалось сгенерировать график, попробуйте снова",
+    "loadingChart": "Загружаю данные графика...",
+    "loadingWeather": "Загружаю данные о погоде...",
+    "weatherError": "Не удалось получить данные о погоде, попробуйте позже",
+    "noForecast": "Прогноз недоступен"
+  },
   "placeholders": {
     "modelSelectSearch": "Поиск...",
     "chatInputPrompt": "Спросите что-нибудь..."

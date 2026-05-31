@@ -2,6 +2,7 @@
 import { isReasoningUIPart, isTextUIPart, isToolUIPart, getToolName } from 'ai'
 import type { UIMessage } from 'ai'
 import { isPartStreaming, isToolStreaming } from '@nuxt/ui/utils/ai'
+import { useI18n } from 'vue-i18n'
 import ChatComark from '../Comark'
 import ChatToolChart from '../tool/Chart.vue'
 import ChatToolWeather from '../tool/Weather.vue'
@@ -11,6 +12,8 @@ import { getMergedParts } from '../../../utils/ai'
 import { getSearchQuery, getSources } from '../../../utils/tool'
 import type { WeatherUIToolInvocation } from '../../../tools/weather'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
+
+const { t } = useI18n()
 
 defineProps<{
   message: UIMessage
@@ -51,7 +54,7 @@ const emit = defineEmits<{
       />
       <UChatTool
         v-else-if="getToolName(part) === 'web_search' || getToolName(part) === 'google_search'"
-        :text="isToolStreaming(part) ? 'Searching the web...' : 'Searched the web'"
+        :text="isToolStreaming(part) ? t('toolStatus.searching') : t('toolStatus.searched')"
         :suffix="getSearchQuery(part)"
         :streaming="isToolStreaming(part)"
         chevron="leading"

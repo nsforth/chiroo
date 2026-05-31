@@ -1,17 +1,31 @@
 import { createI18n } from 'vue-i18n'
+import { en as uiEn, ru as uiRu } from '@nuxt/ui/locale'
 
-import en from '../locales/en.json'
-import ru from '../locales/ru.json'
+import enMsg from '../locales/en.json'
+import ruMsg from '../locales/ru.json'
 
-const browserLocale = navigator.language.slice(0, 2)
-const locale: string = ['ru', 'en'].includes(browserLocale) ? browserLocale : 'en'
+const localeConfig = {
+  en: { messages: enMsg, nuxtUi: uiEn },
+  ru: { messages: ruMsg, nuxtUi: uiRu }
+} as const
+
+export type LocaleCode = keyof typeof localeConfig
+export const localeCodes = Object.keys(localeConfig) as LocaleCode[]
+
+const browserCode = navigator.language.slice(0, 2)
+const defaultLocale: LocaleCode = localeCodes.includes(browserCode as LocaleCode)
+  ? (browserCode as LocaleCode)
+  : 'en'
 
 export const i18n = createI18n({
   legacy: false,
-  locale,
+  locale: defaultLocale,
   fallbackLocale: 'en',
-  messages: {
-    en,
-    ru
-  }
+  messages: Object.fromEntries(
+    Object.entries(localeConfig).map(([k, v]) => [k, v.messages])
+  )
 })
+
+export function getNuxtUiLocale(code: string) {
+  return localeConfig[code as LocaleCode]?.nuxtUi ?? uiEn
+}

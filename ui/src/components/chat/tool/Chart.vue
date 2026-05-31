@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { BulletLegendItemInterface } from 'vue-chrts'
 import { CurveType, LegendPosition } from 'vue-chrts'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
 import { LineChart } from 'vue-chrts'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   invocation: ChartUIToolInvocation
@@ -24,9 +27,9 @@ const icon = computed(() => {
 
 const message = computed(() => {
   return ({
-    'input-available': 'Generating chart...',
-    'output-error': 'Can\'t generate chart, please try again'
-  })[props.invocation.state as string] || 'Loading chart data...'
+    'input-available': t('toolStatus.generatingChart'),
+    'output-error': t('toolStatus.chartError')
+  })[props.invocation.state as string] || t('toolStatus.loadingChart')
 })
 
 const xFormatter = (invocation: ChartUIToolInvocation) => {

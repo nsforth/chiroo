@@ -49,6 +49,25 @@
     "modalDescPrivate": "Only you can view this chat.",
     "failedToUpdate": "Failed to update visibility"
   },
+  "chatActions": {
+    "copyResponse": "Copy response",
+    "goodResponse": "Good response",
+    "badResponse": "Bad response",
+    "regenerate": "Regenerate response",
+    "editMessage": "Edit message",
+    "shareChat": "Share chat",
+    "chatActions": "Chat actions"
+  },
+  "toolStatus": {
+    "searching": "Searching the web...",
+    "searched": "Searched the web",
+    "generatingChart": "Generating chart...",
+    "chartError": "Can't generate chart, please try again",
+    "loadingChart": "Loading chart data...",
+    "loadingWeather": "Loading weather data...",
+    "weatherError": "Can't get weather data, please try again later",
+    "noForecast": "No forecast available"
+  },
   "placeholders": {
     "modelSelectSearch": "Search...",
     "chatInputPrompt": "Type your message here..."

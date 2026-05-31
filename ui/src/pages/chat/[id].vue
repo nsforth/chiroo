@@ -256,6 +256,7 @@ onMounted(() => {
         <UChatPrompt
           v-if="isOwner"
           v-model="input"
+          :placeholder="t('placeholders.chatInputPrompt')"
           :error="chat.error"
           variant="subtle"
           class="sticky bottom-0 [view-transition-name:chat-prompt] rounded-b-none z-10"

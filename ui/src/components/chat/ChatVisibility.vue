@@ -81,12 +81,12 @@ function copyLink() {
     :description="isShared ? t('visibility.modalDescShared') : t('visibility.modalDescPrivate')"
     close
   >
-    <UTooltip text="Share chat">
+    <UTooltip :text="t('chatActions.shareChat')">
       <UButton
         color="neutral"
         variant="ghost"
         icon="i-lucide-share"
-        aria-label="Share chat"
+        :aria-label="t('chatActions.shareChat')"
       />
     </UTooltip>
 

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { WeatherUIToolInvocation } from '../../../tools/weather'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   invocation: WeatherUIToolInvocation
@@ -22,9 +25,9 @@ const icon = computed(() => {
 
 const message = computed(() => {
   return ({
-    'input-available': 'Loading weather data...',
-    'output-error': 'Can\'t get weather data, please try again later'
-  })[props.invocation.state as string] || 'Loading weather data...'
+    'input-available': t('toolStatus.loadingWeather'),
+    'output-error': t('toolStatus.weatherError')
+  })[props.invocation.state as string] || t('toolStatus.loadingWeather')
 })
 </script>
 
@@ -111,7 +114,7 @@ const message = computed(() => {
         class="flex items-center justify-center py-3"
       >
         <div class="text-xs">
-          No forecast available
+          {{ t('toolStatus.noForecast') }}
         </div>
       </div>
     </template>

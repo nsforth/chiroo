@@ -3,7 +3,10 @@ import { ref, computed } from 'vue'
 import type { UIMessage } from 'ai'
 import { isFileUIPart } from 'ai'
 import { useClipboard } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getMessageText } from '../../../utils/ai'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   message: UIMessage & { createdAt?: string | Date }
@@ -49,46 +52,46 @@ function copy() {
 
 <template>
   <template v-if="message.role === 'assistant' && !streaming">
-    <UTooltip text="Copy response">
+    <UTooltip :text="t('chatActions.copyResponse')">
       <UButton
         size="sm"
         :color="copied ? 'primary' : 'neutral'"
         variant="ghost"
         :icon="copied ? 'i-lucide-copy-check' : 'i-lucide-copy'"
-        aria-label="Copy response"
+        :aria-label="t('chatActions.copyResponse')"
         @click="copy"
       />
     </UTooltip>
 
-    <UTooltip text="Good response">
+    <UTooltip :text="t('chatActions.goodResponse')">
       <UButton
         size="sm"
         :color="vote === true ? 'success' : 'neutral'"
         variant="ghost"
         icon="i-lucide-thumbs-up"
-        aria-label="Good response"
+        :aria-label="t('chatActions.goodResponse')"
         @click="emit('vote', message, true)"
       />
     </UTooltip>
 
-    <UTooltip text="Bad response">
+    <UTooltip :text="t('chatActions.badResponse')">
       <UButton
         size="sm"
         :color="vote === false ? 'error' : 'neutral'"
         variant="ghost"
         icon="i-lucide-thumbs-down"
-        aria-label="Bad response"
+        :aria-label="t('chatActions.badResponse')"
         @click="emit('vote', message, false)"
       />
     </UTooltip>
 
-    <UTooltip text="Regenerate response">
+    <UTooltip :text="t('chatActions.regenerate')">
       <UButton
         size="sm"
         color="neutral"
         variant="ghost"
         icon="i-lucide-rotate-cw"
-        aria-label="Regenerate response"
+        :aria-label="t('chatActions.regenerate')"
         @click="emit('regenerate', message)"
       />
     </UTooltip>
@@ -109,14 +112,14 @@ function copy() {
 
     <UTooltip
       v-if="!hasFiles"
-      text="Edit message"
+      :text="t('chatActions.editMessage')"
     >
       <UButton
         size="sm"
         color="neutral"
         variant="ghost"
         icon="i-lucide-pencil"
-        aria-label="Edit message"
+        :aria-label="t('chatActions.editMessage')"
         @click="emit('edit', message)"
       />
     </UTooltip>
