@@ -4,18 +4,18 @@ use dotenvy::dotenv;
 use secrecy::{SecretBox, SecretString};
 use tokio::sync::OnceCell;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     host: String,
     port: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     url: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpenAiConfig {
     base_url: String,
     api_key: SecretString,
@@ -29,6 +29,7 @@ pub struct OidcConfig {
     client_secret: SecretString,
     redirect_uri: String,
     app_base_url: String,
+    secure_cookie: bool,
     state_secret: SecretString,
     cleanup_interval_secs: u64,
     session_ttl_multiplier: u32,
@@ -54,6 +55,10 @@ impl OidcConfig {
 
     pub fn app_base_url(&self) -> &str {
         &self.app_base_url
+    }
+
+    pub fn secure_cookie(&self) -> bool {
+        self.secure_cookie
     }
 
     pub fn state_secret(&self) -> &SecretBox<str> {
@@ -87,7 +92,7 @@ impl OpenAiConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub db: DatabaseConfig,
@@ -122,7 +127,7 @@ async fn init_config() -> Config {
         port: env::var("PORT")
             .unwrap_or_else(|_| String::from("3000"))
             .parse::<u16>()
-            .unwrap(),
+            .expect("PORT is not and integer"),
     };
 
     let database_config = DatabaseConfig {
@@ -130,20 +135,21 @@ async fn init_config() -> Config {
     };
 
     let openai_config = OpenAiConfig {
-        base_url: env::var("OPENAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
+        base_url: env::var("OPENAI_BASE_URL").expect("OPENAI_BASE_URL must be set"),
         api_key: SecretString::new(
             env::var("OPENAI_API_KEY")
-                .unwrap_or_else(|_| "sk-no-key".into())
+                .expect("OPENAI_API_KEY must be set")
                 .into_boxed_str(),
         ),
-        model: env::var("OPENAI_MODEL").unwrap_or_else(|_| "LLM".into()),
+        model: env::var("OPENAI_MODEL").expect("OPENAI_MODEL must be set"),
     };
 
     let app_base_url = env::var("APP_BASE_URL").expect("APP_BASE_URL must be set");
+    let secure_cookie = !app_base_url.starts_with("http://");
 
     let oidc_config = OidcConfig {
         redirect_uri: format!("{app_base_url}/api/auth/oidc/callback"),
+        secure_cookie,
         app_base_url,
         issuer_url: env::var("OIDC_ISSUER_URL").expect("OIDC_ISSUER_URL must be set"),
         client_id: SecretString::new(

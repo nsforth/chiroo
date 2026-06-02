@@ -26,7 +26,8 @@ pub async fn oidc_callback(
         Ok((redirect_url, access_token)) => {
             let cookie = Cookie::build(("access_token", access_token))
                 .http_only(true)
-                .path("/") // TODO: Secure cookie
+                .path("/")
+                .secure(state.config.oidc_config().secure_cookie())
                 .same_site(cookie::SameSite::Lax)
                 .to_string();
 

@@ -54,10 +54,11 @@ fn extract_access_token(headers: &HeaderMap) -> Option<String> {
         .map(|c| c.value_trimmed().to_string())
 }
 
-fn build_set_cookie(token: &str) -> String {
+fn build_set_cookie(token: &str, secure: bool) -> String {
     Cookie::build(("access_token", token.to_string()))
         .http_only(true)
         .path("/")
+        .secure(secure)
         .same_site(cookie::SameSite::Lax)
         .to_string()
 }
@@ -99,7 +100,7 @@ pub async fn auth_middleware(
             request
                 .extensions_mut()
                 .insert(AuthUser::from_sid_and_user(provider_sid, user));
-            let cookie = build_set_cookie(&access_token);
+            let cookie = build_set_cookie(&access_token, state.config.oidc_config().secure_cookie());
             (request, Some(cookie))
         },
         AuthResult::Expired => {

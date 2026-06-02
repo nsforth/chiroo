@@ -1,3 +1,4 @@
+use axum::Router;
 use deadpool_diesel::postgres::{Manager, Pool};
 use deadpool_diesel::Runtime;
 use diesel_migrations::MigrationHarness;
@@ -16,7 +17,7 @@ mod services;
 mod state;
 mod utils;
 
-use crate::config::config;
+use crate::config::{config, Config};
 use crate::errors::{internal_error, AppError};
 use crate::routes::app_router;
 use crate::services::ai_service::AiService;
@@ -33,6 +34,7 @@ async fn main() {
     init_tracing();
 
     let app_config = config().await;
+    tracing::info!("application configuration is {:?}", app_config);
 
     let manager = Manager::new(app_config.db_url().to_string(), Runtime::Tokio1);
     let pool = Pool::builder(manager)
@@ -43,19 +45,6 @@ async fn main() {
         tracing::error!("Failed to run migrations: {:?}", err);
         return;
     }
-
-    let auth_service = AuthService::new(app_config.oidc_config().clone(), pool.clone());
-    auth_service.clone().start_background_jobs(app_config.oidc_config().cleanup_interval_secs());
-
-    let state = AppState {
-        chat_service: ChatService::new(pool.clone(), MessageService::new(pool.clone())),
-        message_service: MessageService::new(pool.clone()),
-        vote_service: VoteService::new(pool.clone()),
-        ai_service: AiService::new(&app_config.openai),
-        auth_service,
-    };
-
-    let app = app_router(state);
 
     let host = app_config.server_host();
     let port = app_config.server_port();
@@ -68,6 +57,8 @@ async fn main() {
         .await
         .expect("Failed to bind");
 
+    let app = create_app(app_config, pool);
+
     axum::serve(listener, app)
         .await
         .expect("Server failed to run");
@@ -76,8 +67,7 @@ async fn main() {
 fn init_tracing() {
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -90,4 +80,24 @@ async fn run_migrations(pool: &Pool) -> Result<(), AppError> {
         .map_err(internal_error)?
         .map_err(internal_error)?;
     Ok(())
+}
+
+fn create_app(app_config: &'static Config, pool: Pool) -> Router {
+    let auth_service = AuthService::new(app_config.oidc_config().clone(), pool.clone());
+    auth_service
+        .clone()
+        .start_background_jobs(app_config.oidc_config().cleanup_interval_secs());
+
+    let ai_service = AiService::new(&app_config.openai);
+
+    let state = AppState {
+        chat_service: ChatService::new(pool.clone(), MessageService::new(pool.clone())),
+        message_service: MessageService::new(pool.clone()),
+        vote_service: VoteService::new(pool.clone()),
+        ai_service,
+        auth_service,
+        config: app_config,
+    };
+
+    app_router(state)
 }
