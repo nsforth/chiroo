@@ -13,6 +13,7 @@ use axum::{
     routing::{delete, get, patch, post},
     Router,
 };
+use tower_http::trace::TraceLayer;
 
 pub fn app_router(state: AppState) -> Router {
     let auth_router = Router::new()
@@ -34,6 +35,7 @@ pub fn app_router(state: AppState) -> Router {
         .nest("/api/auth", auth_router)
         .merge(protected)
         .fallback(handler_404)
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
