@@ -1,58 +1,28 @@
 import { createSharedComposable } from '@vueuse/core'
 import { ref, computed } from 'vue'
 import type { UserSession } from '../types/session'
-import { $fetch } from 'ofetch'
-import { useCsrf } from './useCsrf'
+import { apiFetch } from '../api'
 
 export const useUserSession = createSharedComposable(() => {
   const session = ref<UserSession | null>(null)
-  const { csrf, headerName } = useCsrf()
+  const loading = ref(false)
 
   const clearSession = async () => {
-    await $fetch('/api/session', {
-      method: 'DELETE',
-      headers: { [headerName]: csrf() }
-    })
+    // TODO: implement logout with Keycloak end session
     session.value = null
   }
 
   const fetchSession = async () => {
-    session.value = await $fetch<UserSession>('/api/session').catch(() => null)
-  }
-
-  const popupListener = (e: StorageEvent) => {
-    if (e.key === 'temp-auth-popup') {
-      fetchSession()
-      window.removeEventListener('storage', popupListener)
-    }
-  }
-  const openInPopup = (route: string, size: { width?: number, height?: number } = {}) => {
-    // Set a local storage item to tell the popup that we pending auth
-    localStorage.setItem('temp-auth-popup', 'true')
-
-    const width = size.width ?? 960
-    const height = size.height ?? 600
-    const top = (window.top?.outerHeight ?? 0) / 2
-      + (window.top?.screenY ?? 0)
-      - height / 2
-    const left = (window.top?.outerWidth ?? 0) / 2
-      + (window.top?.screenX ?? 0)
-      - width / 2
-
-    window.open(
-      route,
-      'nuxt-auth-utils-popup',
-      `width=${width}, height=${height}, top=${top}, left=${left}, toolbar=no, location=no, directories=no, status=no, menubar=no, scrollbars=no, resizable=no, copyhistory=no`,
-    )
-
-    window.addEventListener('storage', popupListener)
+    loading.value = true
+    session.value = await apiFetch<UserSession>('/api/session').catch(() => null)
+    loading.value = false
   }
 
   return {
     loggedIn: computed(() => Boolean(session.value?.user)),
     user: computed(() => session.value?.user || null),
     session,
-    openInPopup,
+    loading,
     fetchSession,
     clearSession,
   }

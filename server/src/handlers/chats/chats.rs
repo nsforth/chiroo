@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::models::chat::Chat;
-use crate::domain::models::user::UserId;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
+use crate::middleware::auth::AuthUser;
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;
@@ -53,7 +53,7 @@ impl From<&Chat> for ChatResponse {
         Self {
             id: value.id.0.to_string(),
             title: value.title.clone(),
-            user_id: value.owner.0.to_string(),
+            user_id: value.owner.to_string(),
             visibility,
             created_at: value.created_at.and_utc().to_rfc3339(),
         }
@@ -77,31 +77,36 @@ pub struct ChatDetailResponse {
 
 pub async fn get_chats(
     State(state): State<AppState>,
+    auth_user: AuthUser,
 ) -> Result<Json<ChatsResponse>, ErrorResponse> {
-    let chats = state.chat_service.get_chats().await?;
+    let chats = state.chat_service.get_chats(auth_user.user_id).await?;
     Ok(Json(From::from(chats)))
 }
 
 pub async fn create_chat(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     JsonExtractor(new_chat): JsonExtractor<CreateChatRequest>,
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
-    let owner = Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap();
     let chat = state
         .chat_service
-        .create_chat(new_chat.first_message, UserId(owner))
+        .create_chat(new_chat.first_message, auth_user.user_id)
         .await?;
     Ok(Json(From::from(&chat)))
 }
 
 pub async fn get_chat(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(id): PathExtractor<Uuid>,
 ) -> Result<Json<ChatDetailResponse>, ErrorResponse> {
     let chat_id = crate::domain::models::chat::ChatId(id);
 
-    // TODO: Incapsulate chat with messages into service
-    let chat = match state.chat_service.get_chat(&chat_id).await? {
+    let chat = match state
+        .chat_service
+        .get_chat(chat_id, auth_user.user_id)
+        .await?
+    {
         Some(chat) => chat,
         None => {
             return Err((StatusCode::NOT_FOUND, "Chat not found")
@@ -133,9 +138,7 @@ pub async fn get_chat(
         })
         .collect();
 
-    // TODO: Move to chat_service
-    let hardcoded_user = Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap();
-    let is_owner = chat.owner.0 == hardcoded_user;
+    let is_owner = chat.owner == auth_user.user_id;
 
     // TODO: Move to converter
     let visibility = if chat.public {
@@ -144,10 +147,9 @@ pub async fn get_chat(
         "private".to_string()
     };
 
-    // TODO: Make converter and constructor
     Ok(Json(ChatDetailResponse {
         id: chat.id.0.to_string(),
-        user_id: chat.owner.0.to_string(),
+        user_id: chat.owner.to_string(),
         title: chat.title,
         visibility,
         created_at: chat.created_at.and_utc().to_rfc3339(),
@@ -156,12 +158,12 @@ pub async fn get_chat(
     }))
 }
 
-/// Delete a chat by ID.
 pub async fn delete_chat(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(id): PathExtractor<Uuid>,
 ) -> Result<StatusCode, ErrorResponse> {
-    let user_id = UserId(Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap());
+    let user_id = auth_user.user_id;
     let chat_id = crate::domain::models::chat::ChatId(id);
     match state.chat_service.delete_chat(&chat_id, &user_id).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
@@ -171,13 +173,13 @@ pub async fn delete_chat(
     }
 }
 
-/// Update chat title.
 pub async fn update_title(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(id): PathExtractor<Uuid>,
     JsonExtractor(body): JsonExtractor<UpdateTitleRequest>,
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
-    let user_id = UserId(Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap());
+    let user_id = auth_user.user_id;
     let chat_id = crate::domain::models::chat::ChatId(id);
     match state
         .chat_service
@@ -188,13 +190,13 @@ pub async fn update_title(
     }
 }
 
-/// Update chat visibility (public/private).
 pub async fn update_visibility(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(id): PathExtractor<Uuid>,
     JsonExtractor(body): JsonExtractor<UpdateVisibilityRequest>,
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
-    let user_id = UserId(Uuid::parse_str("b78f01ac-5225-11f1-a097-e71b54ed4087").unwrap());
+    let user_id = auth_user.user_id;
     let chat_id = crate::domain::models::chat::ChatId(id);
     match state
         .chat_service

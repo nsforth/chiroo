@@ -22,6 +22,57 @@ pub struct OpenAiConfig {
     model: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct OidcConfig {
+    issuer_url: String,
+    client_id: SecretString,
+    client_secret: SecretString,
+    redirect_uri: String,
+    app_base_url: String,
+    state_secret: SecretString,
+    cleanup_interval_secs: u64,
+    session_ttl_multiplier: u32,
+    default_access_token_expires_secs: u64,
+}
+
+impl OidcConfig {
+    pub fn issuer_url(&self) -> &str {
+        &self.issuer_url
+    }
+
+    pub fn client_id(&self) -> &SecretString {
+        &self.client_id
+    }
+
+    pub fn client_secret(&self) -> &SecretString {
+        &self.client_secret
+    }
+
+    pub fn redirect_uri(&self) -> &str {
+        &self.redirect_uri
+    }
+
+    pub fn app_base_url(&self) -> &str {
+        &self.app_base_url
+    }
+
+    pub fn state_secret(&self) -> &SecretBox<str> {
+        &self.state_secret
+    }
+
+    pub fn cleanup_interval_secs(&self) -> u64 {
+        self.cleanup_interval_secs
+    }
+
+    pub fn session_ttl_multiplier(&self) -> u32 {
+        self.session_ttl_multiplier
+    }
+
+    pub fn default_access_token_expires_secs(&self) -> u64 {
+        self.default_access_token_expires_secs
+    }
+}
+
 impl OpenAiConfig {
     pub fn base_url(&self) -> String {
         self.base_url.clone()
@@ -41,6 +92,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub db: DatabaseConfig,
     pub openai: OpenAiConfig,
+    pub oidc: OidcConfig,
 }
 
 impl Config {
@@ -54,6 +106,10 @@ impl Config {
 
     pub fn server_port(&self) -> u16 {
         self.server.port
+    }
+
+    pub fn oidc_config(&self) -> &OidcConfig {
+        &self.oidc
     }
 }
 
@@ -84,10 +140,46 @@ async fn init_config() -> Config {
         model: env::var("OPENAI_MODEL").unwrap_or_else(|_| "LLM".into()),
     };
 
+    let app_base_url = env::var("APP_BASE_URL").expect("APP_BASE_URL must be set");
+
+    let oidc_config = OidcConfig {
+        redirect_uri: format!("{app_base_url}/api/auth/oidc/callback"),
+        app_base_url,
+        issuer_url: env::var("OIDC_ISSUER_URL").expect("OIDC_ISSUER_URL must be set"),
+        client_id: SecretString::new(
+            env::var("OIDC_CLIENT_ID")
+                .expect("OIDC_CLIENT_ID must be set")
+                .into_boxed_str(),
+        ),
+        client_secret: SecretString::new(
+            env::var("OIDC_CLIENT_SECRET")
+                .expect("OIDC_CLIENT_SECRET must be set")
+                .into_boxed_str(),
+        ),
+        state_secret: SecretString::new(
+            env::var("STATE_SECRET")
+                .expect("STATE_SECRET must be set")
+                .into_boxed_str(),
+        ),
+        cleanup_interval_secs: env::var("SESSION_CLEANUP_INTERVAL_SECS")
+            .unwrap_or_else(|_| "600".into())
+            .parse()
+            .unwrap_or(600),
+        session_ttl_multiplier: env::var("SESSION_TTL_MULTIPLIER")
+            .unwrap_or_else(|_| "10".into())
+            .parse()
+            .unwrap_or(10),
+        default_access_token_expires_secs: env::var("OIDC_ACCESS_TOKEN_EXPIRES_SECS")
+            .unwrap_or_else(|_| "300".into())
+            .parse()
+            .unwrap_or(300),
+    };
+
     Config {
         server: server_config,
         db: database_config,
         openai: openai_config,
+        oidc: oidc_config,
     }
 }
 

@@ -1,23 +1,38 @@
+use crate::handlers::auth::{login, oidc_callback};
 use crate::handlers::chats::{
     create_chat, delete_chat, delete_messages_after, get_chat, get_chats, get_votes, send_message,
     update_title, update_visibility, vote,
 };
 use crate::handlers::session::get_session;
+use crate::middleware::auth::auth_middleware;
 use crate::AppState;
 use axum::{
     http::StatusCode,
+    middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post},
     Router,
 };
 
 pub fn app_router(state: AppState) -> Router {
+    let auth_router = Router::new()
+        .route("/login", post(login))
+        .route("/oidc/callback", get(oidc_callback));
+
     let chat_router = chat_router();
+
+    let protected = Router::new()
+        .route("/api/session", get(get_session))
+        .nest("/api/chats", chat_router)
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
 
     Router::new()
         .route("/", get(root))
-        .route("/api/session", get(get_session))
-        .nest("/api/chats", chat_router)
+        .nest("/api/auth", auth_router)
+        .merge(protected)
         .fallback(handler_404)
         .with_state(state)
 }

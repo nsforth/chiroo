@@ -22,8 +22,8 @@ impl ChatService {
     }
 
     /// Get all chats (public and owned by any user).
-    pub async fn get_chats(&self) -> Result<Vec<Chat>, AppError> {
-        let r = chat_repository::get_all(&self.pool).await;
+    pub async fn get_chats(&self, user_id: UserId) -> Result<Vec<Chat>, AppError> {
+        let r = chat_repository::get_all(&self.pool, user_id).await;
         match r {
             Ok(chats) => Ok(chats.into_iter().map(Into::into).collect()),
             Err(_) => Err(AppError::InternalServerError),
@@ -31,8 +31,12 @@ impl ChatService {
     }
 
     /// Get a single chat by ID.
-    pub async fn get_chat(&self, chat_id: &ChatId) -> Result<Option<Chat>, AppError> {
-        let r = chat_repository::get_by_id(&self.pool, *chat_id).await;
+    pub async fn get_chat(
+        &self,
+        chat_id: ChatId,
+        user_id: UserId,
+    ) -> Result<Option<Chat>, AppError> {
+        let r = chat_repository::get_by_id(&self.pool, chat_id, user_id).await;
         match r {
             Ok(chat) => Ok(chat.map(Into::into)),
             Err(_) => Err(AppError::InternalServerError),

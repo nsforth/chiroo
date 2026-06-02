@@ -3,19 +3,23 @@ use axum::response::ErrorResponse;
 use axum::Json;
 
 use crate::handlers::session::{SessionResponse, UserResponse};
+use crate::middleware::auth::AuthUser;
 use crate::AppState;
 
 pub async fn get_session(
-    State(_): State<AppState>,
+    State(state): State<AppState>,
+    auth_user: AuthUser,
 ) -> Result<Json<SessionResponse>, ErrorResponse> {
+    let user = state.auth_service.get_user(auth_user.user_id).await?;
+
     let session = SessionResponse {
-        created_at: 0,
-        id: "c6f591e2-5225-11f1-a32d-1715edb436ac".to_string(),
+        created_at: user.created_at.and_utc().timestamp(),
+        id: auth_user.user_id.to_string(),
         user: Some(UserResponse {
-            id: "b78f01ac-5225-11f1-a097-e71b54ed4087".to_string(),
-            name: "Ivan Ivanov".to_string(),
-            username: "ivan_ivanov".to_string(),
-            avatar: None,
+            id: auth_user.user_id.to_string(),
+            name: user.name.unwrap_or_default(),
+            username: user.username.unwrap_or_default(),
+            avatar: user.avatar_url,
         }),
     };
     Ok(Json(session))

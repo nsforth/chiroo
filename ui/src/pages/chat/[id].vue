@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { $fetch } from 'ofetch'
+import { apiFetch, loginAndRedirect } from '../../api'
 import { Chat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import type { UIMessage } from 'ai'
@@ -24,7 +24,7 @@ const { model } = useModels()
 const { fetchChats, chats } = useChats()
 const { csrf, headerName } = useCsrf()
 
-const data = await $fetch(`/api/chats/${route.params.id}`).catch(() => null)
+const data = await apiFetch(`/api/chats/${route.params.id}`).catch(() => null)
 
 const isOwner = computed(() => data?.isOwner ?? false)
 const visibility = ref<'public' | 'private'>(data?.visibility ?? 'private')
@@ -38,7 +38,7 @@ watch(() => chats.value.find(c => c.id === data?.id)?.label, (label) => {
 
 const votes = ref<Vote[]>([])
 if (isOwner.value) {
-  $fetch(`/api/chats/votes/${route.params.id}`).then((v) => {
+  apiFetch(`/api/chats/votes/${route.params.id}`).then((v) => {
     votes.value = v
   }).catch(() => {})
 }
@@ -61,6 +61,11 @@ const chat = new Chat({
     }
   },
   onError(error) {
+    if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+      loginAndRedirect()
+      return
+    }
+
     let message = error.message
     if (typeof message === 'string' && message[0] === '{') {
       try {
@@ -103,7 +108,7 @@ function cancelEdit() {
 
 async function saveEdit(message: UIMessage, text: string) {
   try {
-    await $fetch(`/api/chats/messages/${data!.id}`, {
+    await apiFetch(`/api/chats/messages/${data!.id}`, {
       method: 'DELETE',
       headers: { [headerName]: csrf() },
       body: { messageId: message.id, type: 'edit' }
@@ -123,7 +128,7 @@ async function saveEdit(message: UIMessage, text: string) {
 
 async function regenerateMessage(message: UIMessage) {
   try {
-    await $fetch(`/api/chats/messages/${data!.id}`, {
+    await apiFetch(`/api/chats/messages/${data!.id}`, {
       method: 'DELETE',
       headers: { [headerName]: csrf() },
       body: { messageId: message.id, type: 'regenerate' }
@@ -159,7 +164,7 @@ async function vote(message: UIMessage, isUpvoted: boolean) {
       ]
 
   try {
-    await $fetch(`/api/chats/votes/${data!.id}`, {
+    await apiFetch(`/api/chats/votes/${data!.id}`, {
       method: 'POST',
       headers: { [headerName]: csrf() },
       body: next === null ? { messageId: message.id } : { messageId: message.id, isUpvoted: next }

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { $fetch } from 'ofetch'
+import { apiFetch } from '../api'
 import { useChats } from '../composables/useChats'
 import { useCsrf } from '../composables/useCsrf'
 import { useUserSession } from '../composables/useUserSession'
@@ -32,7 +32,7 @@ async function createChat(prompt: string) {
   input.value = prompt
   loading.value = true
   try {
-    const chat = await $fetch('/api/chats', {
+    const chat = await apiFetch('/api/chats', {
       method: 'POST',
       headers: { [headerName]: csrf() },
       body: { firstMessage: prompt }

@@ -11,19 +11,21 @@ const router = useRouter()
 const route = useRoute()
 const toast = useToast()
 const { t } = useI18n()
-const { loggedIn, openInPopup, fetchSession } = useUserSession()
+const { loggedIn, fetchSession } = useUserSession()
 const { groups, fetchChats } = useChats()
 const { renameChat, deleteChat } = useChatActions()
 
-await fetchSession()
-try {
-  await fetchChats()
-} catch {
-  toast.add({
-    description: t('errors.failedToLoadChats'),
-    icon: 'i-lucide-alert-circle',
-    color: 'error'
-  })
+if (route.path !== '/auth/error') {
+  await fetchSession()
+  try {
+    await fetchChats()
+  } catch {
+    toast.add({
+      description: t('errors.failedToLoadChats'),
+      icon: 'i-lucide-alert-circle',
+      color: 'error'
+    })
+  }
 }
 
 const sidebarOpen = ref(false)
@@ -81,7 +83,10 @@ defineShortcuts({
 </script>
 
 <template>
-  <UDashboardGroup unit="rem">
+  <div v-if="route.path === '/auth/error'" class="min-h-screen flex items-center justify-center">
+    <RouterView />
+  </div>
+  <UDashboardGroup v-else unit="rem">
     <UDashboardSidebar
       id="default"
       v-model:open="sidebarOpen"
@@ -177,15 +182,6 @@ defineShortcuts({
         <UserMenu
           v-if="loggedIn"
           :collapsed="collapsed"
-        />
-        <UButton
-          v-else
-          :label="collapsed ? '' : t('buttons.loginWithGitHub')"
-          icon="i-simple-icons:github"
-          color="neutral"
-          variant="ghost"
-          class="w-full"
-          @click="openInPopup('/auth/github')"
         />
       </template>
     </UDashboardSidebar>

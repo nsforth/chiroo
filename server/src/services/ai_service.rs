@@ -22,9 +22,7 @@ use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{
     Message, MessagePart, ReasoningBlock, Role, TextBlock, ToolCallBlock, ToolCallState,
 };
-use crate::domain::models::stream_event::{
-    FinishReason as DomainFinishReason, MessageStreamEvent,
-};
+use crate::domain::models::stream_event::{FinishReason as DomainFinishReason, MessageStreamEvent};
 
 #[derive(Debug, Deserialize)]
 struct CustomDelta {
@@ -97,6 +95,7 @@ impl AiService {
         chat_id: ChatId,
         user_message: &str,
     ) -> impl futures::Stream<Item = MessageStreamEvent> + Send {
+        tracing::debug!("Start stream for chat id {:?}", chat_id);
         let client = self.client.clone();
         let model = self.model.to_string();
         let user_message = user_message.to_string();
@@ -172,78 +171,102 @@ impl Accumulator {
             (AccState::Initial, ChunkKind::Reasoning(rc)) => {
                 let id = Uuid::new_v4().to_string();
                 events.push(MessageStreamEvent::ReasoningStart { id: id.clone() });
-                events.push(MessageStreamEvent::ReasoningDelta { id: id.clone(), delta: rc.to_string() });
+                events.push(MessageStreamEvent::ReasoningDelta {
+                    id: id.clone(),
+                    delta: rc.to_string(),
+                });
                 self.reasoning.push_str(rc);
                 self.state = AccState::Reasoning { id };
-            }
+            },
             (AccState::Initial, ChunkKind::Text(content)) => {
                 let id = Uuid::new_v4().to_string();
                 events.push(MessageStreamEvent::TextStart { id: id.clone() });
-                events.push(MessageStreamEvent::TextDelta { id: id.clone(), delta: content.to_string() });
+                events.push(MessageStreamEvent::TextDelta {
+                    id: id.clone(),
+                    delta: content.to_string(),
+                });
                 self.text.push_str(content);
                 self.state = AccState::Text { id };
-            }
+            },
             (AccState::Initial, ChunkKind::Tool(chunks)) => {
                 self.ingest_tool_chunks(chunks, &mut events);
                 self.state = AccState::Tool;
-            }
+            },
 
             (AccState::Reasoning { id }, ChunkKind::Reasoning(rc)) => {
-                events.push(MessageStreamEvent::ReasoningDelta { id: id.clone(), delta: rc.to_string() });
+                events.push(MessageStreamEvent::ReasoningDelta {
+                    id: id.clone(),
+                    delta: rc.to_string(),
+                });
                 self.reasoning.push_str(rc);
                 // stay in Reasoning
-            }
+            },
             (AccState::Reasoning { id }, ChunkKind::Text(content)) => {
                 events.push(MessageStreamEvent::ReasoningEnd { id: id.clone() });
                 let new_id = Uuid::new_v4().to_string();
                 events.push(MessageStreamEvent::TextStart { id: new_id.clone() });
-                events.push(MessageStreamEvent::TextDelta { id: new_id.clone(), delta: content.to_string() });
+                events.push(MessageStreamEvent::TextDelta {
+                    id: new_id.clone(),
+                    delta: content.to_string(),
+                });
                 self.text.push_str(content);
                 self.state = AccState::Text { id: new_id };
-            }
+            },
             (AccState::Reasoning { id }, ChunkKind::Tool(chunks)) => {
                 events.push(MessageStreamEvent::ReasoningEnd { id: id.clone() });
                 self.ingest_tool_chunks(chunks, &mut events);
                 self.state = AccState::Tool;
-            }
+            },
 
             (AccState::Text { id }, ChunkKind::Text(content)) => {
-                events.push(MessageStreamEvent::TextDelta { id: id.clone(), delta: content.to_string() });
+                events.push(MessageStreamEvent::TextDelta {
+                    id: id.clone(),
+                    delta: content.to_string(),
+                });
                 self.text.push_str(content);
                 // stay in Text
-            }
+            },
             (AccState::Text { id }, ChunkKind::Reasoning(rc)) => {
                 events.push(MessageStreamEvent::TextEnd { id: id.clone() });
                 let new_id = Uuid::new_v4().to_string();
                 events.push(MessageStreamEvent::ReasoningStart { id: new_id.clone() });
-                events.push(MessageStreamEvent::ReasoningDelta { id: new_id.clone(), delta: rc.to_string() });
+                events.push(MessageStreamEvent::ReasoningDelta {
+                    id: new_id.clone(),
+                    delta: rc.to_string(),
+                });
                 self.reasoning.push_str(rc);
                 self.state = AccState::Reasoning { id: new_id };
-            }
+            },
             (AccState::Text { id }, ChunkKind::Tool(chunks)) => {
                 events.push(MessageStreamEvent::TextEnd { id: id.clone() });
                 self.ingest_tool_chunks(chunks, &mut events);
                 self.state = AccState::Tool;
-            }
+            },
 
             (AccState::Tool, ChunkKind::Tool(chunks)) => {
                 self.ingest_tool_chunks(chunks, &mut events);
                 // stay in Tool
-            }
+            },
             (AccState::Tool, ChunkKind::Reasoning(rc)) => {
                 let id = Uuid::new_v4().to_string();
                 events.push(MessageStreamEvent::ReasoningStart { id: id.clone() });
-                events.push(MessageStreamEvent::ReasoningDelta { id: id.clone(), delta: rc.to_string() });
+                events.push(MessageStreamEvent::ReasoningDelta {
+                    id: id.clone(),
+                    delta: rc.to_string(),
+                });
                 self.reasoning.push_str(rc);
                 self.state = AccState::Reasoning { id };
-            }
+            },
             (AccState::Tool, ChunkKind::Text(content)) => {
                 let id = Uuid::new_v4().to_string();
                 events.push(MessageStreamEvent::TextStart { id: id.clone() });
-                events.push(MessageStreamEvent::TextDelta { id: id.clone(), delta: content.to_string() });
+                events.push(MessageStreamEvent::TextDelta {
+                    id: id.clone(),
+                    delta: content.to_string(),
+                });
                 self.text.push_str(content);
                 self.state = AccState::Text { id };
-            }
+            },
         }
 
         events
@@ -255,11 +278,11 @@ impl Accumulator {
         match &self.state {
             AccState::Reasoning { id } => {
                 events.push(MessageStreamEvent::ReasoningEnd { id: id.clone() });
-            }
+            },
             AccState::Text { id } => {
                 events.push(MessageStreamEvent::TextEnd { id: id.clone() });
-            }
-            AccState::Initial | AccState::Tool => {}
+            },
+            AccState::Initial | AccState::Tool => {},
         }
 
         let mut message = Message::new(self.chat_id, Role::Assistant);
@@ -301,10 +324,13 @@ impl Accumulator {
             })
             .collect();
 
-        (events, AccumulatorResult {
-            message,
-            completed_tools,
-        })
+        (
+            events,
+            AccumulatorResult {
+                message,
+                completed_tools,
+            },
+        )
     }
 
     fn ingest_tool_chunks(
@@ -313,13 +339,14 @@ impl Accumulator {
         events: &mut Vec<MessageStreamEvent>,
     ) {
         for chunk in chunks {
-            let entry = self.tool_calls.entry(chunk.index).or_insert_with(|| {
-                PendingToolCall {
+            let entry = self
+                .tool_calls
+                .entry(chunk.index)
+                .or_insert_with(|| PendingToolCall {
                     id: chunk.id.clone().unwrap_or_default(),
                     name: String::new(),
                     arguments: String::new(),
-                }
-            });
+                });
 
             if let Some(id) = &chunk.id {
                 entry.id = id.clone();
@@ -363,7 +390,9 @@ impl From<FinishReason> for DomainFinishReason {
 }
 
 enum StepResult {
-    Stop { message: Message },
+    Stop {
+        message: Message,
+    },
     ToolCalls {
         message: Message,
         completed_tools: Vec<ChatCompletionMessageToolCall>,
@@ -374,9 +403,7 @@ async fn send_or_bail(
     tx: &mpsc::Sender<MessageStreamEvent>,
     event: MessageStreamEvent,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tx.send(event)
-        .await
-        .map_err(|_| "client disconnected")?;
+    tx.send(event).await.map_err(|_| "client disconnected")?;
     Ok(())
 }
 
@@ -416,7 +443,16 @@ async fn run_stream(
     for _step in 0..max_steps {
         send_or_bail(&tx, MessageStreamEvent::LlmCallStart).await?;
 
-        match run_llm_step(client.clone(), model.clone(), &messages, &tools, chat_id, &tx).await {
+        match run_llm_step(
+            client.clone(),
+            model.clone(),
+            &messages,
+            &tools,
+            chat_id,
+            &tx,
+        )
+        .await
+        {
             Ok(StepResult::Stop { message }) => {
                 messages.push(build_openai_assistant_message(&message, &[]));
                 send_or_bail(
@@ -428,7 +464,7 @@ async fn run_stream(
                 )
                 .await?;
                 return Ok(());
-            }
+            },
             Ok(StepResult::ToolCalls {
                 message,
                 completed_tools,
@@ -455,7 +491,7 @@ async fn run_stream(
                                 },
                             )
                             .await?;
-                        }
+                        },
                         Err(err_text) => {
                             send_or_bail(
                                 &tx,
@@ -472,10 +508,10 @@ async fn run_stream(
                                     .build()?
                                     .into(),
                             );
-                        }
+                        },
                     }
                 }
-            }
+            },
             Err(e) => {
                 let _ = tx
                     .send(MessageStreamEvent::Error {
@@ -483,7 +519,7 @@ async fn run_stream(
                     })
                     .await;
                 return Ok(());
-            }
+            },
         }
     }
 
@@ -552,10 +588,8 @@ async fn run_llm_step(
                         message: result.message,
                     },
                     _ => {
-                        return Err(
-                            format!("Unexpected finish reason: {reason:?}").into(),
-                        );
-                    }
+                        return Err(format!("Unexpected finish reason: {reason:?}").into());
+                    },
                 });
             }
         }

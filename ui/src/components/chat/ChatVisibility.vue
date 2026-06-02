@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { $fetch } from 'ofetch'
+import { apiFetch } from '../../api'
 import { useI18n } from 'vue-i18n'
 import { useClipboard } from '@vueuse/core'
 import { useCsrf } from '../../composables/useCsrf'
@@ -47,7 +47,7 @@ async function updateVisibility(value: 'public' | 'private') {
   emit('update:visibility', value)
 
   try {
-    await $fetch(`/api/chats/visibility/${props.chatId}`, {
+    await apiFetch(`/api/chats/visibility/${props.chatId}`, {
       method: 'PATCH',
       headers: { [headerName]: csrf() },
       body: { visibility: value }

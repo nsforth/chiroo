@@ -3,11 +3,15 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::json;
 
+use crate::infra::errors::InfraError;
+
 #[derive(Debug)]
 pub enum AppError {
     InternalServerError,
     NotFound(String),
     BodyParsingError(String),
+    Unauthorized,
+    OidcError(String),
 }
 
 pub fn internal_error<E: std::fmt::Display>(err: E) -> AppError {
@@ -27,7 +31,45 @@ impl IntoResponse for AppError {
                 StatusCode::BAD_REQUEST,
                 format!("Bad request error: {message}"),
             ),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, String::from("Unauthorized")),
+            Self::OidcError(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("OIDC error: {message}"),
+            ),
         };
         (status, Json(json!({ "message": err_msg }))).into_response()
+    }
+}
+
+impl From<url::ParseError> for AppError {
+    fn from(e: url::ParseError) -> Self {
+        Self::OidcError(e.to_string())
+    }
+}
+
+impl From<openidconnect::ConfigurationError> for AppError {
+    fn from(e: openidconnect::ConfigurationError) -> Self {
+        Self::OidcError(e.to_string())
+    }
+}
+
+impl From<openidconnect::DiscoveryError<openidconnect::reqwest::Error>> for AppError {
+    fn from(e: openidconnect::DiscoveryError<openidconnect::reqwest::Error>) -> Self {
+        Self::OidcError(format!("{e:?}"))
+    }
+}
+
+impl From<jsonwebtoken::errors::Error> for AppError {
+    fn from(e: jsonwebtoken::errors::Error) -> Self {
+        Self::OidcError(e.to_string())
+    }
+}
+
+impl From<InfraError> for AppError {
+    fn from(e: InfraError) -> Self {
+        match e {
+            InfraError::InternalServerError => Self::InternalServerError,
+            InfraError::NotFound => Self::NotFound("Not found".into()),
+        }
     }
 }

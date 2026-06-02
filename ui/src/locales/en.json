@@ -7,7 +7,8 @@
     "failedToSaveVote": "Failed to save vote",
     "failedToUpdateVisibility": "Failed to update visibility",
     "failedToRenameChat": "Failed to rename chat",
-    "failedToDeleteChat": "Failed to delete chat"
+    "failedToDeleteChat": "Failed to delete chat",
+    "authFailed": "Authentication failed"
   },
   "buttons": {
     "newChat": "New chat",
@@ -19,6 +20,7 @@
     "copyLink": "Copy link",
     "copied": "Copied!",
     "backToHome": "Back to home",
+    "retry": "Retry",
     "loginWithGitHub": "Login with GitHub"
   },
   "greeting": {

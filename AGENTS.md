@@ -128,10 +128,42 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - `chat.regenerate()`: truncates to last user message, POSTs `{ trigger: "regenerate-message" }`
 - `chat.sendMessage({ text })`: appends user text, POSTs `{ trigger: "submit-message" }`
 
+## Code rules
+
+- Before writing a manual implementation of anything — parsing, conversion, verification,
+  algorithm selection, key extraction — search the API surface of crates you already
+  depend on FIRST. Use docs.rs for the EXACT version in `Cargo.lock`, not latest.
+- Prefer: a method that already does what you need over manual code; a `From`/`TryFrom`
+  impl over manual field mapping; a dedicated module like `jwk` or `crypto` over ad-hoc
+  structs and functions.
+- If you find yourself writing string splitting, base64, manual JSON digging, or
+  match-on-algorithm-enum — stop. Ask: "Does the library already do this?"
+- If you've searched and genuinely found nothing suitable in any existing dependency,
+  **do not implement from scratch**. Tell the user what you need and ask how to proceed.
+- Applies universally across all crates and domains — JSON, JWT, SQL, HTTP, crypto, etc.
+
+## Auth architecture
+
+- OIDC provider: Keycloak (configurable). Backend is a confidential client, auth code flow.
+- Stateless state token: `{redirect, nonce, exp}` signed with HS256 via `jsonwebtoken`.
+  No server-side in-memory or DB storage for pending auth states.
+- Sessions stored in `sessions` table: `provider_sid`, `access_token`, `refresh_token`,
+  `expires_at`. Cleanup via periodic task (interval configurable, default 10 min).
+- `AuthService` holds `OidcClient` in a `tokio::sync::OnceCell` — lazy init, OIDC server
+  may be unreachable at startup.
+- `verify_token(token, jwks, issuer)` is a pure function — testable without async/HTTP.
+  Uses `jsonwebtoken::jwk::JwkSet::find(kid)` + `DecodingKey::try_from(jwk)`.
+  Algorithm taken from token header (`header.alg`), not JWK.
+- Refresh flow: middleware catches `Expired` → `auth_service.refresh_session(&token)`
+  looks up session by `access_token` in DB (no sid extraction), refreshes via OIDC,
+  stores new tokens, sets new cookie.
+- Frontend: `apiFetch` with 401 interceptor → `POST /api/auth/login` → `{loginUrl}` →
+  redirect to Keycloak. Dedup via `loginPromise`.
+- Session TTL: computed as `access_token_expires_in × session_ttl_multiplier` (configurable, default 10).
+
 ## Known issues / gotchas
 
 - CSRF: frontend sends `x-csrf-token` header, backend does NOT validate it. Do not try to fix this, it's in TODO list.
-- Auth: user UUID is hardcoded (`b78f01ac-5225-11f1-a097-e71b54ed4087`). Also do not try to fix it.
 
 ## AI service (`services/ai_service.rs`)
 

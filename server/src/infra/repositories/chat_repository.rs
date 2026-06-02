@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::models::chat::{Chat, ChatId};
-use crate::domain::models::user::UserId;
-use crate::infra::db::schema::chats;
+use crate::domain::models::user::{User, UserId};
+use crate::infra::db::schema::chats::{self, owner};
 use crate::infra::errors::InfraError;
 
 #[derive(Serialize, Queryable, Selectable)]
@@ -49,13 +49,17 @@ pub async fn insert(
     Ok(res)
 }
 
-pub async fn get_all(pool: &deadpool_diesel::postgres::Pool) -> Result<Vec<ChatDb>, InfraError> {
+pub async fn get_all(
+    pool: &deadpool_diesel::postgres::Pool,
+    user_id: UserId,
+) -> Result<Vec<ChatDb>, InfraError> {
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
         .interact(move |conn| {
             let query = chats::table.into_boxed::<diesel::pg::Pg>();
             query
                 .select(ChatDb::as_select())
+                .filter(owner.eq(user_id.0))
                 .order_by(chats::created_at.desc())
                 .load::<ChatDb>(conn)
         })
@@ -69,6 +73,7 @@ pub async fn get_all(pool: &deadpool_diesel::postgres::Pool) -> Result<Vec<ChatD
 pub async fn get_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: ChatId,
+    user_id: UserId,
 ) -> Result<Option<ChatDb>, InfraError> {
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
@@ -76,6 +81,7 @@ pub async fn get_by_id(
             chats::table
                 .find(id.0)
                 .select(ChatDb::as_select())
+                .filter(owner.eq(user_id.0))
                 .get_result::<ChatDb>(conn)
                 .optional()
         })

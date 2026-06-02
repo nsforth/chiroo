@@ -1,7 +1,7 @@
 import { defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { $fetch } from 'ofetch'
+import { apiFetch } from '../api'
 import { useChats } from './useChats'
 import { useCsrf } from './useCsrf'
 
@@ -33,7 +33,7 @@ export function useChatActions() {
     if (!result || result === currentTitle) return null
 
     try {
-      await $fetch(`/api/chats/title/${id}`, {
+      await apiFetch(`/api/chats/title/${id}`, {
         method: 'PATCH',
         headers: { [headerName]: csrf() },
         body: { title: result }
@@ -60,7 +60,7 @@ export function useChatActions() {
     if (!result) return false
 
     try {
-      await $fetch(`/api/chats/${id}`, {
+      await apiFetch(`/api/chats/${id}`, {
         method: 'DELETE',
         headers: { [headerName]: csrf() }
       })

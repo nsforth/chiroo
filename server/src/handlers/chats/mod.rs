@@ -1,6 +1,3 @@
-use serde::Deserialize;
-use serde::Serialize;
-
 mod chats;
 mod messages;
 mod stream;
