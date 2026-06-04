@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use dotenvy::dotenv;
 use secrecy::{SecretBox, SecretString};
@@ -31,9 +31,9 @@ pub struct OidcConfig {
     app_base_url: String,
     secure_cookie: bool,
     state_secret: SecretString,
-    cleanup_interval_secs: u64,
+    cleanup_interval_secs: Duration,
     session_ttl_multiplier: u32,
-    default_access_token_expires_secs: u64,
+    default_access_token_expires_secs: Duration,
 }
 
 impl OidcConfig {
@@ -65,7 +65,7 @@ impl OidcConfig {
         &self.state_secret
     }
 
-    pub fn cleanup_interval_secs(&self) -> u64 {
+    pub fn cleanup_interval_secs(&self) -> Duration {
         self.cleanup_interval_secs
     }
 
@@ -73,7 +73,7 @@ impl OidcConfig {
         self.session_ttl_multiplier
     }
 
-    pub fn default_access_token_expires_secs(&self) -> u64 {
+    pub fn default_access_token_expires_secs(&self) -> Duration {
         self.default_access_token_expires_secs
     }
 }
@@ -170,15 +170,17 @@ async fn init_config() -> Config {
         cleanup_interval_secs: env::var("SESSION_CLEANUP_INTERVAL_SECS")
             .unwrap_or_else(|_| "600".into())
             .parse()
-            .unwrap_or(600),
+            .map(|d| Duration::from_secs(d))
+            .expect("Session cleanup interval must be positive integer in seconds"),
         session_ttl_multiplier: env::var("SESSION_TTL_MULTIPLIER")
             .unwrap_or_else(|_| "10".into())
             .parse()
-            .unwrap_or(10),
+            .expect("Session ttl multiplier must be positive integer"),
         default_access_token_expires_secs: env::var("OIDC_ACCESS_TOKEN_EXPIRES_SECS")
             .unwrap_or_else(|_| "300".into())
             .parse()
-            .unwrap_or(300),
+            .map(|d| Duration::from_secs(d))
+            .expect("oidc access token expires defult time must be positive integer in seconds"),
     };
 
     Config {

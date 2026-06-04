@@ -5,11 +5,12 @@ use diesel::{
     ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl, Selectable,
     SelectableHelper,
 };
+use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::models::session::Session;
 use crate::domain::models::session::SessionId;
+use crate::domain::models::session::{ProviderSessionId, Session};
 use crate::domain::models::user::UserId;
 use crate::infra::db::schema::sessions;
 use crate::infra::errors::InfraError;
@@ -41,13 +42,13 @@ pub async fn upsert(
     pool: &deadpool_diesel::postgres::Pool,
     provider_sid: &str,
     user_id: Uuid,
-    access_token: &str,
-    refresh_token: &str,
+    access_token: &SecretBox<str>,
+    refresh_token: &SecretBox<str>,
     expires_at: NaiveDateTime,
 ) -> Result<SessionDb, InfraError> {
     let sid_owned = provider_sid.to_string();
-    let at_owned = access_token.to_string();
-    let rt_owned = refresh_token.to_string();
+    let at_owned = access_token.expose_secret().to_string(); // TODO Encryption
+    let rt_owned = refresh_token.expose_secret().to_string();
 
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
@@ -80,9 +81,9 @@ pub async fn upsert(
 
 pub async fn find_by_provider_sid(
     pool: &deadpool_diesel::postgres::Pool,
-    provider_sid: &str,
+    provider_sid: &ProviderSessionId,
 ) -> Result<Option<Session>, InfraError> {
-    let sid_owned = provider_sid.to_string();
+    let sid_owned = provider_sid.0.clone();
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
         .interact(move |conn| {
@@ -118,9 +119,9 @@ impl From<SessionDb> for Session {
         Session {
             id: SessionId(db.id),
             user_id: UserId(db.user_id),
-            provider_sid: db.provider_sid,
-            access_token: db.access_token,
-            refresh_token: db.refresh_token,
+            provider_sid: ProviderSessionId(db.provider_sid),
+            access_token: SecretBox::from(db.access_token),
+            refresh_token: SecretBox::from(db.refresh_token),
             created_at: db.created_at,
             expires_at: db.expires_at,
         }

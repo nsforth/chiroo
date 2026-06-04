@@ -6,6 +6,7 @@ use axum::{
     Json,
 };
 use cookie::Cookie;
+use secrecy::{ExposeSecret, SecretBox};
 use serde_json::json;
 
 use crate::domain::models::user::{User, UserId};
@@ -46,16 +47,16 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthUser {
     }
 }
 
-fn extract_access_token(headers: &HeaderMap) -> Option<String> {
+fn extract_access_token(headers: &HeaderMap) -> Option<SecretBox<str>> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     Cookie::parse(cookie_header)
         .ok()
         .filter(|c| c.name() == "access_token")
-        .map(|c| c.value_trimmed().to_string())
+        .map(|c| SecretBox::from(c.value_trimmed()))
 }
 
-fn build_set_cookie(token: &str, secure: bool) -> String {
-    Cookie::build(("access_token", token.to_string()))
+fn build_set_cookie(token: &SecretBox<str>, secure: bool) -> String {
+    Cookie::build(("access_token", token.expose_secret().to_string()))
         .http_only(true)
         .path("/")
         .secure(secure)
@@ -86,10 +87,9 @@ pub async fn auth_middleware(
 
     let (new_request, new_cookie) = match state.auth_service.verify_or_refresh(&token).await {
         AuthResult::Valid { claims, user } => {
-            request.extensions_mut().insert(AuthUser::from_sid_and_user(
-                claims.sid,
-                user,
-            ));
+            request
+                .extensions_mut()
+                .insert(AuthUser::from_sid_and_user(claims.sid, user));
             (request, None)
         },
         AuthResult::Refreshed {
@@ -97,10 +97,12 @@ pub async fn auth_middleware(
             user,
             provider_sid,
         } => {
+            tracing::info!("Refreshing token for user: {}", user.id);
             request
                 .extensions_mut()
                 .insert(AuthUser::from_sid_and_user(provider_sid, user));
-            let cookie = build_set_cookie(&access_token, state.config.oidc_config().secure_cookie());
+            let cookie =
+                build_set_cookie(&access_token, state.config.oidc_config().secure_cookie());
             (request, Some(cookie))
         },
         AuthResult::Expired => {

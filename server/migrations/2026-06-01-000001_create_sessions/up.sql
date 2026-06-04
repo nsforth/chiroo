@@ -7,5 +7,3 @@ CREATE TABLE sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL
 );
-
-CREATE INDEX sessions_access_token_idx ON sessions (access_token);

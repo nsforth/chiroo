@@ -18,7 +18,7 @@ mod state;
 mod utils;
 
 use crate::config::{config, Config};
-use crate::errors::{internal_error, AppError};
+use crate::errors::AppError;
 use crate::routes::app_router;
 use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
@@ -74,11 +74,14 @@ fn init_tracing() {
 }
 
 async fn run_migrations(pool: &Pool) -> Result<(), AppError> {
-    let conn = pool.get().await.map_err(internal_error)?;
+    let conn = pool
+        .get()
+        .await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     conn.interact(|conn_inner| conn_inner.run_pending_migrations(MIGRATIONS).map(|_| ()))
         .await
-        .map_err(internal_error)?
-        .map_err(internal_error)?;
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     Ok(())
 }
 

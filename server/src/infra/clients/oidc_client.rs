@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use chrono::NaiveDateTime;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use openidconnect::core::{
@@ -5,7 +8,7 @@ use openidconnect::core::{
 };
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce, OAuth2TokenResponse,
-    RedirectUrl, RefreshToken, Scope, TokenResponse,
+    RedirectUrl, RefreshToken, Scope, StandardErrorResponse, TokenResponse,
 };
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
@@ -54,6 +57,7 @@ fn decode_state_token(state: &str, secret: &SecretBox<str>) -> Result<StateToken
     Ok(token_data.claims)
 }
 
+// TODO Update not only keys but json webtoken metadata too
 #[cached::cached(
     ttl = 3600,
     result = true,
@@ -77,35 +81,34 @@ pub struct AuthUrlResult {
     pub url: Url,
 }
 
+#[derive(Debug)]
 pub struct TokenExchangeResult {
-    pub access_token: String,
-    pub refresh_token: String,
+    pub access_token: SecretBox<str>,
+    pub refresh_token: SecretBox<str>,
     pub id_claims: Option<IdTokenClaims>,
-    pub expires_at: chrono::NaiveDateTime,
+    pub session_expires_at: chrono::NaiveDateTime,
     pub redirect_url: String,
 }
 
 impl TokenExchangeResult {
     fn new(
-        access_token: String,
-        refresh_token: String,
+        access_token: SecretBox<str>,
+        refresh_token: SecretBox<str>,
         id_claims: Option<IdTokenClaims>,
-        expires_in: Option<u64>,
-        default_expires_in: u64,
-        multiplier: u32,
+        session_expires_at: chrono::NaiveDateTime,
         redirect_url: String,
     ) -> Self {
-        let secs = expires_in.unwrap_or(default_expires_in) as i64 * multiplier as i64;
         Self {
             access_token,
             refresh_token,
             id_claims,
-            expires_at: chrono::Utc::now().naive_utc() + chrono::Duration::seconds(secs),
+            session_expires_at,
             redirect_url,
         }
     }
 }
 
+#[derive(Debug)]
 pub struct IdTokenClaims {
     pub sub: String,
     pub sid: String,
@@ -115,17 +118,39 @@ pub struct IdTokenClaims {
     pub picture: Option<String>,
 }
 
+impl IdTokenClaims {
+    fn new(sub: String, sid: String, claims: &CoreIdTokenClaims) -> Self {
+        IdTokenClaims {
+            sub,
+            sid,
+            name: claims
+                .name()
+                .and_then(|n| n.get(None).map(|v| v.to_string())),
+            email: claims.email().map(|e| e.to_string()),
+            preferred_username: claims.preferred_username().map(|u| u.to_string()),
+            picture: claims
+                .picture()
+                .and_then(|p| p.get(None).map(|v| v.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
     pub sub: String,
     pub sid: String,
 }
 
+#[derive(Deserialize, Debug)]
+struct RefreshTokenClaims {
+    exp: Option<i64>,
+}
+
 #[derive(Debug)]
-pub enum TokenStatus {
-    Valid(AccessTokenClaims),
-    Expired(AccessTokenClaims),
-    Invalid,
+pub enum TokenStatus<T> {
+    Valid(T),
+    Expired(T),
+    Invalid(String),
 }
 
 #[derive(Clone)]
@@ -139,7 +164,7 @@ pub struct OidcClient {
     jwks_uri: String,
     state_secret: SecretBox<str>,
     session_ttl_multiplier: u32,
-    default_expires_in: u64,
+    default_expires_in: Duration,
 }
 
 impl OidcClient {
@@ -187,8 +212,8 @@ impl OidcClient {
         let (auth_url, _, _) = client
             .authorize_url(
                 CoreAuthenticationFlow::AuthorizationCode,
-                move || csrf_token.clone(),
-                move || nonce_value.clone(),
+                || csrf_token,
+                || nonce_value,
             )
             .add_scope(Scope::new("openid".to_string()))
             .url();
@@ -202,6 +227,10 @@ impl OidcClient {
         state: &str,
     ) -> Result<TokenExchangeResult, AppError> {
         let state_payload = decode_state_token(state, &self.state_secret)?;
+
+        let jwks = fetch_jwk_set(self.jwks_uri.clone())
+            .await
+            .map_err(|_| AppError::OidcError("Failed to fetch JWKS".into()))?;
 
         let client = CoreClient::from_provider_metadata(
             self.metadata.clone(),
@@ -228,38 +257,32 @@ impl OidcClient {
             .map_err(|e| AppError::OidcError(format!("ID token verification: {e:?}")))?;
 
         let sub = claims.subject().to_string();
-        let access_token = token_response.access_token().secret().to_string();
-        let sid = match self.verify_access_token(&access_token).await {
+
+        let access_token = From::from(token_response.access_token().secret().as_str());
+        let sid = match verify_token::<AccessTokenClaims>(&access_token, &jwks, &self.issuer_url) {
             TokenStatus::Valid(claims) => claims.sid,
             _ => return Err(AppError::OidcError("Failed to verify access token".into())),
         };
 
-        let id_claims = IdTokenClaims {
-            sub,
-            sid,
-            name: claims
-                .name()
-                .and_then(|n| n.get(None).map(|v| v.to_string())),
-            email: claims.email().map(|e| e.to_string()),
-            preferred_username: claims.preferred_username().map(|u| u.to_string()),
-            picture: claims
-                .picture()
-                .and_then(|p| p.get(None).map(|v| v.to_string())),
-        };
+        let id_claims = IdTokenClaims::new(sub, sid, claims);
 
-        let expires_in = token_response.expires_in().map(|d| d.as_secs());
-
-        Ok(TokenExchangeResult::new(
-            token_response.access_token().secret().to_string(),
+        let refresh_token = From::from(
             token_response
                 .refresh_token()
                 .ok_or_else(|| AppError::OidcError("No refresh token".into()))?
                 .secret()
-                .to_string(),
+                .as_str(),
+        );
+        let session_expires_at = get_expired_at_from_refresh_token(
+            &refresh_token,
+            self.default_expires_in * self.session_ttl_multiplier,
+        )?;
+
+        Ok(TokenExchangeResult::new(
+            SecretBox::from(access_token),
+            SecretBox::from(refresh_token),
             Some(id_claims),
-            expires_in,
-            self.default_expires_in,
-            self.session_ttl_multiplier,
+            session_expires_at,
             state_payload.redirect,
         ))
     }
@@ -267,8 +290,12 @@ impl OidcClient {
     // TODO: retries for refresh_token on transient errors
     pub async fn refresh_token(
         &self,
-        refresh_token: &str,
+        refresh_token: &SecretBox<str>,
     ) -> Result<TokenExchangeResult, AppError> {
+        let jwks = fetch_jwk_set(self.jwks_uri.clone())
+            .await
+            .map_err(|_| AppError::OidcError("Failed to fetch JWKS".into()))?;
+
         let client = CoreClient::from_provider_metadata(
             self.metadata.clone(),
             self.client_id.clone(),
@@ -277,56 +304,99 @@ impl OidcClient {
         .set_redirect_uri(self.redirect_uri.clone());
 
         let token_response: CoreTokenResponse = client
-            .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
+            .exchange_refresh_token(&RefreshToken::new(
+                refresh_token.expose_secret().to_string(),
+            ))
             .map_err(|e| AppError::OidcError(format!("Token refresh setup: {e:?}")))?
             .request_async(&self.http_client)
             .await
             .map_err(|e| AppError::OidcError(format!("Token refresh: {e:?}")))?;
 
-        let expires_in = token_response.expires_in().map(|d| d.as_secs());
+        let access_token = From::from(token_response.access_token().secret().as_str());
+        match verify_token::<AccessTokenClaims>(&access_token, &jwks, &self.issuer_url) {
+            TokenStatus::Valid(_) => {},
+            _ => {
+                return Err(AppError::OidcError(
+                    "Failed to verify new access token".into(),
+                ))
+            },
+        };
 
-        Ok(TokenExchangeResult::new(
-            token_response.access_token().secret().to_string(),
+        let new_refresh_token = From::from(
             token_response
                 .refresh_token()
-                .map(|r| r.secret().to_string())
-                .unwrap_or_else(|| refresh_token.to_string()),
+                .ok_or_else(|| AppError::OidcError("No refresh token".into()))?
+                .secret()
+                .as_str(),
+        );
+
+        let session_expires_at = get_expired_at_from_refresh_token(
+            &new_refresh_token,
+            self.default_expires_in * self.session_ttl_multiplier,
+        )?;
+
+        Ok(TokenExchangeResult::new(
+            SecretBox::from(access_token),
+            new_refresh_token,
             None,
-            expires_in,
-            self.default_expires_in,
-            self.session_ttl_multiplier,
+            session_expires_at,
             String::new(),
         ))
     }
 
-    pub async fn verify_access_token(&self, token: &str) -> TokenStatus {
+    pub async fn verify_access_token(
+        &self,
+        token: &SecretBox<str>,
+    ) -> TokenStatus<AccessTokenClaims> {
         let jwks = match fetch_jwk_set(self.jwks_uri.clone()).await {
             Ok(keys) => keys,
-            Err(_) => return TokenStatus::Invalid,
+            Err(e) => return TokenStatus::Invalid(e.to_string()),
         };
         verify_token(token, &jwks, &self.issuer_url)
     }
 }
 
-fn verify_token(token: &str, jwks: &JwkSet, issuer_url: &str) -> TokenStatus {
-    let header = match jsonwebtoken::decode_header(token) {
+fn get_expired_at_from_refresh_token(
+    token: &SecretBox<str>,
+    fallback_expiry: Duration,
+) -> Result<NaiveDateTime, AppError> {
+    match jsonwebtoken::dangerous::insecure_decode::<RefreshTokenClaims>(token.expose_secret()) {
+        Ok(token_data) => Ok(token_data
+            .claims
+            .exp
+            .and_then(|exp| chrono::DateTime::from_timestamp(exp, 0))
+            .unwrap_or_else(|| chrono::Utc::now() + fallback_expiry)
+            .naive_utc()),
+        Err(e) => Err(AppError::OidcError(format!(
+            "Refresh token parsing error: {}",
+            e
+        ))),
+    }
+}
+
+fn verify_token<T: serde::de::DeserializeOwned>(
+    token: &SecretBox<str>,
+    jwks: &JwkSet,
+    issuer_url: &str,
+) -> TokenStatus<T> {
+    let header = match jsonwebtoken::decode_header(token.expose_secret()) {
         Ok(h) => h,
-        Err(_) => return TokenStatus::Invalid,
+        Err(e) => return TokenStatus::Invalid(e.to_string()),
     };
 
     let kid = match header.kid {
         Some(ref k) => k,
-        None => return TokenStatus::Invalid,
+        None => return TokenStatus::Invalid(String::from("No key id in jwt header")),
     };
 
     let jwk = match jwks.find(kid) {
         Some(j) => j,
-        None => return TokenStatus::Invalid,
+        None => return TokenStatus::Invalid(format!("Not found jwk key {} in key set", kid)),
     };
 
     let decoding_key = match DecodingKey::try_from(jwk) {
         Ok(k) => k,
-        Err(_) => return TokenStatus::Invalid,
+        Err(e) => return TokenStatus::Invalid(e.to_string()),
     };
 
     let mut validation = Validation::new(header.alg);
@@ -335,18 +405,21 @@ fn verify_token(token: &str, jwks: &JwkSet, issuer_url: &str) -> TokenStatus {
     validation.validate_aud = false;
     validation.required_spec_claims.clear();
 
-    match jsonwebtoken::decode::<AccessTokenClaims>(token, &decoding_key, &validation) {
+    let result = match jsonwebtoken::decode::<T>(token.expose_secret(), &decoding_key, &validation)
+    {
         Ok(data) => TokenStatus::Valid(data.claims),
         Err(e) => match e.kind() {
             jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-                match jsonwebtoken::dangerous::insecure_decode::<AccessTokenClaims>(token) {
+                match jsonwebtoken::dangerous::insecure_decode::<T>(token.expose_secret()) {
                     Ok(data) => TokenStatus::Expired(data.claims),
-                    Err(_) => TokenStatus::Invalid,
+                    Err(e) => TokenStatus::Invalid(e.to_string()),
                 }
-            }
-            _ => TokenStatus::Invalid,
+            },
+            _ => TokenStatus::Invalid(e.to_string()),
         },
-    }
+    };
+
+    result
 }
 
 #[cfg(test)]
@@ -379,15 +452,23 @@ mod tests {
         let jwks: JwkSet = serde_json::from_str(KEYCLOAK_JWKS).unwrap();
         let issuer = "http://localhost:8080/realms/myrealm";
 
-        let status = verify_token(VALID_ACCESS_TOKEN, &jwks, issuer);
+        let status =
+            verify_token::<AccessTokenClaims>(&SecretBox::from(VALID_ACCESS_TOKEN), &jwks, issuer);
         assert!(
             matches!(status, TokenStatus::Valid(_) | TokenStatus::Expired(_)),
             "Expected Valid or Expired, got {status:?}"
         );
 
-        let wrong_issuer = verify_token(VALID_ACCESS_TOKEN, &jwks, "http://wrong.issuer");
+        let wrong_issuer = verify_token::<AccessTokenClaims>(
+            &SecretBox::from(VALID_ACCESS_TOKEN),
+            &jwks,
+            "http://wrong.issuer",
+        );
         assert!(
-            matches!(wrong_issuer, TokenStatus::Invalid | TokenStatus::Expired(_)),
+            matches!(
+                wrong_issuer,
+                TokenStatus::Invalid(_) | TokenStatus::Expired(_)
+            ),
             "Expected Invalid or Expired for wrong issuer, got {wrong_issuer:?}"
         );
 

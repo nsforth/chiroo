@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -8,15 +10,24 @@ use crate::infra::errors::InfraError;
 #[derive(Debug)]
 pub enum AppError {
     InternalServerError,
+    DatabaseError(String),
     NotFound(String),
     BodyParsingError(String),
     Unauthorized,
     OidcError(String),
 }
 
-pub fn internal_error<E: std::fmt::Display>(err: E) -> AppError {
-    tracing::error!("Internal error: {}", err);
-    AppError::InternalServerError
+impl Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::InternalServerError => write!(f, "Internal server error"),
+            AppError::DatabaseError(e) => write!(f, "Database error: {}", e),
+            AppError::NotFound(e) => write!(f, "Not found: {}", e),
+            AppError::BodyParsingError(e) => write!(f, "Body parsing error: {}", e),
+            AppError::Unauthorized => write!(f, "Unathorized"),
+            AppError::OidcError(e) => write!(f, "OIDC Error: {}", e),
+        }
+    }
 }
 
 impl IntoResponse for AppError {
@@ -26,6 +37,7 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 String::from("Internal Server Error"),
             ),
+            Self::DatabaseError(e) => (StatusCode::INTERNAL_SERVER_ERROR, String::from(e)),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::BodyParsingError(message) => (
                 StatusCode::BAD_REQUEST,

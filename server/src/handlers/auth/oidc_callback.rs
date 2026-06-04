@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use cookie::Cookie;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::AppState;
@@ -24,7 +25,7 @@ pub async fn oidc_callback(
         .await
     {
         Ok((redirect_url, access_token)) => {
-            let cookie = Cookie::build(("access_token", access_token))
+            let cookie = Cookie::build(("access_token", access_token.expose_secret()))
                 .http_only(true)
                 .path("/")
                 .secure(state.config.oidc_config().secure_cookie())
