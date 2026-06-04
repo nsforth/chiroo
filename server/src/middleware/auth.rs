@@ -11,6 +11,7 @@ use serde_json::json;
 
 use crate::domain::models::auth_user::AuthUser;
 use crate::services::auth_service::AuthResult;
+use crate::utils::extract_cookie;
 use crate::AppState;
 
 impl<S: Send + Sync> FromRequestParts<S> for AuthUser {
@@ -24,14 +25,6 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthUser {
             )
         })
     }
-}
-
-fn extract_access_token(headers: &HeaderMap) -> Option<SecretBox<str>> {
-    let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
-    Cookie::parse(cookie_header)
-        .ok()
-        .filter(|c| c.name() == "access_token")
-        .map(|c| SecretBox::from(c.value_trimmed()))
 }
 
 fn build_set_cookie(token: &SecretBox<str>, secure: bool) -> String {
@@ -56,7 +49,9 @@ pub async fn auth_middleware(
     mut request: axum::extract::Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let token = match extract_access_token(request.headers()) {
+    let token = match extract_cookie(request.headers(), "access_token")
+        .map(|t| SecretBox::from(t.into_boxed_str()))
+    {
         Some(t) => t,
         None => {
             tracing::debug!("Request without access token to protected route");

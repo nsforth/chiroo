@@ -1,13 +1,10 @@
-use std::collections::HashSet;
-
 use axum::{
     extract::State,
-    http::{header, HeaderMap, Method, StatusCode},
+    http::{Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
-use cookie::Cookie;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -15,6 +12,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
+use crate::utils::extract_cookie;
 use crate::AppState;
 
 const CSRF_COOKIE_NAME: &str = "csrf-token";
@@ -53,14 +51,6 @@ fn verify_csrf_token(token: &str, secret: &str) -> Result<CsrfClaims, jsonwebtok
     .map(|data| data.claims)
 }
 
-fn extract_csrf_cookie(headers: &HeaderMap) -> Option<String> {
-    let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
-    Cookie::parse(cookie_header)
-        .ok()
-        .filter(|c| c.name() == CSRF_COOKIE_NAME)
-        .map(|c| c.value().to_string())
-}
-
 fn is_mutating(method: &Method) -> bool {
     matches!(
         *method,
@@ -77,7 +67,7 @@ pub async fn csrf_middleware(
         return Ok(next.run(request).await);
     }
 
-    let cookie_token = extract_csrf_cookie(request.headers());
+    let cookie_token = extract_cookie(request.headers(), CSRF_COOKIE_NAME);
     let header_token = request
         .headers()
         .get(CSRF_HEADER_NAME)
@@ -105,7 +95,7 @@ pub async fn csrf_middleware(
     };
 
     let auth_user = request.extensions().get::<AuthUser>();
-    tracing::info!("CSFR: chech AuthUser {:?}", auth_user);
+
     match auth_user {
         Some(user) if user.session_id == claims.sid => Ok(next.run(request).await),
         _ => return Ok(unauthorized_response()),
