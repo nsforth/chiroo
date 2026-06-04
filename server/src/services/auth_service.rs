@@ -77,14 +77,16 @@ impl AuthService {
                 Ok(user) => AuthResult::Valid { claims, user },
                 Err(_) => AuthResult::Invalid,
             },
-            TokenStatus::Expired => match self.refresh_session(cookie_token).await {
-                Ok((new_token, user, sid)) => AuthResult::Refreshed {
-                    access_token: new_token,
-                    user,
-                    provider_sid: sid,
-                },
-                Err(_) => AuthResult::Expired,
-            },
+            TokenStatus::Expired(claims) => {
+                match self.refresh_session(&claims.sid).await {
+                    Ok((new_token, user, sid)) => AuthResult::Refreshed {
+                        access_token: new_token,
+                        user,
+                        provider_sid: sid,
+                    },
+                    Err(_) => AuthResult::Expired,
+                }
+            }
             TokenStatus::Invalid => AuthResult::Invalid,
         }
     }
@@ -137,13 +139,13 @@ impl AuthService {
 
     async fn refresh_session(
         &self,
-        cookie_access_token: &str,
+        sid: &str,
     ) -> Result<(String, User, String), AppError> {
-        let session = session_repository::find_by_access_token(&self.pool, cookie_access_token)
+        let session = session_repository::find_by_provider_sid(&self.pool, sid)
             .await?
             .ok_or_else(|| AppError::Unauthorized)?;
 
-        let user: User = user_repository::find_by_id(&self.pool, session.user_id)
+        let user: User = user_repository::find_by_id(&self.pool, session.user_id.0)
             .await?
             .map(Into::into)
             .ok_or_else(|| AppError::Unauthorized)?;
@@ -152,8 +154,8 @@ impl AuthService {
         let result = client.refresh_token(&session.refresh_token).await?;
 
         let sid = match self.verify_access_token(&result.access_token).await {
-            TokenStatus::Valid(claims) => claims.sid.unwrap_or(session.provider_sid),
-            _ => session.provider_sid,
+            TokenStatus::Valid(claims) => claims.sid,
+            _ => return Err(AppError::Unauthorized),
         };
 
         session_repository::upsert(

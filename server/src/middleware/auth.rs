@@ -87,7 +87,7 @@ pub async fn auth_middleware(
     let (new_request, new_cookie) = match state.auth_service.verify_or_refresh(&token).await {
         AuthResult::Valid { claims, user } => {
             request.extensions_mut().insert(AuthUser::from_sid_and_user(
-                claims.sid.unwrap_or_default(),
+                claims.sid,
                 user,
             ));
             (request, None)

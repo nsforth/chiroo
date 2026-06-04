@@ -118,14 +118,13 @@ pub struct IdTokenClaims {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
     pub sub: String,
-    #[serde(default)]
-    pub sid: Option<String>,
+    pub sid: String,
 }
 
 #[derive(Debug)]
 pub enum TokenStatus {
     Valid(AccessTokenClaims),
-    Expired,
+    Expired(AccessTokenClaims),
     Invalid,
 }
 
@@ -231,8 +230,8 @@ impl OidcClient {
         let sub = claims.subject().to_string();
         let access_token = token_response.access_token().secret().to_string();
         let sid = match self.verify_access_token(&access_token).await {
-            TokenStatus::Valid(claims) => claims.sid.unwrap_or_default(),
-            _ => String::new(),
+            TokenStatus::Valid(claims) => claims.sid,
+            _ => return Err(AppError::OidcError("Failed to verify access token".into())),
         };
 
         let id_claims = IdTokenClaims {
@@ -339,7 +338,12 @@ fn verify_token(token: &str, jwks: &JwkSet, issuer_url: &str) -> TokenStatus {
     match jsonwebtoken::decode::<AccessTokenClaims>(token, &decoding_key, &validation) {
         Ok(data) => TokenStatus::Valid(data.claims),
         Err(e) => match e.kind() {
-            jsonwebtoken::errors::ErrorKind::ExpiredSignature => TokenStatus::Expired,
+            jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                match jsonwebtoken::dangerous::insecure_decode::<AccessTokenClaims>(token) {
+                    Ok(data) => TokenStatus::Expired(data.claims),
+                    Err(_) => TokenStatus::Invalid,
+                }
+            }
             _ => TokenStatus::Invalid,
         },
     }
@@ -377,13 +381,13 @@ mod tests {
 
         let status = verify_token(VALID_ACCESS_TOKEN, &jwks, issuer);
         assert!(
-            matches!(status, TokenStatus::Valid(_) | TokenStatus::Expired),
+            matches!(status, TokenStatus::Valid(_) | TokenStatus::Expired(_)),
             "Expected Valid or Expired, got {status:?}"
         );
 
         let wrong_issuer = verify_token(VALID_ACCESS_TOKEN, &jwks, "http://wrong.issuer");
         assert!(
-            matches!(wrong_issuer, TokenStatus::Invalid | TokenStatus::Expired),
+            matches!(wrong_issuer, TokenStatus::Invalid | TokenStatus::Expired(_)),
             "Expected Invalid or Expired for wrong issuer, got {wrong_issuer:?}"
         );
 

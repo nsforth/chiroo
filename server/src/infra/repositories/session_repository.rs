@@ -99,27 +99,6 @@ pub async fn find_by_provider_sid(
     Ok(res.map(From::from))
 }
 
-pub async fn find_by_access_token(
-    pool: &deadpool_diesel::postgres::Pool,
-    access_token: &str,
-) -> Result<Option<SessionDb>, InfraError> {
-    let at_owned = access_token.to_string();
-    let conn = pool.get().await.map_err(InfraError::from)?;
-    let res = conn
-        .interact(move |conn| {
-            sessions::table
-                .filter(sessions::access_token.eq(at_owned))
-                .select(SessionDb::as_select())
-                .get_result::<SessionDb>(conn)
-                .optional()
-        })
-        .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
-
-    Ok(res)
-}
-
 pub async fn delete_expired(pool: &deadpool_diesel::postgres::Pool) -> Result<usize, InfraError> {
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn
