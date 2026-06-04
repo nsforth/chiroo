@@ -1,6 +1,6 @@
 use axum::{
     extract::{FromRequestParts, State},
-    http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode},
+    http::{header, request::Parts, HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -30,7 +30,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthUser {
 fn build_set_cookie(token: &SecretBox<str>, secure: bool) -> String {
     Cookie::build(("access_token", token.expose_secret().to_string()))
         .http_only(true)
-        .path("/")
+        .path("/api")
         .secure(secure)
         .same_site(cookie::SameSite::Lax)
         .to_string()

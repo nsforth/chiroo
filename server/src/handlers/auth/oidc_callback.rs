@@ -29,7 +29,7 @@ pub async fn oidc_callback(
             let secure = state.config.oidc_config().secure_cookie();
             let access_cookie = Cookie::build(("access_token", access_token.expose_secret()))
                 .http_only(true)
-                .path("/")
+                .path("/api")
                 .secure(secure)
                 .same_site(cookie::SameSite::Lax)
                 .to_string();
