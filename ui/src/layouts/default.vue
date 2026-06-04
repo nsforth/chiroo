@@ -188,7 +188,8 @@ defineShortcuts({
 
     <UDashboardSearch
       v-model:open="searchOpen"
-      :placeholder="t('chat.searchPlaceholder')"
+      :color-mode="false"
+      
       :groups="[{
         id: 'links',
         items: [{
