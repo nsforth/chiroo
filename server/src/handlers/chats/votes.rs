@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::MessageId;
 use crate::domain::models::votes::VoteType;
-use crate::middleware::auth::AuthUser;
+use crate::domain::models::auth_user::AuthUser;
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;

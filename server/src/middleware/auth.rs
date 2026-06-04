@@ -9,30 +9,9 @@ use cookie::Cookie;
 use secrecy::{ExposeSecret, SecretBox};
 use serde_json::json;
 
-use crate::domain::models::user::{User, UserId};
+use crate::domain::models::auth_user::AuthUser;
 use crate::services::auth_service::AuthResult;
 use crate::AppState;
-
-#[derive(Clone, Debug)]
-pub struct AuthUser {
-    pub user_id: UserId,
-    pub provider_sid: String,
-    pub name: Option<String>,
-    pub username: String,
-    pub email: Option<String>,
-}
-
-impl AuthUser {
-    fn from_sid_and_user(sid: String, user: User) -> Self {
-        AuthUser {
-            user_id: user.id,
-            provider_sid: sid,
-            name: user.name,
-            username: user.username.unwrap_or_default(),
-            email: user.email,
-        }
-    }
-}
 
 impl<S: Send + Sync> FromRequestParts<S> for AuthUser {
     type Rejection = (StatusCode, Json<serde_json::Value>);
@@ -86,21 +65,13 @@ pub async fn auth_middleware(
     };
 
     let (new_request, new_cookie) = match state.auth_service.verify_or_refresh(&token).await {
-        AuthResult::Valid { claims, user } => {
-            request
-                .extensions_mut()
-                .insert(AuthUser::from_sid_and_user(claims.sid, user));
+        AuthResult::Valid(auth_user) => {
+            request.extensions_mut().insert(auth_user);
             (request, None)
         },
-        AuthResult::Refreshed {
-            access_token,
-            user,
-            provider_sid,
-        } => {
-            tracing::info!("Refreshing token for user: {}", user.id);
-            request
-                .extensions_mut()
-                .insert(AuthUser::from_sid_and_user(provider_sid, user));
+        AuthResult::Refreshed(auth_user, access_token) => {
+            tracing::info!("Refreshing token for user: {}", auth_user.user_id);
+            request.extensions_mut().insert(auth_user);
             let cookie =
                 build_set_cookie(&access_token, state.config.oidc_config().secure_cookie());
             (request, Some(cookie))

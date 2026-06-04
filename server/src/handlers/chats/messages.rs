@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
-use crate::middleware::auth::AuthUser;
+use crate::domain::models::auth_user::AuthUser;
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;

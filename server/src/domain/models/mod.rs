@@ -1,3 +1,4 @@
+pub mod auth_user;
 pub mod chat;
 pub mod messages;
 pub mod session;

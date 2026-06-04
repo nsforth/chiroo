@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::OnceCell;
 
 use crate::config::OidcConfig;
+use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::session::ProviderSessionId;
 use crate::domain::models::user::{User, UserId};
 use crate::errors::AppError;
@@ -11,15 +12,8 @@ use crate::infra::clients::oidc_client::{AccessTokenClaims, OidcClient, TokenSta
 use crate::infra::repositories::{session_repository, user_repository};
 
 pub enum AuthResult {
-    Valid {
-        claims: AccessTokenClaims,
-        user: User,
-    },
-    Refreshed {
-        access_token: SecretBox<str>,
-        user: User,
-        provider_sid: String,
-    },
+    Valid(AuthUser),
+    Refreshed(AuthUser, SecretBox<str>),
     Expired,
     Invalid,
 }
@@ -64,30 +58,29 @@ impl AuthService {
         Ok(result.url.to_string())
     }
 
-    async fn resolve_user_by_sso_id(&self, sso_id: &str) -> Result<User, AppError> {
-        user_repository::find_by_sso_id(&self.pool, sso_id)
-            .await?
-            .map(Into::into)
-            .ok_or_else(|| AppError::Unauthorized)
-    }
-
     // TODO: Add logging on errors
     // TODO: Better error handling, need to match on variants of AppError in private fn
     pub async fn verify_or_refresh(&self, access_token: &SecretBox<str>) -> AuthResult {
         match self.verify_access_token(access_token).await {
-            TokenStatus::Valid(claims) => match self.resolve_user_by_sso_id(&claims.sub).await {
-                Ok(user) => AuthResult::Valid { claims, user },
-                Err(_) => AuthResult::Invalid,
+            TokenStatus::Valid(claims) => {
+                match session_repository::find_by_provider_sid(
+                    &self.pool,
+                    &ProviderSessionId(claims.sid.clone()),
+                )
+                .await
+                {
+                    Ok(Some(session)) => AuthResult::Valid(AuthUser {
+                        user_id: session.user_id,
+                        session_id: session.id.0.to_string(),
+                    }),
+                    _ => AuthResult::Invalid,
+                }
             },
             TokenStatus::Expired(claims) => match self
                 .refresh_session(ProviderSessionId(claims.sid.clone()), access_token)
                 .await
             {
-                Ok((new_token, user, sid)) => AuthResult::Refreshed {
-                    access_token: new_token,
-                    user,
-                    provider_sid: sid,
-                },
+                Ok((new_token, auth_user)) => AuthResult::Refreshed(auth_user, new_token),
                 Err(e) => {
                     tracing::debug!("User session is expired: {}", e);
                     AuthResult::Expired
@@ -104,7 +97,7 @@ impl AuthService {
         &self,
         code: &str,
         state: &str,
-    ) -> Result<(String, SecretBox<str>), AppError> {
+    ) -> Result<(String, SecretBox<str>, AuthUser), AppError> {
         let client = self.get_client().await?;
         let result = client.exchange_code(code, state).await?;
 
@@ -133,7 +126,7 @@ impl AuthService {
         )
         .await?;
 
-        session_repository::upsert(
+        let session_db = session_repository::upsert(
             &self.pool,
             &sid,
             user.id,
@@ -143,14 +136,19 @@ impl AuthService {
         )
         .await?;
 
-        Ok((result.redirect_url, result.access_token))
+        let auth_user = AuthUser {
+            user_id: UserId(session_db.user_id),
+            session_id: session_db.id.to_string(),
+        };
+
+        Ok((result.redirect_url, result.access_token, auth_user))
     }
 
     async fn refresh_session(
         &self,
         sid: ProviderSessionId,
         access_token: &SecretBox<str>,
-    ) -> Result<(SecretBox<str>, User, String), AppError> {
+    ) -> Result<(SecretBox<str>, AuthUser), AppError> {
         let session = session_repository::find_by_provider_sid(&self.pool, &sid)
             .await?
             .ok_or_else(|| AppError::Unauthorized)?;
@@ -159,30 +157,30 @@ impl AuthService {
             return Err(AppError::Unauthorized);
         }
 
-        let user: User = user_repository::find_by_id(&self.pool, session.user_id.0)
-            .await?
-            .map(Into::into)
-            .ok_or_else(|| AppError::Unauthorized)?;
-
         let client = self.get_client().await?;
         let result = client.refresh_token(&session.refresh_token).await?;
 
-        let sid = match self.verify_access_token(&result.access_token).await {
+        let new_sid = match self.verify_access_token(&result.access_token).await {
             TokenStatus::Valid(claims) => claims.sid,
             _ => return Err(AppError::Unauthorized),
         };
 
         session_repository::upsert(
             &self.pool,
-            &sid,
-            user.id.0,
+            &new_sid,
+            session.user_id.0,
             &result.access_token,
             &result.refresh_token,
             result.session_expires_at,
         )
         .await?;
 
-        Ok((result.access_token, user, sid))
+        let auth_user = AuthUser {
+            user_id: session.user_id,
+            session_id: session.id.0.to_string(),
+        };
+
+        Ok((result.access_token, auth_user))
     }
 
     async fn verify_access_token(&self, token: &SecretBox<str>) -> TokenStatus<AccessTokenClaims> {

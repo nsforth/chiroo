@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::errors::AppError;
-use crate::middleware::auth::AuthUser;
+use crate::domain::models::auth_user::AuthUser;
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
 

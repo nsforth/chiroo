@@ -5,6 +5,7 @@ use crate::handlers::chats::{
 };
 use crate::handlers::session::get_session;
 use crate::middleware::auth::auth_middleware;
+use crate::middleware::csrf::csrf_middleware;
 use crate::AppState;
 use axum::{
     http::StatusCode,
@@ -25,6 +26,10 @@ pub fn app_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/session", get(get_session))
         .nest("/api/chats", chat_router)
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            csrf_middleware,
+        ))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
