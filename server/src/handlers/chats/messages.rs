@@ -4,9 +4,11 @@ use axum::response::{ErrorResponse, IntoResponse};
 use axum::Json;
 use uuid::Uuid;
 
+use crate::domain::models::chat::ChatId;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
-use crate::utils::PathExtractor;
+use crate::middleware::auth::AuthUser;
 use crate::utils::JsonExtractor;
+use crate::utils::PathExtractor;
 use crate::AppState;
 
 /// Response for a list of messages in a chat.
@@ -46,21 +48,36 @@ pub struct DeleteMessagesAfterRequest {
 /// Frontend calls DELETE /api/chats/messages/{chat_id} with body { messageId, type }.
 pub async fn delete_messages_after(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(chat_id): PathExtractor<Uuid>,
     JsonExtractor(body): JsonExtractor<DeleteMessagesAfterRequest>,
 ) -> Result<StatusCode, ErrorResponse> {
-    let message_id = Uuid::parse_str(&body.message_id).map_err(|_| {
-        (axum::http::StatusCode::BAD_REQUEST, "Invalid message ID").into_response()
-    })?;
+    let chat_id = ChatId(chat_id);
+    state
+        .chat_service
+        .check_ownership(chat_id, auth_user.user_id)
+        .await
+        .map_err(IntoResponse::into_response)?;
 
-    match state.message_service.delete_after_message(chat_id, message_id).await {
+    let message_id = Uuid::parse_str(&body.message_id)
+        .map_err(|_| (axum::http::StatusCode::BAD_REQUEST, "Invalid message ID").into_response())?;
+
+    match state
+        .message_service
+        .delete_after_message(chat_id.0, message_id)
+        .await
+    {
         Ok(_) => Ok(StatusCode::NO_CONTENT),
-        Err(_) => Err((StatusCode::NOT_FOUND, "Message not found").into_response().into()),
+        Err(_) => Err((StatusCode::NOT_FOUND, "Message not found")
+            .into_response()
+            .into()),
     }
 }
 
 /// Convert a database MessageDb to the UIMessage format expected by the frontend.
-fn message_db_to_ui_message(msg: crate::infra::repositories::message_repository::MessageDb) -> UIMessage {
+fn message_db_to_ui_message(
+    msg: crate::infra::repositories::message_repository::MessageDb,
+) -> UIMessage {
     let role = match msg.role.as_str() {
         "user" => MessageRole::User,
         "assistant" => MessageRole::Assistant,
@@ -90,8 +107,10 @@ fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
     }
 
     // Fallback: wrap the entire JSON value as a text part
-    vec![UIMessagePart::Text(crate::handlers::chats::ui_messages::TextUIPart {
-        text: serde_json::to_string(parts).unwrap_or_default(),
-        state: Some(crate::handlers::chats::ui_messages::TextState::Done),
-    })]
+    vec![UIMessagePart::Text(
+        crate::handlers::chats::ui_messages::TextUIPart {
+            text: serde_json::to_string(parts).unwrap_or_default(),
+            state: Some(crate::handlers::chats::ui_messages::TextState::Done),
+        },
+    )]
 }

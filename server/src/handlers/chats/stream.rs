@@ -7,6 +7,8 @@ use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
+use crate::errors::AppError;
+use crate::middleware::auth::AuthUser;
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
 
@@ -108,10 +110,13 @@ pub struct SendMessageRequest {
 #[axum::debug_handler]
 pub async fn send_message(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(chat_id): PathExtractor<Uuid>,
     JsonExtractor(body): JsonExtractor<SendMessageRequest>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>> + Send> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, AppError> {
     let chat_id = ChatId(chat_id);
+    state.chat_service.check_ownership(chat_id, auth_user.user_id).await?;
+
     let user_text = extract_last_user_text(&body.messages);
 
     let domain_stream = state.ai_service.stream(chat_id, &user_text);
@@ -125,7 +130,7 @@ pub async fn send_message(
         }))
     });
 
-    Sse::new(sse_stream).keep_alive(KeepAlive::default())
+    Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
 }
 
 // TODO: Replace with UIMessage converter

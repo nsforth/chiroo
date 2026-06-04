@@ -96,6 +96,19 @@ impl ChatService {
         }
     }
 
+    /// Verify that the user owns the chat. Returns `NotFound` if not.
+    pub async fn check_ownership(
+        &self,
+        chat_id: ChatId,
+        user_id: UserId,
+    ) -> Result<(), AppError> {
+        match chat_repository::is_owner(&self.pool, chat_id, user_id).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(AppError::NotFound("Chat not found".into())),
+            Err(_) => Err(AppError::InternalServerError),
+        }
+    }
+
     /// Update chat visibility (public/private).
     pub async fn update_visibility(
         &self,

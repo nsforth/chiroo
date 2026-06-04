@@ -4,6 +4,7 @@ use diesel::{
     BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl,
     Selectable, SelectableHelper,
 };
+use diesel::dsl::exists;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -149,6 +150,25 @@ pub async fn update_visibility(
         .map_err(InfraError::from)?
         .map_err(InfraError::from)?;
 
+    Ok(res)
+}
+
+pub async fn is_owner(
+    pool: &deadpool_diesel::postgres::Pool,
+    chat_id: ChatId,
+    user_id: UserId,
+) -> Result<bool, InfraError> {
+    let conn = pool.get().await.map_err(InfraError::from)?;
+    let res = conn
+        .interact(move |conn| {
+            diesel::select(exists(
+                chats::table.filter(chats::id.eq(chat_id.0).and(chats::owner.eq(user_id.0))),
+            ))
+            .get_result::<bool>(conn)
+        })
+        .await
+        .map_err(InfraError::from)?
+        .map_err(InfraError::from)?;
     Ok(res)
 }
 

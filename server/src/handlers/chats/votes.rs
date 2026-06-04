@@ -1,12 +1,13 @@
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::ErrorResponse;
+use axum::response::{ErrorResponse, IntoResponse};
 use axum::Json;
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::MessageId;
 use crate::domain::models::votes::VoteType;
+use crate::middleware::auth::AuthUser;
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;
@@ -31,8 +32,12 @@ pub struct VoteResponse {
 
 pub async fn get_votes(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(chat_id): PathExtractor<ChatId>,
 ) -> Result<Json<Vec<VoteResponse>>, ErrorResponse> {
+    state.chat_service.check_ownership(chat_id, auth_user.user_id).await
+        .map_err(IntoResponse::into_response)?;
+
     let votes = state.vote_service.get_votes_for_chat(chat_id).await?;
 
     let votes_responses: Vec<VoteResponse> = votes
@@ -53,9 +58,13 @@ pub async fn get_votes(
 
 pub async fn vote(
     State(state): State<AppState>,
+    auth_user: AuthUser,
     PathExtractor(chat_id): PathExtractor<ChatId>,
     JsonExtractor(body): JsonExtractor<VoteRequest>,
 ) -> Result<StatusCode, ErrorResponse> {
+    state.chat_service.check_ownership(chat_id, auth_user.user_id).await
+        .map_err(IntoResponse::into_response)?;
+
     let message_id = MessageId(body.message_id.clone());
 
     if let Some(is_upvoted) = body.is_upvoted {
