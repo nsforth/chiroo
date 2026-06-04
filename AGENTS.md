@@ -18,8 +18,9 @@ handlers/  → HTTP layer, converts domain ↔ requests/responses/DTOs
 services/  → business logic, orchestrates repositories
 infra/     → Diesel schema, repositories (SQL queries)
 domain/    → pure data types (Chat, ChatId, UserId, Vote, MessageId)
+utils/     → shared utilities (extract_cookie, custom Axum extractors)
 ```
-
+`
 `AppState` is the DI container holding all services.
 
 ## Diesel / Database
@@ -128,6 +129,13 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - `chat.regenerate()`: truncates to last user message, POSTs `{ trigger: "regenerate-message" }`
 - `chat.sendMessage({ text })`: appends user text, POSTs `{ trigger: "submit-message" }`
 
+## Language
+
+- All documentation, code comments, commit messages, and communication must be in English.
+- `TODO.md` at the project root is the single source of truth for future work items.
+  If the user asks to add a task for later, add it to `TODO.md`.
+  When a task is completed, check `TODO.md` and remove the corresponding entry if present.
+
 ## Code rules
 
 - Before writing a manual implementation of anything — parsing, conversion, verification,
@@ -149,21 +157,35 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
   No server-side in-memory or DB storage for pending auth states.
 - Sessions stored in `sessions` table: `provider_sid`, `access_token`, `refresh_token`,
   `expires_at`. Cleanup via periodic task (interval configurable, default 10 min).
+- `AuthUser` domain type in `domain/models/auth_user.rs`: `{ user_id: UserId, session_id: String }`.
+  Used as an Axum extractor (impl `FromRequestParts` in `middleware/auth.rs`).
+  Injected into request extensions by `auth_middleware`.
 - `AuthService` holds `OidcClient` in a `tokio::sync::OnceCell` — lazy init, OIDC server
   may be unreachable at startup.
 - `verify_token(token, jwks, issuer)` is a pure function — testable without async/HTTP.
   Uses `jsonwebtoken::jwk::JwkSet::find(kid)` + `DecodingKey::try_from(jwk)`.
   Algorithm taken from token header (`header.alg`), not JWK.
-- Refresh flow: middleware catches `Expired` → `auth_service.refresh_session(&token)`
-  looks up session by `access_token` in DB (no sid extraction), refreshes via OIDC,
-  stores new tokens, sets new cookie.
+- `AuthResult` enum: `Valid(AuthUser)`, `Refreshed(AuthUser, access_token)`, `Expired`, `Invalid`.
+  `AuthService::verify_or_refresh` does a single session lookup by `provider_sid` from the
+  access token JWT — user identity comes from `session.user_id`, not a separate `users` query.
+- Refresh flow: middleware catches `Expired` → `auth_service.refresh_session` looks up
+  the session by `provider_sid` from JWT's `sid` claim, refreshes via OIDC, upserts new
+  tokens, returns new `AuthUser` + new `access_token`. Middleware sets `Set-Cookie` with
+  `path=/api` on the response.
+- CSRF middleware (`middleware/csrf.rs`): on POST/PUT/PATCH/DELETE, validates
+  `x-csrf-token` header matches the `csrf-token` cookie (JWT HS256 with `{jti, sid}`),
+  verifies JWT signature, and checks `sid` in JWT matches `AuthUser.session_id`.
+  Returns 401 on any failure. Cookie set in OIDC callback (non-HttpOnly, path=/).
+- `access_token` cookie: `HttpOnly`, `path=/api`, `SameSite=Lax`, `Secure` if HTTPS.
+- `csrf-token` cookie: non-HttpOnly (JS reads it for header), `path=/`, `SameSite=Lax`.
+- Cookie extraction from multi-cookie headers: shared `extract_cookie(headers, name)` in
+  `utils/cookies.rs`. Iterates over `split(';')` to handle any cookie order.
 - Frontend: `apiFetch` with 401 interceptor → `POST /api/auth/login` → `{loginUrl}` →
   redirect to Keycloak. Dedup via `loginPromise`.
 - Session TTL: computed as `access_token_expires_in × session_ttl_multiplier` (configurable, default 10).
-
-## Known issues / gotchas
-
-- CSRF: frontend sends `x-csrf-token` header, backend does NOT validate it. Do not try to fix this, it's in TODO list.
+- Ownership checks: `chat_service::check_ownership(chat_id, user_id)` → lightweight
+  `SELECT EXISTS(...)` via `chat_repository::is_owner`. Used in `send_message`, `get_votes`,
+  `vote`, `delete_messages_after` handlers.
 
 ## AI service (`services/ai_service.rs`)
 
