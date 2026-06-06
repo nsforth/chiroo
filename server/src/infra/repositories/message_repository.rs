@@ -1,6 +1,9 @@
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use diesel::{BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl, Selectable, SelectableHelper};
+use diesel::{
+    BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl,
+    Selectable, SelectableHelper,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -106,10 +109,13 @@ pub async fn delete_after_message(
     // Delete all messages in the chat created after the target message
     let res = conn
         .interact(move |conn| {
-            diesel::delete(messages::table.filter(
-                messages::chat_id.eq(chat_id)
-                    .and(messages::created_at.gt(target_created_at)),
-            ))
+            diesel::delete(
+                messages::table.filter(
+                    messages::chat_id
+                        .eq(chat_id)
+                        .and(messages::created_at.gt(target_created_at)),
+                ),
+            )
             .execute(conn)
         })
         .await

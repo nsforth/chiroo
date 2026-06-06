@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{info, instrument};
+use uuid::Uuid;
+
 use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCallChunk,
@@ -10,12 +18,6 @@ use async_openai::Client;
 use futures::StreamExt;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use uuid::Uuid;
 
 use crate::config::OpenAiConfig;
 use crate::domain::models::chat::ChatId;
@@ -90,12 +92,12 @@ impl AiService {
         }
     }
 
+    #[instrument(skip(self, user_message))]
     pub fn stream(
         &self,
         chat_id: ChatId,
         user_message: &str,
     ) -> impl futures::Stream<Item = MessageStreamEvent> + Send {
-        tracing::debug!("Start stream for chat id {:?}", chat_id);
         let client = self.client.clone();
         let model = self.model.to_string();
         let user_message = user_message.to_string();
@@ -103,7 +105,7 @@ impl AiService {
 
         tokio::spawn(async move {
             if let Err(e) = run_stream(client, model, user_message, chat_id, tx.clone()).await {
-                tracing::error!("AI stream error: {e:?}");
+                info!(chat_id = ?chat_id, error = e.to_string(), "failed");
                 let _ = tx
                     .send(MessageStreamEvent::Error {
                         error_text: e.to_string(),
@@ -407,6 +409,7 @@ async fn send_or_bail(
     Ok(())
 }
 
+#[instrument(skip(client, model, user_message, tx))]
 async fn run_stream(
     client: Client<OpenAIConfig>,
     model: String,
@@ -463,6 +466,7 @@ async fn run_stream(
                     },
                 )
                 .await?;
+                info!(reason = "stop", "success");
                 return Ok(());
             },
             Ok(StepResult::ToolCalls {
@@ -523,6 +527,7 @@ async fn run_stream(
         }
     }
 
+    info!(reason = "max_steps", "success");
     let _ = tx
         .send(MessageStreamEvent::Error {
             error_text: "Max steps reached".into(),

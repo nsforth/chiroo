@@ -12,6 +12,7 @@ mod errors;
 mod handlers;
 mod infra;
 mod middleware;
+mod operation_result;
 mod routes;
 mod services;
 mod state;

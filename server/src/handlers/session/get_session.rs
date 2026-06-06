@@ -2,8 +2,8 @@ use axum::extract::State;
 use axum::response::ErrorResponse;
 use axum::Json;
 
-use crate::handlers::session::{SessionResponse, UserResponse};
 use crate::domain::models::auth_user::AuthUser;
+use crate::handlers::session::{SessionResponse, UserResponse};
 use crate::AppState;
 
 pub async fn get_session(

@@ -136,6 +136,45 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
   If the user asks to add a task for later, add it to `TODO.md`.
   When a task is completed, check `TODO.md` and remove the corresponding entry if present.
 
+## Service layer logging
+
+All public methods in `server/src/services/*.rs` must have `#[instrument(skip(self))]`:
+
+- Wraps execution in a tracing span with the method name and parameter values.
+  Every `tracing::info!()` call inside automatically includes the span context
+  in the log output.
+- `SecretBox` is safe — its `Debug` impl redacts the value.
+- Skip plain-string secrets explicitly: `#[instrument(skip(self, code, state))]`.
+
+Exit logging (`info!`):
+- `info!("success")` or `info!(key = value, "success")` — result fields not in span params.
+- `info!(error = ..., "failed")` — error message.
+
+Do NOT add `#[instrument]` on private/helper methods — only on public entry points.
+Do NOT manually log entry params — the span covers that.
+
+Example:
+```rust
+use tracing::{info, instrument};
+
+#[instrument(skip(self))]
+pub async fn delete_chat(&self, chat_id: &ChatId, user_id: &UserId) -> Result<(), AppError> {
+    let result = /* ... */;
+    match &result {
+        Ok(()) => info!("success"),
+        Err(e) => info!(error = e.to_string(), "failed"),
+    }
+    result
+}
+```
+
+Structured fields instead of format strings — result data goes as `key = value` in the macro,
+not in the message string. The message is just `"success"` or `"failed"`.
+
+## Formatting
+
+- After making changes to Rust code under `server/` and verifying it compiles (`cargo check`), always run `cargo fmt` in the `server/` directory.
+
 ## Code rules
 
 - Before writing a manual implementation of anything — parsing, conversion, verification,

@@ -1,3 +1,5 @@
+use tracing::{info, instrument};
+
 use crate::domain::models::messages::Message;
 use crate::errors::AppError;
 use crate::infra::repositories::message_repository;
@@ -49,13 +51,20 @@ impl MessageService {
 
     /// Delete all messages created after the given message_id for a specific chat.
     /// Used for truncating history when user edits or regenerates a message.
+    #[instrument(skip(self))]
     pub async fn delete_after_message(
         &self,
         chat_id: uuid::Uuid,
         target_message_id: uuid::Uuid,
     ) -> Result<usize, AppError> {
-        message_repository::delete_after_message(&self.pool, chat_id, target_message_id)
-            .await
-            .map_err(|_| AppError::InternalServerError)
+        let result =
+            message_repository::delete_after_message(&self.pool, chat_id, target_message_id)
+                .await
+                .map_err(|_| AppError::InternalServerError);
+        match &result {
+            Ok(count) => info!(deleted = count, "success"),
+            Err(e) => info!(error = e.to_string(), "failed"),
+        }
+        result
     }
 }

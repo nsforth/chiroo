@@ -5,9 +5,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::Chat;
 use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
-use crate::domain::models::auth_user::AuthUser;
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;

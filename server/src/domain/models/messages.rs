@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 const MAX_TITLE_CHARS: usize = 15;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MessageId(pub Uuid);
 
 impl MessageId {

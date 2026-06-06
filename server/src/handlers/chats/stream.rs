@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use uuid::Uuid;
 
+use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::errors::AppError;
-use crate::domain::models::auth_user::AuthUser;
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
 
@@ -115,7 +115,10 @@ pub async fn send_message(
     JsonExtractor(body): JsonExtractor<SendMessageRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>> + Send>, AppError> {
     let chat_id = ChatId(chat_id);
-    state.chat_service.check_ownership(chat_id, auth_user.user_id).await?;
+    state
+        .chat_service
+        .check_ownership(chat_id, auth_user.user_id)
+        .await?;
 
     let user_text = extract_last_user_text(&body.messages);
 

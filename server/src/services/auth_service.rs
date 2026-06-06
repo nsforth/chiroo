@@ -1,7 +1,9 @@
-use deadpool_diesel::postgres::Pool;
-use secrecy::{ExposeSecret, SecretBox};
 use std::time::Duration;
 use tokio::sync::OnceCell;
+use tracing::{info, instrument};
+
+use deadpool_diesel::postgres::Pool;
+use secrecy::{ExposeSecret, SecretBox};
 
 use crate::config::OidcConfig;
 use crate::domain::models::auth_user::AuthUser;
@@ -10,12 +12,30 @@ use crate::domain::models::user::{User, UserId};
 use crate::errors::AppError;
 use crate::infra::clients::oidc_client::{AccessTokenClaims, OidcClient, TokenStatus};
 use crate::infra::repositories::{session_repository, user_repository};
+use crate::operation_result::OperationResult;
 
 pub enum AuthResult {
     Valid(AuthUser),
     Refreshed(AuthUser, SecretBox<str>),
     Expired,
     Invalid,
+}
+
+impl OperationResult for AuthResult {
+    fn is_success(&self) -> bool {
+        matches!(self, AuthResult::Valid(_) | AuthResult::Refreshed(_, _))
+    }
+}
+
+impl std::fmt::Display for AuthResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthResult::Valid(_) => write!(f, "valid"),
+            AuthResult::Refreshed(_, _) => write!(f, "refreshed"),
+            AuthResult::Expired => write!(f, "expired"),
+            AuthResult::Invalid => write!(f, "invalid"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -40,6 +60,7 @@ impl AuthService {
             .await
     }
 
+    #[instrument(skip(self))]
     pub fn start_background_jobs(self, cleanup_interval_secs: Duration) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(cleanup_interval_secs);
@@ -52,16 +73,18 @@ impl AuthService {
         });
     }
 
+    #[instrument(skip(self))]
     pub async fn build_login_url(&self, redirect: String) -> Result<String, AppError> {
         let client = self.get_client().await?;
         let result = client.build_auth_url(&redirect)?;
-        Ok(result.url.to_string())
+        let url = result.url.to_string();
+        info!("success");
+        Ok(url)
     }
 
-    // TODO: Add logging on errors
-    // TODO: Better error handling, need to match on variants of AppError in private fn
+    #[instrument(skip(self))]
     pub async fn verify_or_refresh(&self, access_token: &SecretBox<str>) -> AuthResult {
-        match self.verify_access_token(access_token).await {
+        let result = match self.verify_access_token(access_token).await {
             TokenStatus::Valid(claims) => {
                 match session_repository::find_by_provider_sid(
                     &self.pool,
@@ -81,18 +104,15 @@ impl AuthService {
                 .await
             {
                 Ok((new_token, auth_user)) => AuthResult::Refreshed(auth_user, new_token),
-                Err(e) => {
-                    tracing::debug!("User session is expired: {}", e);
-                    AuthResult::Expired
-                },
+                Err(_e) => AuthResult::Expired,
             },
-            TokenStatus::Invalid(e) => {
-                tracing::info!("Invalid token: {}", e);
-                AuthResult::Invalid
-            },
-        }
+            TokenStatus::Invalid(e) => AuthResult::Invalid,
+        };
+        info!(auth_result = %result, "{}", result.status());
+        result
     }
 
+    #[instrument(skip(self, code, state))]
     pub async fn handle_callback(
         &self,
         code: &str,
@@ -141,6 +161,7 @@ impl AuthService {
             session_id: session_db.id.to_string(),
         };
 
+        info!("success");
         Ok((result.redirect_url, result.access_token, auth_user))
     }
 
@@ -190,16 +211,28 @@ impl AuthService {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn cleanup_expired(&self) -> Result<usize, AppError> {
-        session_repository::delete_expired(&self.pool)
+        let result = session_repository::delete_expired(&self.pool)
             .await
-            .map_err(|_| AppError::InternalServerError)
+            .map_err(|_| AppError::InternalServerError);
+        match &result {
+            Ok(count) => info!(deleted = count, "success"),
+            Err(e) => info!(error = e.to_string(), "failed"),
+        }
+        result
     }
 
+    #[instrument(skip(self))]
     pub async fn get_user(&self, user_id: UserId) -> Result<User, AppError> {
-        user_repository::find_by_id(&self.pool, user_id.0)
+        let result = user_repository::find_by_id(&self.pool, user_id.0)
             .await?
             .map(Into::into)
-            .ok_or_else(|| AppError::NotFound("User not found".into()))
+            .ok_or_else(|| AppError::NotFound("User not found".into()));
+        match &result {
+            Ok(_) => info!("success"),
+            Err(e) => info!(error = e.to_string(), "failed"),
+        }
+        result
     }
 }

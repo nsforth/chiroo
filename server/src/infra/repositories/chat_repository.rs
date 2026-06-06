@@ -1,10 +1,10 @@
 use chrono::NaiveDateTime;
 use diesel::deserialize::Queryable;
+use diesel::dsl::exists;
 use diesel::{
     BoolExpressionMethods, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl,
     Selectable, SelectableHelper,
 };
-use diesel::dsl::exists;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

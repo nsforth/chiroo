@@ -53,10 +53,7 @@ pub async fn auth_middleware(
         .map(|t| SecretBox::from(t.into_boxed_str()))
     {
         Some(t) => t,
-        None => {
-            tracing::debug!("Request without access token to protected route");
-            return Ok(unauthorized_response());
-        },
+        None => return Ok(unauthorized_response()),
     };
 
     let (new_request, new_cookie) = match state.auth_service.verify_or_refresh(&token).await {
@@ -65,20 +62,13 @@ pub async fn auth_middleware(
             (request, None)
         },
         AuthResult::Refreshed(auth_user, access_token) => {
-            tracing::info!("Refreshing token for user: {}", auth_user.user_id);
             request.extensions_mut().insert(auth_user);
             let cookie =
                 build_set_cookie(&access_token, state.config.oidc_config().secure_cookie());
             (request, Some(cookie))
         },
-        AuthResult::Expired => {
-            tracing::debug!("Access token is expired");
-            return Ok(unauthorized_response());
-        },
-        AuthResult::Invalid => {
-            tracing::debug!("Access token is invalid");
-            return Ok(unauthorized_response());
-        },
+        AuthResult::Expired => return Ok(unauthorized_response()),
+        AuthResult::Invalid => return Ok(unauthorized_response()),
     };
 
     let mut response = next.run(new_request).await;
