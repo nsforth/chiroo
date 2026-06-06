@@ -24,7 +24,9 @@ async-openai = { version = "0.40", features = ["chat-completion", "byot"] }
 axum = { version = "0.8", features = ["macros", "tokio"] }
 axum-macros = "0.5"
 cached = { version = "1", features = ["async", "proc_macro"] }
+chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
+typenum = "1"
 cookie = "0.18"
 diesel = { version = "2.3", features = ["postgres", "uuid", "serde_json", "chrono"] }
 diesel_migrations = "2.3"

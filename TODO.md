@@ -10,14 +10,6 @@ Needs:
 - Backend `POST /api/auth/logout` — delete session from DB, clear cookies
 - Keycloak RP-Initiated Logout to end the session on the provider side
 
-### Encrypt tokens at rest
-
-`access_token` and `refresh_token` stored as plain `TEXT` in the `sessions` table (see `session_repository.rs:50`: `// TODO Encryption`).
-
-If the DB is compromised, all active tokens (access + refresh) are exposed.
-
-Needs: encrypt both fields on write, decrypt on read. Encryption key from config (e.g. `STATE_SECRET` or a dedicated `TOKEN_ENCRYPTION_KEY`).
-
 ---
 
 ## Features

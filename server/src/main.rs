@@ -20,6 +20,7 @@ mod utils;
 
 use crate::config::{config, Config};
 use crate::errors::AppError;
+use crate::infra::repositories::session_repository::SessionRepository;
 use crate::routes::app_router;
 use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
@@ -87,7 +88,10 @@ async fn run_migrations(pool: &Pool) -> Result<(), AppError> {
 }
 
 fn create_app(app_config: &'static Config, pool: Pool) -> Router {
-    let auth_service = AuthService::new(app_config.oidc_config().clone(), pool.clone());
+    let session_repo = SessionRepository::new(app_config.db_encryption_key());
+
+    let auth_service =
+        AuthService::new(session_repo, app_config.oidc_config().clone(), pool.clone());
     auth_service
         .clone()
         .start_background_jobs(app_config.oidc_config().cleanup_interval_secs());

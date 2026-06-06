@@ -45,8 +45,8 @@ diesel::table! {
         id -> Uuid,
         user_id -> Uuid,
         provider_sid -> Text,
-        access_token -> Text,
-        refresh_token -> Text,
+        access_token -> Binary,
+        refresh_token -> Binary,
         created_at -> Timestamptz,
         expires_at -> Timestamptz,
     }

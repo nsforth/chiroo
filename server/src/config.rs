@@ -1,8 +1,10 @@
-use std::{env, time::Duration};
+use std::{env, sync::Arc, time::Duration};
 
 use dotenvy::dotenv;
 use secrecy::{SecretBox, SecretString};
 use tokio::sync::OnceCell;
+
+use crate::utils::crypto::KEY_LEN;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -13,6 +15,7 @@ pub struct ServerConfig {
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     url: String,
+    encryption_key: Arc<SecretBox<[u8; KEY_LEN]>>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +108,10 @@ impl Config {
         self.db.url.clone()
     }
 
+    pub fn db_encryption_key(&self) -> Arc<SecretBox<[u8; KEY_LEN]>> {
+        Arc::clone(&self.db.encryption_key)
+    }
+
     pub fn server_host(&self) -> String {
         self.server.host.clone()
     }
@@ -130,8 +137,14 @@ async fn init_config() -> Config {
             .expect("PORT is not and integer"),
     };
 
+    let raw_key = env::var("DATABASE_ENCRYPTION_KEY").expect("DATABASE_ENCRYPTION_KEY must be set");
+    let key_bytes: [u8; KEY_LEN] = raw_key
+        .as_bytes()
+        .try_into()
+        .unwrap_or_else(|_| panic!("DATABASE_ENCRYPTION_KEY must be exactly {KEY_LEN} bytes"));
     let database_config = DatabaseConfig {
         url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+        encryption_key: Arc::new(SecretBox::new(Box::new(key_bytes))),
     };
 
     let openai_config = OpenAiConfig {
@@ -170,7 +183,7 @@ async fn init_config() -> Config {
         cleanup_interval_secs: env::var("SESSION_CLEANUP_INTERVAL_SECS")
             .unwrap_or_else(|_| "600".into())
             .parse()
-            .map(|d| Duration::from_secs(d))
+            .map(Duration::from_secs)
             .expect("Session cleanup interval must be positive integer in seconds"),
         session_ttl_multiplier: env::var("SESSION_TTL_MULTIPLIER")
             .unwrap_or_else(|_| "10".into())
@@ -179,7 +192,7 @@ async fn init_config() -> Config {
         default_access_token_expires_secs: env::var("OIDC_ACCESS_TOKEN_EXPIRES_SECS")
             .unwrap_or_else(|_| "300".into())
             .parse()
-            .map(|d| Duration::from_secs(d))
+            .map(Duration::from_secs)
             .expect("oidc access token expires defult time must be positive integer in seconds"),
     };
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio::sync::OnceCell;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 use deadpool_diesel::postgres::Pool;
 use secrecy::{ExposeSecret, SecretBox};
@@ -11,7 +11,8 @@ use crate::domain::models::session::ProviderSessionId;
 use crate::domain::models::user::{User, UserId};
 use crate::errors::AppError;
 use crate::infra::clients::oidc_client::{AccessTokenClaims, OidcClient, TokenStatus};
-use crate::infra::repositories::{session_repository, user_repository};
+use crate::infra::repositories::session_repository::{self, SessionRepository};
+use crate::infra::repositories::user_repository;
 use crate::operation_result::OperationResult;
 
 pub enum AuthResult {
@@ -43,14 +44,16 @@ pub struct AuthService {
     oidc_config: OidcConfig,
     oidc_client: OnceCell<OidcClient>,
     pool: Pool,
+    session_repo: SessionRepository,
 }
 
 impl AuthService {
-    pub fn new(oidc_config: OidcConfig, pool: Pool) -> Self {
+    pub fn new(session_repo: SessionRepository, oidc_config: OidcConfig, pool: Pool) -> Self {
         Self {
             oidc_config,
             oidc_client: OnceCell::new(),
             pool,
+            session_repo,
         }
     }
 
@@ -86,11 +89,10 @@ impl AuthService {
     pub async fn verify_or_refresh(&self, access_token: &SecretBox<str>) -> AuthResult {
         let result = match self.verify_access_token(access_token).await {
             TokenStatus::Valid(claims) => {
-                match session_repository::find_by_provider_sid(
-                    &self.pool,
-                    &ProviderSessionId(claims.sid.clone()),
-                )
-                .await
+                match self
+                    .session_repo
+                    .find_by_provider_sid(&self.pool, &ProviderSessionId(claims.sid.clone()))
+                    .await
                 {
                     Ok(Some(session)) => AuthResult::Valid(AuthUser {
                         user_id: session.user_id,
@@ -146,19 +148,21 @@ impl AuthService {
         )
         .await?;
 
-        let session_db = session_repository::upsert(
-            &self.pool,
-            &sid,
-            user.id,
-            &result.access_token,
-            &result.refresh_token,
-            result.session_expires_at,
-        )
-        .await?;
+        let session = self
+            .session_repo
+            .upsert(
+                &self.pool,
+                &sid,
+                user.id,
+                &result.access_token,
+                &result.refresh_token,
+                result.session_expires_at,
+            )
+            .await?;
 
         let auth_user = AuthUser {
-            user_id: UserId(session_db.user_id),
-            session_id: session_db.id.to_string(),
+            user_id: session.user_id,
+            session_id: session.id.0.to_string(),
         };
 
         info!(status = "success");
@@ -170,7 +174,9 @@ impl AuthService {
         sid: ProviderSessionId,
         access_token: &SecretBox<str>,
     ) -> Result<(SecretBox<str>, AuthUser), AppError> {
-        let session = session_repository::find_by_provider_sid(&self.pool, &sid)
+        let session = self
+            .session_repo
+            .find_by_provider_sid(&self.pool, &sid)
             .await?
             .ok_or_else(|| AppError::Unauthorized)?;
 
@@ -186,15 +192,16 @@ impl AuthService {
             _ => return Err(AppError::Unauthorized),
         };
 
-        session_repository::upsert(
-            &self.pool,
-            &new_sid,
-            session.user_id.0,
-            &result.access_token,
-            &result.refresh_token,
-            result.session_expires_at,
-        )
-        .await?;
+        self.session_repo
+            .upsert(
+                &self.pool,
+                &new_sid,
+                session.user_id.0,
+                &result.access_token,
+                &result.refresh_token,
+                result.session_expires_at,
+            )
+            .await?;
 
         let auth_user = AuthUser {
             user_id: session.user_id,
@@ -217,7 +224,8 @@ impl AuthService {
             .await
             .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(count) => info!(deleted = count, status = result.status()),
+            Ok(count) if *count > 0usize => info!(deleted = count, status = result.status()),
+            Ok(count) => debug!(deleted = count, status = result.status()),
             Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
