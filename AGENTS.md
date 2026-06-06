@@ -147,8 +147,9 @@ All public methods in `server/src/services/*.rs` must have `#[instrument(skip(se
 - Skip plain-string secrets explicitly: `#[instrument(skip(self, code, state))]`.
 
 Exit logging (`info!`):
-- `info!("success")` or `info!(key = value, "success")` — result fields not in span params.
-- `info!(error = ..., "failed")` — error message.
+- `info!(key = value, status = result.status())` — result fields, `status` is ALWAYS last.
+- `info!(status = "success")` — for simple success-only paths (no `Result`).
+- `info!(error = ..., status = result.status())` — on error.
 
 Do NOT add `#[instrument]` on private/helper methods — only on public entry points.
 Do NOT manually log entry params — the span covers that.
@@ -161,15 +162,15 @@ use tracing::{info, instrument};
 pub async fn delete_chat(&self, chat_id: &ChatId, user_id: &UserId) -> Result<(), AppError> {
     let result = /* ... */;
     match &result {
-        Ok(()) => info!("success"),
-        Err(e) => info!(error = e.to_string(), "failed"),
+        Ok(()) => info!(status = result.status()),
+        Err(e) => info!(error = e.to_string(), status = result.status()),
     }
     result
 }
 ```
 
 Structured fields instead of format strings — result data goes as `key = value` in the macro,
-not in the message string. The message is just `"success"` or `"failed"`.
+not in the message string. The `status` field must always be the last field.
 
 ## Formatting
 

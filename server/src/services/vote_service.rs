@@ -1,11 +1,11 @@
-use tracing::{info, instrument};
-
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::MessageId;
 use crate::domain::models::votes::Vote;
 use crate::errors::AppError;
 use crate::infra::repositories::vote_repository::{self, NewVoteDb};
+use crate::operation_result::OperationResult;
 use deadpool_diesel::postgres::Pool;
+use tracing::{info, instrument};
 
 #[derive(Clone)]
 pub struct VoteService {
@@ -25,8 +25,8 @@ impl VoteService {
                 .map(|votes| votes.iter().map(Into::into).collect())
                 .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(votes) => info!(count = votes.len(), "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(votes) => info!(count = votes.len(), status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -45,8 +45,8 @@ impl VoteService {
         .map(Into::into)
         .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(vote) => info!(vote_type = ?vote.vote_type, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(vote) => info!(vote_type = ?vote.vote_type, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -65,8 +65,8 @@ impl VoteService {
         .map(Into::into)
         .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(vote) => info!(vote_type = ?vote.vote_type, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(vote) => info!(vote_type = ?vote.vote_type, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -77,8 +77,8 @@ impl VoteService {
             .await
             .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(deleted) => info!(deleted = deleted, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(deleted) => info!(deleted = deleted, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }

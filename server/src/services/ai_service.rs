@@ -105,7 +105,7 @@ impl AiService {
 
         tokio::spawn(async move {
             if let Err(e) = run_stream(client, model, user_message, chat_id, tx.clone()).await {
-                info!(chat_id = ?chat_id, error = e.to_string(), "failed");
+                info!(chat_id = ?chat_id, error = e.to_string(), status = "failed");
                 let _ = tx
                     .send(MessageStreamEvent::Error {
                         error_text: e.to_string(),
@@ -466,7 +466,7 @@ async fn run_stream(
                     },
                 )
                 .await?;
-                info!(reason = "stop", "success");
+                info!(reason = "stop", status = "success");
                 return Ok(());
             },
             Ok(StepResult::ToolCalls {
@@ -527,7 +527,7 @@ async fn run_stream(
         }
     }
 
-    info!(reason = "max_steps", "success");
+    info!(reason = "max_steps", status = "success");
     let _ = tx
         .send(MessageStreamEvent::Error {
             error_text: "Max steps reached".into(),

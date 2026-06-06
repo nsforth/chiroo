@@ -6,6 +6,7 @@ use axum::Json;
 use serde_json::json;
 
 use crate::infra::errors::InfraError;
+use crate::operation_result::OperationResult;
 
 #[derive(Debug)]
 pub enum AppError {
@@ -83,5 +84,17 @@ impl From<InfraError> for AppError {
             InfraError::InternalServerError => Self::InternalServerError,
             InfraError::NotFound => Self::NotFound("Not found".into()),
         }
+    }
+}
+
+impl OperationResult for AppError {
+    fn is_success(&self) -> bool {
+        false
+    }
+}
+
+impl<T> OperationResult for Result<T, AppError> {
+    fn is_success(&self) -> bool {
+        self.is_ok()
     }
 }

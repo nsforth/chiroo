@@ -1,12 +1,12 @@
-use tracing::{info, instrument};
-
 use crate::domain::models::messages::Message;
 use crate::errors::AppError;
 use crate::infra::repositories::message_repository;
 use crate::infra::repositories::message_repository::{
     message_role_to_db_role, MessageDb, NewMessageDb,
 };
+use crate::operation_result::OperationResult;
 use deadpool_diesel::postgres::Pool;
+use tracing::{info, instrument};
 
 #[derive(Clone)]
 pub struct MessageService {
@@ -62,8 +62,8 @@ impl MessageService {
                 .await
                 .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(count) => info!(deleted = count, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(count) => info!(deleted = count, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }

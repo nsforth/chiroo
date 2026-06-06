@@ -3,6 +3,7 @@ use crate::domain::models::messages::{Message, MessagePart, Role, TextBlock};
 use crate::domain::models::user::UserId;
 use crate::errors::AppError;
 use crate::infra::repositories::chat_repository;
+use crate::operation_result::OperationResult;
 use crate::services::message_service::MessageService;
 use deadpool_diesel::postgres::Pool;
 use tracing::{info, instrument};
@@ -31,8 +32,8 @@ impl ChatService {
             Err(_) => Err(AppError::InternalServerError),
         };
         match &result {
-            Ok(chats) => info!(chats_len = chats.len(), "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(chats) => info!(chats_len = chats.len(), status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -50,9 +51,8 @@ impl ChatService {
             Err(_) => Err(AppError::InternalServerError),
         };
         match &result {
-            Ok(Some(_)) => info!(found = true, "success"),
-            Ok(None) => info!(found = false, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(r) => info!(found = r.is_some(), status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -86,8 +86,8 @@ impl ChatService {
             Err(e) => Err(e),
         };
         match &result {
-            Ok(chat) => info!(title = ?chat.title, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(chat) => info!(title = ?chat.title, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -101,8 +101,8 @@ impl ChatService {
             Err(_) => Err(AppError::InternalServerError),
         };
         match &result {
-            Ok(()) => info!("success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(()) => info!(status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -130,8 +130,8 @@ impl ChatService {
             Err(_) => Err(AppError::InternalServerError),
         };
         match &result {
-            Ok(chat) => info!(title = ?chat.title, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(chat) => info!(title = ?chat.title, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -145,8 +145,8 @@ impl ChatService {
             Err(_) => Err(AppError::InternalServerError),
         };
         match &result {
-            Ok(()) => info!(is_owner = true, "success"),
-            Err(_e) => info!(is_owner = false, "success"),
+            Ok(()) => info!(is_owner = true, status = result.status()),
+            Err(_e) => info!(is_owner = false, status = result.status()),
         }
         result
     }
@@ -170,8 +170,8 @@ impl ChatService {
                 Err(_) => Err(AppError::InternalServerError),
             };
         match &result {
-            Ok(chat) => info!(is_public = chat.public, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(chat) => info!(is_public = chat.public, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }

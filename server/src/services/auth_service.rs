@@ -78,7 +78,7 @@ impl AuthService {
         let client = self.get_client().await?;
         let result = client.build_auth_url(&redirect)?;
         let url = result.url.to_string();
-        info!("success");
+        info!(status = "success");
         Ok(url)
     }
 
@@ -106,9 +106,9 @@ impl AuthService {
                 Ok((new_token, auth_user)) => AuthResult::Refreshed(auth_user, new_token),
                 Err(_e) => AuthResult::Expired,
             },
-            TokenStatus::Invalid(e) => AuthResult::Invalid,
+            TokenStatus::Invalid(_e) => AuthResult::Invalid,
         };
-        info!(auth_result = %result, "{}", result.status());
+        info!(auth_result = %result, status = result.status());
         result
     }
 
@@ -161,7 +161,7 @@ impl AuthService {
             session_id: session_db.id.to_string(),
         };
 
-        info!("success");
+        info!(status = "success");
         Ok((result.redirect_url, result.access_token, auth_user))
     }
 
@@ -217,8 +217,8 @@ impl AuthService {
             .await
             .map_err(|_| AppError::InternalServerError);
         match &result {
-            Ok(count) => info!(deleted = count, "success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(count) => info!(deleted = count, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
@@ -230,8 +230,8 @@ impl AuthService {
             .map(Into::into)
             .ok_or_else(|| AppError::NotFound("User not found".into()));
         match &result {
-            Ok(_) => info!("success"),
-            Err(e) => info!(error = e.to_string(), "failed"),
+            Ok(_) => info!(status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }
