@@ -11,6 +11,20 @@ pub enum FinishReason {
     Other,
 }
 
+impl From<async_openai::types::chat::FinishReason> for FinishReason {
+    fn from(r: async_openai::types::chat::FinishReason) -> Self {
+        use async_openai::types::chat::FinishReason as OaiFinish;
+        match r {
+            OaiFinish::Stop => Self::Stop,
+            OaiFinish::Length => Self::Length,
+            OaiFinish::ToolCalls => Self::ToolCalls,
+            OaiFinish::ContentFilter => Self::ContentFilter,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum MessageStreamEvent {
     ReasoningStart {
         id: String,

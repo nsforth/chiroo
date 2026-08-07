@@ -22,6 +22,18 @@ export function getSearchQuery(part: ToolPart): string | undefined {
   return (part.input as { query?: string } | undefined)?.query
 }
 
+export function formatToolInput(part: ToolPart): string {
+  const input = part.input
+  if (input == null) return ''
+  return typeof input === 'string' ? input : JSON.stringify(input)
+}
+
+export function formatToolOutput(part: ToolPart): string {
+  const output = part.output
+  if (output == null) return ''
+  return typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+}
+
 export function getSources(part: ToolPart): Source[] {
   const output = part.output
   if (!output) return []

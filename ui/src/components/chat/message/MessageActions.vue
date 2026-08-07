@@ -51,7 +51,7 @@ function copy() {
 </script>
 
 <template>
-  <template v-if="message.role === 'assistant' && !streaming">
+  <template v-if="!streaming && !editing">
     <UTooltip :text="t('chatActions.copyResponse')">
       <UButton
         size="sm"
@@ -62,7 +62,9 @@ function copy() {
         @click="copy"
       />
     </UTooltip>
+  </template>
 
+  <template v-if="message.role === 'assistant' && !streaming">
     <UTooltip :text="t('chatActions.goodResponse')">
       <UButton
         size="sm"

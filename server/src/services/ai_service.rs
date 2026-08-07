@@ -1,94 +1,45 @@
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::{info, instrument};
-use uuid::Uuid;
-
 use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::{
-    ChatCompletionMessageToolCall, ChatCompletionMessageToolCallChunk,
-    ChatCompletionMessageToolCalls, ChatCompletionRequestAssistantMessageArgs,
-    ChatCompletionRequestMessage, ChatCompletionRequestToolMessageArgs,
-    ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionTools,
-    CreateChatCompletionRequestArgs, FinishReason, FunctionObject, ReasoningEffort,
-};
 use async_openai::Client;
+use chrono::Utc;
 use futures::StreamExt;
 use secrecy::ExposeSecret;
-use serde::Deserialize;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{debug, instrument};
 
 use crate::config::OpenAiConfig;
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::{
-    Message, MessagePart, ReasoningBlock, Role, TextBlock, ToolCallBlock, ToolCallState,
-};
-use crate::domain::models::stream_event::{FinishReason as DomainFinishReason, MessageStreamEvent};
-
-#[derive(Debug, Deserialize)]
-struct CustomDelta {
-    content: Option<String>,
-    #[serde(rename = "reasoning_content", alias = "reasoning", default)]
-    reasoning_content: Option<String>,
-    #[serde(default)]
-    tool_calls: Option<Vec<ChatCompletionMessageToolCallChunk>>,
-}
-
-enum ChunkKind<'a> {
-    Reasoning(&'a str),
-    Text(&'a str),
-    Tool(&'a [ChatCompletionMessageToolCallChunk]),
-}
-
-impl CustomDelta {
-    fn kind(&self) -> Option<ChunkKind<'_>> {
-        if let Some(rc) = self.reasoning_content.as_deref().filter(|s| !s.is_empty()) {
-            Some(ChunkKind::Reasoning(rc))
-        } else if let Some(content) = self.content.as_deref().filter(|s| !s.is_empty()) {
-            Some(ChunkKind::Text(content))
-        } else if let Some(chunks) = &self.tool_calls {
-            if !chunks.is_empty() {
-                Some(ChunkKind::Tool(chunks.as_slice()))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct CustomChoice {
-    delta: CustomDelta,
-    finish_reason: Option<FinishReason>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CustomChunk {
-    choices: Vec<CustomChoice>,
-}
-
-type CustomStream = Pin<
-    Box<dyn futures::Stream<Item = Result<CustomChunk, async_openai::error::OpenAIError>> + Send>,
->;
+use crate::domain::models::messages::{Message, MessageId, MessagePart, Role, TextBlock};
+use crate::domain::models::stream_event::MessageStreamEvent;
+use crate::infra::clients::llm_client::{LlmClient, RunRoundParams};
+use crate::services::message_service::MessageService;
+use crate::services::prompts::{PromptRenderer, TemplateContext};
+use crate::services::scenarios::{create_tools, scenario_for_model};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AiService {
-    client: Client<OpenAIConfig>,
-    model: Arc<String>,
+    llm_client: LlmClient,
+    prompt_renderer: PromptRenderer,
+    message_service: MessageService,
 }
 
 impl AiService {
-    pub fn new(config: &OpenAiConfig) -> Self {
+    pub fn new(
+        config: &OpenAiConfig,
+        prompt_renderer: PromptRenderer,
+        message_service: MessageService,
+    ) -> Self {
         let openai_config = OpenAIConfig::new()
             .with_api_base(config.base_url())
             .with_api_key(config.api_key().expose_secret());
 
+        let llm_client = LlmClient::new(Client::with_config(openai_config), config.model());
+
         Self {
-            client: Client::with_config(openai_config),
-            model: Arc::new(config.model()),
+            llm_client,
+            prompt_renderer,
+            message_service,
         }
     }
 
@@ -96,16 +47,37 @@ impl AiService {
     pub fn stream(
         &self,
         chat_id: ChatId,
+        model: &str,
         user_message: &str,
-    ) -> impl futures::Stream<Item = MessageStreamEvent> + Send {
-        let client = self.client.clone();
-        let model = self.model.to_string();
-        let user_message = user_message.to_string();
+        save_user_message: bool,
+    ) -> (
+        MessageId,
+        impl futures::Stream<Item = MessageStreamEvent> + Send,
+    ) {
+        let llm_client = self.llm_client.clone();
+        let prompt_renderer = self.prompt_renderer.clone();
+        let message_service = self.message_service.clone();
+        let chat_id2 = chat_id;
+        let model = model.to_string();
+        let user_message = user_message.to_string(); // TODO: Fix user message only, take previous dialog, about 3-4 messages of assistant and user
+        let assistant_id = MessageId(Uuid::new_v4());
+
         let (tx, rx) = mpsc::channel(64);
 
         tokio::spawn(async move {
-            if let Err(e) = run_stream(client, model, user_message, chat_id, tx.clone()).await {
-                info!(chat_id = ?chat_id, error = e.to_string(), status = "failed");
+            if let Err(e) = run_scenario(
+                llm_client,
+                prompt_renderer,
+                message_service,
+                chat_id2,
+                &model,
+                &user_message,
+                save_user_message,
+                assistant_id,
+                &tx,
+            )
+            .await
+            {
                 let _ = tx
                     .send(MessageStreamEvent::Error {
                         error_text: e.to_string(),
@@ -114,561 +86,116 @@ impl AiService {
             }
         });
 
-        ReceiverStream::new(rx)
+        (assistant_id, ReceiverStream::new(rx))
     }
 }
 
-// ─── Accumulator ───
-
-#[derive(Debug)]
-enum AccState {
-    Initial,
-    Reasoning { id: String },
-    Text { id: String },
-    Tool,
-}
-
-#[derive(Debug)]
-struct PendingToolCall {
-    id: String,
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug)]
-struct Accumulator {
+async fn run_scenario(
+    llm_client: LlmClient,
+    prompt_renderer: PromptRenderer,
+    message_service: MessageService,
     chat_id: ChatId,
-    state: AccState,
+    model: &str,
+    user_message: &str,
+    save_user_message: bool,
+    assistant_id: MessageId,
+    tx: &mpsc::Sender<MessageStreamEvent>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let scenario = scenario_for_model(model);
 
-    reasoning: String,
-    text: String,
+    // TODO Fix hardcoded template params, move general to config, other take from input params
+    let ctx = TemplateContext {
+        assistant_name: "Chiroo".into(),
+        user_name: String::new(),
+        current_date: Utc::now().format("%Y-%m-%d").to_string(),
+        question: user_message.to_string(),
+    };
 
-    tool_calls: HashMap<u32, PendingToolCall>,
-}
+    let mut user_msg = Message::new(chat_id, Role::User);
+    user_msg.parts.push(MessagePart::Text(TextBlock {
+        text: user_message.to_string(),
+    }));
 
-struct AccumulatorResult {
-    message: Message,
-    completed_tools: Vec<ChatCompletionMessageToolCall>,
-}
-
-impl Accumulator {
-    fn new(chat_id: ChatId) -> Self {
-        Self {
-            chat_id,
-            state: AccState::Initial,
-            reasoning: String::new(),
-            text: String::new(),
-            tool_calls: HashMap::new(),
-        }
+    // Persisting the user's question is critical — the scenario is meaningless
+    // without it, so a failed insert aborts the whole run.
+    if save_user_message {
+        message_service
+            .insert_message(&user_msg)
+            .await
+            .map_err(|e| format!("Failed to save user message: {e}"))?;
     }
 
-    fn process_delta(&mut self, delta: &CustomDelta) -> Vec<MessageStreamEvent> {
-        let chunk = match delta.kind() {
-            Some(k) => k,
-            None => return Vec::new(),
+    let mut history: Vec<Message> = vec![user_msg];
+    let last_round_index = scenario.rounds.len().saturating_sub(1);
+
+    for (round_index, round) in scenario.rounds.clone().into_iter().enumerate() {
+        debug!(
+            round_index,
+            prompt_template = %round.prompt_template,
+            tool_names = ?round.tool_names,
+            max_llm_calls = round.max_llm_calls,
+            reasoning_effort = ?round.reasoning_effort,
+            status = "round_start"
+        );
+
+        let prompt = prompt_renderer
+            .render(&round.prompt_template, &ctx)
+            .map_err(|e| format!("Failed to render prompt '{}': {e}", round.prompt_template))?;
+
+        let tools = create_tools(&round.tool_names);
+
+        let params = RunRoundParams {
+            system_prompt: prompt,
+            history: history.clone(),
+            tools,
+            max_llm_calls: round.max_llm_calls,
+            reasoning_effort: round.reasoning_effort,
+            extra_body: round.extra_body.clone(),
+            tool_choice: round.tool_choice,
+            preserve_thinking: round.enable_thinking && round.preserve_thinking,
+            message_id_override: (round_index == last_round_index).then_some(assistant_id),
         };
-        let mut events = Vec::new();
 
-        match (&self.state, chunk) {
-            (AccState::Initial, ChunkKind::Reasoning(rc)) => {
-                let id = Uuid::new_v4().to_string();
-                events.push(MessageStreamEvent::ReasoningStart { id: id.clone() });
-                events.push(MessageStreamEvent::ReasoningDelta {
-                    id: id.clone(),
-                    delta: rc.to_string(),
-                });
-                self.reasoning.push_str(rc);
-                self.state = AccState::Reasoning { id };
-            },
-            (AccState::Initial, ChunkKind::Text(content)) => {
-                let id = Uuid::new_v4().to_string();
-                events.push(MessageStreamEvent::TextStart { id: id.clone() });
-                events.push(MessageStreamEvent::TextDelta {
-                    id: id.clone(),
-                    delta: content.to_string(),
-                });
-                self.text.push_str(content);
-                self.state = AccState::Text { id };
-            },
-            (AccState::Initial, ChunkKind::Tool(chunks)) => {
-                self.ingest_tool_chunks(chunks, &mut events);
-                self.state = AccState::Tool;
-            },
+        let mut round_stream = llm_client.execute_round(chat_id, params);
+        let mut round_message = None;
 
-            (AccState::Reasoning { id }, ChunkKind::Reasoning(rc)) => {
-                events.push(MessageStreamEvent::ReasoningDelta {
-                    id: id.clone(),
-                    delta: rc.to_string(),
-                });
-                self.reasoning.push_str(rc);
-                // stay in Reasoning
-            },
-            (AccState::Reasoning { id }, ChunkKind::Text(content)) => {
-                events.push(MessageStreamEvent::ReasoningEnd { id: id.clone() });
-                let new_id = Uuid::new_v4().to_string();
-                events.push(MessageStreamEvent::TextStart { id: new_id.clone() });
-                events.push(MessageStreamEvent::TextDelta {
-                    id: new_id.clone(),
-                    delta: content.to_string(),
-                });
-                self.text.push_str(content);
-                self.state = AccState::Text { id: new_id };
-            },
-            (AccState::Reasoning { id }, ChunkKind::Tool(chunks)) => {
-                events.push(MessageStreamEvent::ReasoningEnd { id: id.clone() });
-                self.ingest_tool_chunks(chunks, &mut events);
-                self.state = AccState::Tool;
-            },
-
-            (AccState::Text { id }, ChunkKind::Text(content)) => {
-                events.push(MessageStreamEvent::TextDelta {
-                    id: id.clone(),
-                    delta: content.to_string(),
-                });
-                self.text.push_str(content);
-                // stay in Text
-            },
-            (AccState::Text { id }, ChunkKind::Reasoning(rc)) => {
-                events.push(MessageStreamEvent::TextEnd { id: id.clone() });
-                let new_id = Uuid::new_v4().to_string();
-                events.push(MessageStreamEvent::ReasoningStart { id: new_id.clone() });
-                events.push(MessageStreamEvent::ReasoningDelta {
-                    id: new_id.clone(),
-                    delta: rc.to_string(),
-                });
-                self.reasoning.push_str(rc);
-                self.state = AccState::Reasoning { id: new_id };
-            },
-            (AccState::Text { id }, ChunkKind::Tool(chunks)) => {
-                events.push(MessageStreamEvent::TextEnd { id: id.clone() });
-                self.ingest_tool_chunks(chunks, &mut events);
-                self.state = AccState::Tool;
-            },
-
-            (AccState::Tool, ChunkKind::Tool(chunks)) => {
-                self.ingest_tool_chunks(chunks, &mut events);
-                // stay in Tool
-            },
-            (AccState::Tool, ChunkKind::Reasoning(rc)) => {
-                let id = Uuid::new_v4().to_string();
-                events.push(MessageStreamEvent::ReasoningStart { id: id.clone() });
-                events.push(MessageStreamEvent::ReasoningDelta {
-                    id: id.clone(),
-                    delta: rc.to_string(),
-                });
-                self.reasoning.push_str(rc);
-                self.state = AccState::Reasoning { id };
-            },
-            (AccState::Tool, ChunkKind::Text(content)) => {
-                let id = Uuid::new_v4().to_string();
-                events.push(MessageStreamEvent::TextStart { id: id.clone() });
-                events.push(MessageStreamEvent::TextDelta {
-                    id: id.clone(),
-                    delta: content.to_string(),
-                });
-                self.text.push_str(content);
-                self.state = AccState::Text { id };
-            },
-        }
-
-        events
-    }
-
-    fn finish(&mut self) -> (Vec<MessageStreamEvent>, AccumulatorResult) {
-        let mut events = Vec::new();
-
-        match &self.state {
-            AccState::Reasoning { id } => {
-                events.push(MessageStreamEvent::ReasoningEnd { id: id.clone() });
-            },
-            AccState::Text { id } => {
-                events.push(MessageStreamEvent::TextEnd { id: id.clone() });
-            },
-            AccState::Initial | AccState::Tool => {},
-        }
-
-        let mut message = Message::new(self.chat_id, Role::Assistant);
-
-        if !self.reasoning.is_empty() {
-            message.parts.push(MessagePart::Reasoning(ReasoningBlock {
-                text: std::mem::take(&mut self.reasoning),
-            }));
-        }
-        if !self.text.is_empty() {
-            message.parts.push(MessagePart::Text(TextBlock {
-                text: std::mem::take(&mut self.text),
-            }));
-        }
-        if !self.tool_calls.is_empty() {
-            for tc in self.tool_calls.values() {
-                let input: serde_json::Value =
-                    serde_json::from_str(&tc.arguments).unwrap_or_default();
-                message.parts.push(MessagePart::ToolCall(ToolCallBlock {
-                    tool_call_id: tc.id.clone(),
-                    tool_name: tc.name.clone(),
-                    input,
-                    output: None,
-                    error: None,
-                    state: ToolCallState::Invoked,
-                }));
+        while let Some(event) = round_stream.next().await {
+            if let MessageStreamEvent::LlmCallFinish {
+                finish_reason: crate::domain::models::stream_event::FinishReason::Stop,
+                ref message,
+            } = event
+            {
+                round_message = Some(message.clone());
             }
-        }
 
-        let completed_tools: Vec<ChatCompletionMessageToolCall> = self
-            .tool_calls
-            .values()
-            .map(|tc| ChatCompletionMessageToolCall {
-                id: tc.id.clone(),
-                function: async_openai::types::chat::FunctionCall {
-                    name: tc.name.clone(),
-                    arguments: tc.arguments.clone(),
-                },
-            })
-            .collect();
-
-        (
-            events,
-            AccumulatorResult {
-                message,
-                completed_tools,
-            },
-        )
-    }
-
-    fn ingest_tool_chunks(
-        &mut self,
-        chunks: &[ChatCompletionMessageToolCallChunk],
-        events: &mut Vec<MessageStreamEvent>,
-    ) {
-        for chunk in chunks {
-            let entry = self
-                .tool_calls
-                .entry(chunk.index)
-                .or_insert_with(|| PendingToolCall {
-                    id: chunk.id.clone().unwrap_or_default(),
-                    name: String::new(),
-                    arguments: String::new(),
-                });
-
-            if let Some(id) = &chunk.id {
-                entry.id = id.clone();
-            }
-            if let Some(func) = &chunk.function {
-                if let Some(name) = &func.name {
-                    entry.name = name.clone();
-                }
-                if let Some(args) = &func.arguments {
-                    let is_new = entry.arguments.is_empty();
-                    entry.arguments.push_str(args);
-                    if is_new {
-                        events.push(MessageStreamEvent::ToolCallStart {
-                            tool_call_id: entry.id.clone(),
-                            tool_name: entry.name.clone(),
-                            title: Some(format!("Calling {}", entry.name)),
-                        });
-                    }
-                    events.push(MessageStreamEvent::ToolCallDelta {
-                        tool_call_id: entry.id.clone(),
-                        input_text_delta: args.clone(),
-                    });
-                }
-            }
-        }
-    }
-}
-
-// ─── Stream orchestration ───
-
-impl From<FinishReason> for DomainFinishReason {
-    fn from(r: FinishReason) -> Self {
-        match r {
-            FinishReason::Stop => DomainFinishReason::Stop,
-            FinishReason::Length => DomainFinishReason::Length,
-            FinishReason::ToolCalls => DomainFinishReason::ToolCalls,
-            FinishReason::ContentFilter => DomainFinishReason::ContentFilter,
-            _ => DomainFinishReason::Other,
-        }
-    }
-}
-
-enum StepResult {
-    Stop {
-        message: Message,
-    },
-    ToolCalls {
-        message: Message,
-        completed_tools: Vec<ChatCompletionMessageToolCall>,
-    },
-}
-
-async fn send_or_bail(
-    tx: &mpsc::Sender<MessageStreamEvent>,
-    event: MessageStreamEvent,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tx.send(event).await.map_err(|_| "client disconnected")?;
-    Ok(())
-}
-
-#[instrument(skip(client, model, user_message, tx))]
-async fn run_stream(
-    client: Client<OpenAIConfig>,
-    model: String,
-    user_message: String,
-    chat_id: ChatId,
-    tx: mpsc::Sender<MessageStreamEvent>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut messages: Vec<ChatCompletionRequestMessage> =
-        vec![ChatCompletionRequestUserMessageArgs::default()
-            .content(user_message)
-            .build()?
-            .into()];
-
-    let tools = vec![ChatCompletionTools::Function(ChatCompletionTool {
-        function: FunctionObject {
-            name: "weather".into(),
-            description: Some("Get current weather for a location".into()),
-            parameters: Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "City name"
-                    }
-                },
-                "required": ["location"]
-            })),
-            strict: None,
-        },
-    })];
-
-    let max_steps: usize = 5;
-
-    for _step in 0..max_steps {
-        send_or_bail(&tx, MessageStreamEvent::LlmCallStart).await?;
-
-        match run_llm_step(
-            client.clone(),
-            model.clone(),
-            &messages,
-            &tools,
-            chat_id,
-            &tx,
-        )
-        .await
-        {
-            Ok(StepResult::Stop { message }) => {
-                messages.push(build_openai_assistant_message(&message, &[]));
-                send_or_bail(
-                    &tx,
-                    MessageStreamEvent::LlmCallFinish {
-                        finish_reason: DomainFinishReason::Stop,
-                        message,
-                    },
-                )
-                .await?;
-                info!(reason = "stop", status = "success");
+            if tx.send(event).await.is_err() {
                 return Ok(());
-            },
-            Ok(StepResult::ToolCalls {
-                message,
-                completed_tools,
-            }) => {
-                messages.push(build_openai_assistant_message(&message, &completed_tools));
-                send_or_bail(
-                    &tx,
-                    MessageStreamEvent::LlmCallFinish {
-                        finish_reason: DomainFinishReason::ToolCalls,
-                        message,
-                    },
-                )
-                .await?;
+            }
+        }
+        // TODO: Accumulate all messages and write full round instead of one by one steps
+        if let Some(msg) = round_message {
+            let tool_calls = msg
+                .parts
+                .iter()
+                .filter(|p| matches!(p, MessagePart::ToolCall(_)))
+                .count();
+            debug!(
+                round_index,
+                parts = msg.parts.len(),
+                tool_calls,
+                status = "round_end"
+            );
 
-                for tc in &completed_tools {
-                    match execute_mock_tool(&tc.function.name, &tc.function.arguments) {
-                        Ok(output) => {
-                            messages.push(tool_result_message(&tc.id, &output));
-                            send_or_bail(
-                                &tx,
-                                MessageStreamEvent::ToolResult {
-                                    tool_call_id: tc.id.clone(),
-                                    output,
-                                },
-                            )
-                            .await?;
-                        },
-                        Err(err_text) => {
-                            send_or_bail(
-                                &tx,
-                                MessageStreamEvent::ToolError {
-                                    tool_call_id: tc.id.clone(),
-                                    error_text: err_text.clone(),
-                                },
-                            )
-                            .await?;
-                            messages.push(
-                                ChatCompletionRequestToolMessageArgs::default()
-                                    .tool_call_id(tc.id.clone())
-                                    .content(err_text)
-                                    .build()?
-                                    .into(),
-                            );
-                        },
-                    }
-                }
-            },
-            Err(e) => {
-                let _ = tx
-                    .send(MessageStreamEvent::Error {
-                        error_text: e.to_string(),
-                    })
-                    .await;
-                return Ok(());
-            },
+            if let Err(e) = message_service.insert_message(&msg).await {
+                tracing::error!(
+                    chat_id = ?chat_id,
+                    error = %e,
+                    status = "insert_message_failed"
+                );
+            }
+            history.push(msg);
         }
     }
-
-    info!(reason = "max_steps", status = "success");
-    let _ = tx
-        .send(MessageStreamEvent::Error {
-            error_text: "Max steps reached".into(),
-        })
-        .await;
 
     Ok(())
-}
-
-async fn run_llm_step(
-    client: Client<OpenAIConfig>,
-    model: String,
-    messages: &[ChatCompletionRequestMessage],
-    tools: &[ChatCompletionTools],
-    chat_id: ChatId,
-    tx: &mpsc::Sender<MessageStreamEvent>,
-) -> Result<StepResult, Box<dyn std::error::Error + Send + Sync>> {
-    let request = CreateChatCompletionRequestArgs::default()
-        .reasoning_effort(ReasoningEffort::High)
-        .model(model)
-        .messages(messages.to_vec())
-        .tools(tools.to_vec())
-        .stream(true)
-        .build()?;
-
-    let mut stream: CustomStream = client.chat().create_stream_byot(request).await?;
-    let mut acc = Accumulator::new(chat_id);
-
-    while let Some(result) = stream.next().await {
-        let response = result?;
-
-        for choice in response.choices {
-            for event in acc.process_delta(&choice.delta) {
-                send_or_bail(tx, event).await?;
-            }
-
-            if let Some(reason) = &choice.finish_reason {
-                let (end_events, result) = acc.finish();
-                for event in end_events {
-                    send_or_bail(tx, event).await?;
-                }
-
-                for tc in &result.completed_tools {
-                    let input: serde_json::Value =
-                        serde_json::from_str(&tc.function.arguments).unwrap_or_default();
-                    send_or_bail(
-                        tx,
-                        MessageStreamEvent::ToolCallAvailable {
-                            tool_call_id: tc.id.clone(),
-                            tool_name: tc.function.name.clone(),
-                            input,
-                        },
-                    )
-                    .await?;
-                }
-
-                return Ok(match reason {
-                    FinishReason::ToolCalls => StepResult::ToolCalls {
-                        message: result.message,
-                        completed_tools: result.completed_tools,
-                    },
-                    FinishReason::Stop => StepResult::Stop {
-                        message: result.message,
-                    },
-                    _ => {
-                        return Err(format!("Unexpected finish reason: {reason:?}").into());
-                    },
-                });
-            }
-        }
-    }
-
-    Err("Stream ended without finish_reason".into())
-}
-
-// ─── OpenAI request helpers ───
-
-fn build_openai_assistant_message(
-    message: &Message,
-    tool_calls: &[ChatCompletionMessageToolCall],
-) -> ChatCompletionRequestMessage {
-    let content = message
-        .parts
-        .iter()
-        .filter_map(|p| match p {
-            MessagePart::Text(t) => Some(t.text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut builder = ChatCompletionRequestAssistantMessageArgs::default();
-    builder.content(content);
-    if !tool_calls.is_empty() {
-        let tc: Vec<ChatCompletionMessageToolCalls> = tool_calls
-            .iter()
-            .map(|tc| ChatCompletionMessageToolCalls::Function(tc.clone()))
-            .collect();
-        builder.tool_calls(tc);
-    }
-    builder.build().unwrap().into()
-}
-
-fn tool_result_message(
-    tool_call_id: &str,
-    output: &serde_json::Value,
-) -> ChatCompletionRequestMessage {
-    ChatCompletionRequestToolMessageArgs::default()
-        .tool_call_id(tool_call_id)
-        .content(output.to_string())
-        .build()
-        .unwrap()
-        .into()
-}
-
-fn execute_mock_tool(name: &str, arguments: &str) -> Result<serde_json::Value, String> {
-    if name != "weather" {
-        return Err(format!("Unknown tool: {name}"));
-    }
-
-    let _input: serde_json::Value =
-        serde_json::from_str(arguments).map_err(|e| format!("Invalid args: {e}"))?;
-
-    Ok(serde_json::json!({
-        "location": "London",
-        "temperature": 18,
-        "temperatureHigh": 22,
-        "temperatureLow": 12,
-        "condition": {
-            "text": "Cloudy",
-            "icon": "i-lucide-cloud"
-        },
-        "humidity": 72,
-        "windSpeed": 15,
-        "dailyForecast": [
-            {"day": "Today", "high": 22, "low": 14,
-             "condition": {"text": "Cloudy", "icon": "i-lucide-cloud"}},
-            {"day": "Thu", "high": 24, "low": 16,
-             "condition": {"text": "Sunny", "icon": "i-lucide-sun"}},
-            {"day": "Fri", "high": 20, "low": 11,
-             "condition": {"text": "Rainy", "icon": "i-lucide-cloud-rain"}}
-        ]
-    }))
 }

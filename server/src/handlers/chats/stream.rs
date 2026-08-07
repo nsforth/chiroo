@@ -47,6 +47,8 @@ pub enum SseChunk {
         tool_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+        #[serde(rename = "providerExecuted")]
+        provider_executed: bool,
     },
     #[serde(rename = "tool-input-delta")]
     ToolInputDelta {
@@ -62,12 +64,16 @@ pub enum SseChunk {
         #[serde(rename = "toolName")]
         tool_name: String,
         input: serde_json::Value,
+        #[serde(rename = "providerExecuted")]
+        provider_executed: bool,
     },
     #[serde(rename = "tool-output-available")]
     ToolOutputAvailable {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
         output: serde_json::Value,
+        #[serde(rename = "providerExecuted")]
+        provider_executed: bool,
     },
     #[serde(rename = "tool-output-error")]
     ToolOutputError {
@@ -75,6 +81,8 @@ pub enum SseChunk {
         tool_call_id: String,
         #[serde(rename = "errorText")]
         error_text: String,
+        #[serde(rename = "providerExecuted")]
+        provider_executed: bool,
     },
 
     #[serde(rename = "finish")]
@@ -90,17 +98,12 @@ pub enum SseChunk {
 
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
-    #[allow(dead_code)]
     pub id: Uuid,
-    #[allow(dead_code)]
-    pub messages: Vec<serde_json::Value>, // TODO: Change to UIMessage
-    #[allow(dead_code)]
+    pub messages: Vec<serde_json::Value>,
     #[serde(default)]
-    pub trigger: Option<String>, // TODO: Investigate what trigger is?
-    #[allow(dead_code)]
+    pub trigger: Option<String>,
     #[serde(default, rename = "messageId")]
     pub message_id: Option<Uuid>,
-    #[allow(dead_code)]
     #[serde(default)]
     pub model: Option<String>,
 }
@@ -121,12 +124,22 @@ pub async fn send_message(
         .await?;
 
     let user_text = extract_last_user_text(&body.messages);
+    let model = body.model.unwrap_or_else(|| "Qwen3.6-27B".into());
 
-    let domain_stream = state.ai_service.stream(chat_id, &user_text);
+    // A regenerate re-runs an already-persisted user message; an edit targets an
+    // existing one. Only brand-new user messages should be persisted.
+    let save_user_message =
+        !matches!(body.trigger.as_deref(), Some("regenerate-message")) && body.message_id.is_none();
+
+    let (assistant_id, domain_stream) =
+        state
+            .ai_service
+            .stream(chat_id, &model, &user_text, save_user_message);
+    let assistant_id = assistant_id.0.to_string();
     let mut started = false;
 
     let sse_stream = domain_stream.flat_map(move |event| {
-        let chunks = domain_to_sse_chunks(&event, &mut started);
+        let chunks = domain_to_sse_chunks(&event, &mut started, &assistant_id);
         stream::iter(chunks.into_iter().map(|chunk| {
             let json = serde_json::to_string(&chunk).unwrap_or_default();
             Ok(Event::default().data(json))
@@ -157,12 +170,21 @@ fn extract_last_user_text(messages: &[serde_json::Value]) -> String {
 }
 
 // TODO: replace with struct + state machine and full rewrite
-fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<SseChunk> {
+fn domain_to_sse_chunks(
+    event: &MessageStreamEvent,
+    started: &mut bool,
+    assistant_id: &str,
+) -> Vec<SseChunk> {
     match event {
         MessageStreamEvent::LlmCallStart => {
             if !*started {
                 *started = true;
-                vec![SseChunk::Start { message_id: None }, SseChunk::StartStep]
+                vec![
+                    SseChunk::Start {
+                        message_id: Some(assistant_id.to_string()),
+                    },
+                    SseChunk::StartStep,
+                ]
             } else {
                 vec![SseChunk::StartStep]
             }
@@ -193,6 +215,7 @@ fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<S
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             title: title.clone(),
+            provider_executed: true,
         }],
         MessageStreamEvent::ToolCallDelta {
             tool_call_id,
@@ -209,6 +232,7 @@ fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<S
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             input: input.clone(),
+            provider_executed: true,
         }],
         MessageStreamEvent::ToolResult {
             tool_call_id,
@@ -216,6 +240,7 @@ fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<S
         } => vec![SseChunk::ToolOutputAvailable {
             tool_call_id: tool_call_id.clone(),
             output: output.clone(),
+            provider_executed: true,
         }],
         MessageStreamEvent::ToolError {
             tool_call_id,
@@ -223,6 +248,7 @@ fn domain_to_sse_chunks(event: &MessageStreamEvent, started: &mut bool) -> Vec<S
         } => vec![SseChunk::ToolOutputError {
             tool_call_id: tool_call_id.clone(),
             error_text: error_text.clone(),
+            provider_executed: true,
         }],
         MessageStreamEvent::LlmCallFinish {
             finish_reason,

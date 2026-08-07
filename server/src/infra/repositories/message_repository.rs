@@ -34,6 +34,7 @@ pub struct MessageDb {
 #[derive(Deserialize, Insertable)]
 #[diesel(table_name = messages)]
 pub struct NewMessageDb {
+    pub id: Option<Uuid>,
     pub chat_id: Uuid,
     pub role: String,
     #[serde(default)]

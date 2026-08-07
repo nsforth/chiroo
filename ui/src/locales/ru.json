@@ -63,6 +63,8 @@
   "toolStatus": {
     "searching": "Ищу в интернете...",
     "searched": "Нашёл в интернете",
+    "runningTool": "Выполняю {tool}...",
+    "completedTool": "Выполнен {tool}",
     "generatingChart": "Генерирую график...",
     "chartError": "Не удалось сгенерировать график, попробуйте снова",
     "loadingChart": "Загружаю данные графика...",

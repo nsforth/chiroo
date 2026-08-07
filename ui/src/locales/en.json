@@ -63,6 +63,8 @@
   "toolStatus": {
     "searching": "Searching the web...",
     "searched": "Searched the web",
+    "runningTool": "Running {tool}...",
+    "completedTool": "Ran {tool}",
     "generatingChart": "Generating chart...",
     "chartError": "Can't generate chart, please try again",
     "loadingChart": "Loading chart data...",

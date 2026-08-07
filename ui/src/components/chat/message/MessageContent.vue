@@ -7,9 +7,10 @@ import ChatComark from '../Comark'
 import ChatToolChart from '../tool/Chart.vue'
 import ChatToolWeather from '../tool/Weather.vue'
 import ChatToolSources from '../tool/Sources.vue'
+import ChatToolGeneric from '../tool/Generic.vue'
 import ChatMessageEdit from './MessageEdit.vue'
 import { getMergedParts } from '../../../utils/ai'
-import { getSearchQuery, getSources } from '../../../utils/tool'
+import { formatToolInput, formatToolOutput, getSearchQuery, getSources } from '../../../utils/tool'
 import type { WeatherUIToolInvocation } from '../../../tools/weather'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
 
@@ -61,6 +62,15 @@ const emit = defineEmits<{
       >
         <ChatToolSources :sources="getSources(part)" />
       </UChatTool>
+
+      <ChatToolGeneric
+        v-else
+        :tool-name="getToolName(part)"
+        :streaming="isToolStreaming(part)"
+        :input-text="formatToolInput(part)"
+        :output-text="formatToolOutput(part)"
+        :error-text="part.errorText"
+      />
     </template>
 
     <template v-else-if="isTextUIPart(part)">

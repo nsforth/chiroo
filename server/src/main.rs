@@ -26,6 +26,7 @@ use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
 use crate::services::chat_service::ChatService;
 use crate::services::message_service::MessageService;
+use crate::services::prompts::PromptRenderer;
 use crate::services::vote_service::VoteService;
 use crate::state::AppState;
 
@@ -96,11 +97,15 @@ fn create_app(app_config: &'static Config, pool: Pool) -> Router {
         .clone()
         .start_background_jobs(app_config.oidc_config().cleanup_interval_secs());
 
-    let ai_service = AiService::new(&app_config.openai);
+    let message_service = MessageService::new(pool.clone());
+
+    let prompt_renderer = PromptRenderer::new("prompts").expect("Failed to load prompt templates");
+
+    let ai_service = AiService::new(&app_config.openai, prompt_renderer, message_service.clone());
 
     let state = AppState {
-        chat_service: ChatService::new(pool.clone(), MessageService::new(pool.clone())),
-        message_service: MessageService::new(pool.clone()),
+        chat_service: ChatService::new(pool.clone(), message_service.clone()),
+        message_service,
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,

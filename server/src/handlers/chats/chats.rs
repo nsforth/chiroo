@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::Chat;
-use crate::handlers::chats::ui_messages::{MessageRole, UIMessage, UIMessagePart};
+use crate::handlers::chats::ui_messages::{convert_parts_to_ui, MessageRole, UIMessage};
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;
@@ -216,25 +216,4 @@ pub struct UpdateTitleRequest {
 pub struct UpdateVisibilityRequest {
     #[serde(rename = "visibility")]
     pub is_public: bool,
-}
-
-// TODO: Investigate what is this AI generated shit
-fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
-    // Try deserializing as an array of UI parts first
-    if let Ok(ui_parts) = serde_json::from_value::<Vec<UIMessagePart>>(parts.clone()) {
-        return ui_parts;
-    }
-
-    // Try deserializing as a single object that could be a UI part
-    if let Ok(single_part) = serde_json::from_value::<UIMessagePart>(parts.clone()) {
-        return vec![single_part];
-    }
-
-    // Fallback: wrap the entire JSON value as a text part
-    vec![UIMessagePart::Text(
-        crate::handlers::chats::ui_messages::TextUIPart {
-            text: serde_json::to_string(parts).unwrap_or_default(),
-            state: Some(crate::handlers::chats::ui_messages::TextState::Done),
-        },
-    )]
 }

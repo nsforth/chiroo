@@ -15,6 +15,7 @@ impl MessageId {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Message {
     pub id: MessageId,
     pub chat_id: ChatId,

@@ -34,6 +34,19 @@ Needs:
 
 `chats.rs:221` — `// TODO: Investigate what is this AI generated shit`. The function is written in an ad-hoc manner with fallbacks, needs a proper architectural rewrite.
 
+### Domain model: introduce Scenario and Round entities
+
+The assistant response is persisted as a flat list of per-round `Message` rows, which makes the live frontend (1 message per response via AI SDK) diverge from reload (N round messages). Introduce Scenario/Round as first-class domain concepts:
+
+- Domain types `Scenario` (id = UIMessage id, chat_id, user_message_id, model) and `Round` (position, parts)
+- `messages` narrowed to user/system; assistant content lives in scenario rounds
+- `votes` re-pointed to scenario id
+- `run_scenario` saves a `Scenario` + `Round`s; `start.messageId` = scenario_id
+- `get_chat` / `get_messages` build one UIMessage per scenario (id = scenario_id, parts = rounds joined with StepStart)
+- Regenerate/delete operate on scenario_id (cascade delete rounds)
+
+Storage: keep it as a JSON blob in one table (no normalized `scenarios`/`rounds` tables yet) until the domain model stabilizes. No data migration needed — no production yet.
+
 ---
 
 ## Tech Debt

@@ -42,6 +42,7 @@ impl MessageService {
         let role = message_role_to_db_role(&message.role);
 
         self.insert(NewMessageDb {
+            id: Some(message.id.0),
             chat_id: message.chat_id.0,
             role: role.into(),
             parts: parts_json,
