@@ -52,9 +52,53 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    knowledge_bases (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        public -> Bool,
+        metadata -> Json,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    documents (id) {
+        id -> Text,
+        kb_id -> Uuid,
+        title -> Text,
+        url -> Text,
+        version -> Text,
+        mime_type -> Text,
+        metadata -> Json,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    document_data (document_id) {
+        document_id -> Text,
+        data -> Binary,
+    }
+}
+
 diesel::joinable!(messages -> chats (chat_id));
 diesel::joinable!(votes -> chats (chat_id));
 diesel::joinable!(votes -> messages (message_id));
 diesel::joinable!(sessions -> users (user_id));
+diesel::joinable!(documents -> knowledge_bases (kb_id));
+diesel::joinable!(document_data -> documents (document_id));
 
-diesel::allow_tables_to_appear_in_same_query!(chats, messages, votes, users, sessions);
+diesel::allow_tables_to_appear_in_same_query!(
+    chats,
+    messages,
+    votes,
+    users,
+    sessions,
+    knowledge_bases,
+    documents,
+    document_data,
+);

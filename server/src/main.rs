@@ -1,4 +1,3 @@
-use axum::Router;
 use deadpool_diesel::postgres::{Manager, Pool};
 use deadpool_diesel::Runtime;
 use diesel_migrations::MigrationHarness;
@@ -14,6 +13,7 @@ mod infra;
 mod middleware;
 mod operation_result;
 mod routes;
+mod routes_internal;
 mod services;
 mod state;
 mod utils;
@@ -22,9 +22,11 @@ use crate::config::{config, Config};
 use crate::errors::AppError;
 use crate::infra::repositories::session_repository::SessionRepository;
 use crate::routes::app_router;
+use crate::routes_internal::internal_api_router;
 use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
 use crate::services::chat_service::ChatService;
+use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
 use crate::services::prompts::PromptRenderer;
 use crate::services::vote_service::VoteService;
@@ -60,7 +62,11 @@ async fn main() {
         .await
         .expect("Failed to bind");
 
-    let app = create_app(app_config, pool);
+    let state = build_state(app_config, pool);
+
+    let app = app_router(state.clone());
+
+    spawn_internal_api(state).await;
 
     axum::serve(listener, app)
         .await
@@ -88,7 +94,7 @@ async fn run_migrations(pool: &Pool) -> Result<(), AppError> {
     Ok(())
 }
 
-fn create_app(app_config: &'static Config, pool: Pool) -> Router {
+fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
     let session_repo = SessionRepository::new(app_config.db_encryption_key());
 
     let auth_service =
@@ -103,14 +109,36 @@ fn create_app(app_config: &'static Config, pool: Pool) -> Router {
 
     let ai_service = AiService::new(&app_config.openai, prompt_renderer, message_service.clone());
 
-    let state = AppState {
+    AppState {
         chat_service: ChatService::new(pool.clone(), message_service.clone()),
         message_service,
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,
+        knowledge_service: KnowledgeService::new(pool),
         config: app_config,
-    };
+    }
+}
 
-    app_router(state)
+async fn spawn_internal_api(state: AppState) {
+    let app = internal_api_router(state.clone());
+
+    let host = state.config.internal_api_host().to_string();
+    let port = state.config.internal_api_port();
+    let address = format!("{host}:{port}");
+    let socket_addr: SocketAddr = address
+        .parse()
+        .expect("Unable to parse internal API address");
+
+    tracing::info!("internal API listening on http://{}", socket_addr);
+
+    let listener = tokio::net::TcpListener::bind(socket_addr)
+        .await
+        .expect("Failed to bind internal API");
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("Internal API server failed to run");
+    });
 }

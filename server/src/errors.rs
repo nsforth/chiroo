@@ -16,6 +16,7 @@ pub enum AppError {
     BodyParsingError(String),
     Unauthorized,
     OidcError(String),
+    Conflict,
 }
 
 impl Display for AppError {
@@ -27,6 +28,7 @@ impl Display for AppError {
             AppError::BodyParsingError(e) => write!(f, "Body parsing error: {}", e),
             AppError::Unauthorized => write!(f, "Unathorized"),
             AppError::OidcError(e) => write!(f, "OIDC Error: {}", e),
+            AppError::Conflict => write!(f, "Conflict"),
         }
     }
 }
@@ -49,6 +51,7 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("OIDC error: {message}"),
             ),
+            Self::Conflict => (StatusCode::CONFLICT, String::from("Conflict")),
         };
         (status, Json(json!({ "message": err_msg }))).into_response()
     }
@@ -83,6 +86,7 @@ impl From<InfraError> for AppError {
         match e {
             InfraError::InternalServerError => Self::InternalServerError,
             InfraError::NotFound => Self::NotFound("Not found".into()),
+            InfraError::Conflict => Self::Conflict,
         }
     }
 }

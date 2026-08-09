@@ -43,3 +43,32 @@ CREATE TABLE votes (
     is_upvoted BOOLEAN NOT NULL,
     PRIMARY KEY (chat_id, message_id)
 );
+
+CREATE TABLE knowledge_bases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    public BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSON NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE documents (
+    id TEXT PRIMARY KEY,
+    kb_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    metadata JSON NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE document_data (
+    document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    data BYTEA NOT NULL
+);
+
+CREATE INDEX documents_kb_id_idx ON documents(kb_id);

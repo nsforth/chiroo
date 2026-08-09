@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS document_data;
+DROP TABLE IF EXISTS documents;
+DROP TABLE IF EXISTS knowledge_bases;
 DROP TABLE IF EXISTS votes;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS sessions;

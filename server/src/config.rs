@@ -13,6 +13,12 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct InternalApiConfig {
+    host: String,
+    port: u16,
+}
+
+#[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     url: String,
     encryption_key: Arc<SecretBox<[u8; KEY_LEN]>>,
@@ -81,6 +87,16 @@ impl OidcConfig {
     }
 }
 
+impl InternalApiConfig {
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
 impl OpenAiConfig {
     pub fn base_url(&self) -> String {
         self.base_url.clone()
@@ -98,6 +114,7 @@ impl OpenAiConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
+    pub internal_api: InternalApiConfig,
     pub db: DatabaseConfig,
     pub openai: OpenAiConfig,
     pub oidc: OidcConfig,
@@ -120,6 +137,14 @@ impl Config {
         self.server.port
     }
 
+    pub fn internal_api_host(&self) -> &str {
+        self.internal_api.host()
+    }
+
+    pub fn internal_api_port(&self) -> u16 {
+        self.internal_api.port()
+    }
+
     pub fn oidc_config(&self) -> &OidcConfig {
         &self.oidc
     }
@@ -135,6 +160,14 @@ async fn init_config() -> Config {
             .unwrap_or_else(|_| String::from("3000"))
             .parse::<u16>()
             .expect("PORT is not and integer"),
+    };
+
+    let internal_api_config = InternalApiConfig {
+        host: env::var("INTERNAL_API_HOST").unwrap_or_else(|_| String::from("127.0.0.1")),
+        port: env::var("INTERNAL_API_PORT")
+            .unwrap_or_else(|_| String::from("3001"))
+            .parse::<u16>()
+            .expect("INTERNAL_API_PORT is not an integer"),
     };
 
     let raw_key = env::var("DATABASE_ENCRYPTION_KEY").expect("DATABASE_ENCRYPTION_KEY must be set");
@@ -198,6 +231,7 @@ async fn init_config() -> Config {
 
     Config {
         server: server_config,
+        internal_api: internal_api_config,
         db: database_config,
         openai: openai_config,
         oidc: oidc_config,

@@ -1,11 +1,13 @@
 use std::fmt;
 
 use deadpool_diesel::InteractError;
+use diesel::result::{DatabaseErrorKind, Error as DieselError};
 
 #[derive(Debug)]
 pub enum InfraError {
     InternalServerError,
     NotFound,
+    Conflict,
 }
 
 impl fmt::Display for InfraError {
@@ -13,14 +15,19 @@ impl fmt::Display for InfraError {
         match self {
             Self::NotFound => write!(f, "Not found"),
             Self::InternalServerError => write!(f, "Internal server error"),
+            Self::Conflict => write!(f, "Conflict"),
         }
     }
 }
 
-impl From<diesel::result::Error> for InfraError {
-    fn from(error: diesel::result::Error) -> Self {
+impl From<DieselError> for InfraError {
+    fn from(error: DieselError) -> Self {
         match error {
-            diesel::result::Error::NotFound => Self::NotFound,
+            DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)
+            | DieselError::DatabaseError(DatabaseErrorKind::ForeignKeyViolation, _) => {
+                Self::Conflict
+            },
+            DieselError::NotFound => Self::NotFound,
             _ => Self::InternalServerError,
         }
     }
