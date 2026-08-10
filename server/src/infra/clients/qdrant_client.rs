@@ -309,3 +309,316 @@ impl TryFrom<ScoredPoint> for SearchedChunk {
         cp.into_searched_chunk(DocumentChunkId(id), point.score)
     }
 }
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+    use uuid::Uuid;
+
+    use super::QdrantClient;
+    use crate::domain::models::document::DocumentId;
+    use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};
+    use crate::domain::models::knowledge_base::KnowledgeBaseId;
+
+    const QDRANT_URL: &str = "http://localhost:6334";
+    const VECTOR_SIZE: u64 = 4;
+
+    fn make_client(test_id: &str) -> QdrantClient {
+        let prefix = format!("test_{test_id}");
+        QdrantClient::new(QDRANT_URL, None, prefix).expect("failed to create QdrantClient")
+    }
+
+    fn make_kb_id() -> KnowledgeBaseId {
+        KnowledgeBaseId(Uuid::new_v4())
+    }
+
+    fn make_chunk(
+        document_id: &str,
+        kb_id: KnowledgeBaseId,
+        chunk_index: i32,
+        content: &str,
+        embedding: Vec<f32>,
+    ) -> DocumentChunk {
+        let id = Uuid::new_v4().to_string();
+        DocumentChunk {
+            id: DocumentChunkId(id),
+            document_id: DocumentId(document_id.to_string()),
+            kb_id,
+            chunk_index,
+            chunk_total: 3,
+            chunk_offset: chunk_index * 100,
+            chunk_length: content.len() as i32,
+            document_total_length: 300,
+            content: content.to_string(),
+            embedding,
+            version: "v1".to_string(),
+            title: format!("Test Doc {document_id}"),
+            url: format!("https://example.com/{document_id}"),
+            metadata: Value::Null,
+        }
+    }
+
+    fn small_embedding(v: f32) -> Vec<f32> {
+        vec![v, v * 2.0, v * 3.0, v * 4.0]
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn create_and_delete_collection() {
+        let kb_id = make_kb_id();
+        let client = make_client("create_and_delete");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create_collection should succeed");
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete_collection should succeed");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_and_search_hybrid() {
+        let kb_id = make_kb_id();
+        let client = make_client("upsert_and_search");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create collection");
+
+        let expected_id = DocumentChunkId(Uuid::new_v4().to_string());
+        let expected_doc_id = DocumentId("chunk-42".to_string());
+        let expected_metadata = serde_json::json!({
+            "author": "Alice",
+            "tags": ["rust", "qdrant"],
+            "depth": 3,
+        });
+        let expected = DocumentChunk {
+            id: expected_id.clone(),
+            document_id: expected_doc_id.clone(),
+            kb_id,
+            chunk_index: 7,
+            chunk_total: 13,
+            chunk_offset: 700,
+            chunk_length: 35,
+            document_total_length: 1300,
+            content: "Pick the largest non-negative integer, call it n".to_string(),
+            embedding: small_embedding(0.8),
+            version: "v3".to_string(),
+            title: "Art of Round-Trip".to_string(),
+            url: "https://example.com/round-trip".to_string(),
+            metadata: expected_metadata.clone(),
+        };
+        let decoy = make_chunk("decoy", kb_id, 0, "unrelated", small_embedding(0.1));
+        client
+            .upsert_chunks(&kb_id, &[decoy, expected])
+            .await
+            .expect("upsert chunks");
+
+        let results = client
+            .search_hybrid(
+                &kb_id,
+                small_embedding(0.8),
+                "largest non-negative integer",
+                5,
+            )
+            .await
+            .expect("search hybrid");
+
+        assert!(!results.is_empty(), "search should return results");
+        let found = &results[0];
+
+        assert_eq!(found.id, expected_id);
+        assert_eq!(found.document_id, expected_doc_id);
+        assert_eq!(found.chunk_index, 7);
+        assert_eq!(found.chunk_total, 13);
+        assert_eq!(found.chunk_offset, 700);
+        assert_eq!(found.chunk_length, 35);
+        assert_eq!(found.document_total_length, 1300);
+        assert_eq!(
+            found.content,
+            "Pick the largest non-negative integer, call it n"
+        );
+        assert_eq!(found.version, "v3");
+        assert_eq!(found.title, "Art of Round-Trip");
+        assert_eq!(found.url, "https://example.com/round-trip");
+        assert_eq!(
+            found.metadata, expected_metadata,
+            "metadata round-trip mismatch"
+        );
+        assert!(found.score > 0.0, "score should be positive");
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete collection");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn delete_chunks() {
+        let kb_id = make_kb_id();
+        let client = make_client("delete_chunks");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create collection");
+
+        let chunk_a_id = DocumentChunkId(Uuid::new_v4().to_string());
+        let chunk_b_id = DocumentChunkId(Uuid::new_v4().to_string());
+
+        let chunks = vec![
+            DocumentChunk {
+                id: chunk_a_id.clone(),
+                document_id: DocumentId("doc-x".to_string()),
+                kb_id,
+                chunk_index: 0,
+                chunk_total: 2,
+                chunk_offset: 0,
+                chunk_length: 7,
+                document_total_length: 200,
+                content: "chunk A".to_string(),
+                embedding: small_embedding(0.5),
+                version: "v1".to_string(),
+                title: "Test".to_string(),
+                url: "https://example.com".to_string(),
+                metadata: Value::Null,
+            },
+            DocumentChunk {
+                id: chunk_b_id,
+                document_id: DocumentId("doc-x".to_string()),
+                kb_id,
+                chunk_index: 1,
+                chunk_total: 2,
+                chunk_offset: 100,
+                chunk_length: 7,
+                document_total_length: 200,
+                content: "chunk B".to_string(),
+                embedding: small_embedding(0.5),
+                version: "v1".to_string(),
+                title: "Test".to_string(),
+                url: "https://example.com".to_string(),
+                metadata: Value::Null,
+            },
+        ];
+        client.upsert_chunks(&kb_id, &chunks).await.expect("upsert");
+
+        client
+            .delete_chunks(&kb_id, &[chunk_a_id])
+            .await
+            .expect("delete chunks");
+
+        let results = client
+            .search_hybrid(&kb_id, small_embedding(0.5), "chunk", 5)
+            .await
+            .expect("search");
+
+        assert_eq!(results.len(), 1, "only one chunk should remain");
+        assert_eq!(results[0].content, "chunk B");
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete collection");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn delete_by_document() {
+        let kb_id = make_kb_id();
+        let client = make_client("delete_by_doc");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create collection");
+
+        let all_chunks = vec![
+            make_chunk("doc-a", kb_id, 0, "doc A chunk 0", small_embedding(0.3)),
+            make_chunk("doc-a", kb_id, 1, "doc A chunk 1", small_embedding(0.3)),
+            make_chunk("doc-b", kb_id, 0, "doc B chunk 0", small_embedding(0.3)),
+        ];
+        client
+            .upsert_chunks(&kb_id, &all_chunks)
+            .await
+            .expect("upsert");
+
+        client
+            .delete_by_document(&kb_id, &DocumentId("doc-a".to_string()))
+            .await
+            .expect("delete by document");
+
+        let results = client
+            .search_hybrid(&kb_id, small_embedding(0.3), "chunk", 10)
+            .await
+            .expect("search");
+
+        assert_eq!(results.len(), 1, "only doc B chunk should remain");
+        assert_eq!(results[0].document_id, DocumentId("doc-b".to_string()));
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete collection");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn search_empty_collection() {
+        let kb_id = make_kb_id();
+        let client = make_client("search_empty");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create collection");
+
+        let results = client
+            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5)
+            .await
+            .expect("search on empty collection");
+
+        assert!(
+            results.is_empty(),
+            "empty collection should return no results"
+        );
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete collection");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn search_nonexistent_collection() {
+        let kb_id = make_kb_id();
+        let client = make_client("search_nonexistent");
+
+        let result = client
+            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5)
+            .await;
+
+        assert!(
+            result.is_err(),
+            "search on nonexistent collection should error"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn delete_nonexistent_collection() {
+        let kb_id = make_kb_id();
+        let client = make_client("delete_nonexistent");
+
+        let result = client.delete_collection(&kb_id).await;
+        assert!(
+            result.is_ok(),
+            "delete nonexistent collection should be idempotent"
+        );
+    }
+}
