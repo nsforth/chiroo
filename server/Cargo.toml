@@ -20,7 +20,7 @@ suspicious = { level = "deny", priority = -1 }
 complexity = { level = "warn", priority = -1 }
 
 [dependencies]
-async-openai = { version = "0.40", features = ["chat-completion", "byot"] }
+async-openai = { version = "0.40", features = ["chat-completion", "byot", "embedding"] }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros", "tokio", "multipart"] }
 axum-macros = "0.5"

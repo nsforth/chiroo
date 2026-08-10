@@ -20,6 +20,7 @@ mod utils;
 
 use crate::config::{config, Config};
 use crate::errors::AppError;
+use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::repositories::session_repository::SessionRepository;
 use crate::routes::app_router;
@@ -117,6 +118,8 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
     )
     .expect("Failed to create Qdrant client");
 
+    let embedding_client = EmbeddingClient::new(&app_config.embedding);
+
     AppState {
         chat_service: ChatService::new(pool.clone(), message_service.clone()),
         message_service,
@@ -125,6 +128,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         auth_service,
         knowledge_service: KnowledgeService::new(pool),
         qdrant_client,
+        embedding_client,
         config: app_config,
     }
 }

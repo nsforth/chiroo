@@ -32,6 +32,32 @@ pub struct OpenAiConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct EmbeddingConfig {
+    pub base_url: String,
+    pub api_key: SecretString,
+    pub model: String,
+    pub dimensions: Option<u32>,
+}
+
+impl EmbeddingConfig {
+    pub fn base_url(&self) -> String {
+        self.base_url.clone()
+    }
+
+    pub fn api_key(&self) -> &SecretBox<str> {
+        &self.api_key
+    }
+
+    pub fn model(&self) -> String {
+        self.model.clone()
+    }
+
+    pub fn dimensions(&self) -> Option<u32> {
+        self.dimensions
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct OidcConfig {
     issuer_url: String,
     client_id: SecretString,
@@ -138,6 +164,7 @@ pub struct Config {
     pub internal_api: InternalApiConfig,
     pub db: DatabaseConfig,
     pub openai: OpenAiConfig,
+    pub embedding: EmbeddingConfig,
     pub oidc: OidcConfig,
     pub qdrant: QdrantConfig,
 }
@@ -202,14 +229,27 @@ async fn init_config() -> Config {
         encryption_key: Arc::new(SecretBox::new(Box::new(key_bytes))),
     };
 
+    let openai_base_url = env::var("OPENAI_BASE_URL").expect("OPENAI_BASE_URL must be set");
+    let openai_api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+
     let openai_config = OpenAiConfig {
-        base_url: env::var("OPENAI_BASE_URL").expect("OPENAI_BASE_URL must be set"),
+        base_url: openai_base_url.clone(),
+        api_key: SecretString::new(openai_api_key.clone().into_boxed_str()),
+        model: env::var("OPENAI_MODEL").expect("OPENAI_MODEL must be set"),
+    };
+
+    let embedding_config = EmbeddingConfig {
+        base_url: env::var("EMBEDDING_BASE_URL").unwrap_or(openai_base_url),
         api_key: SecretString::new(
-            env::var("OPENAI_API_KEY")
-                .expect("OPENAI_API_KEY must be set")
+            env::var("EMBEDDING_API_KEY")
+                .unwrap_or(openai_api_key)
                 .into_boxed_str(),
         ),
-        model: env::var("OPENAI_MODEL").expect("OPENAI_MODEL must be set"),
+        model: env::var("EMBEDDING_MODEL").expect("EMBEDDING_MODEL must be set"),
+        dimensions: env::var("EMBEDDING_DIMENSIONS").ok().map(|s| {
+            s.parse()
+                .expect("EMBEDDING_DIMENSIONS must be a positive integer")
+        }),
     };
 
     let app_base_url = env::var("APP_BASE_URL").expect("APP_BASE_URL must be set");
@@ -263,6 +303,7 @@ async fn init_config() -> Config {
         internal_api: internal_api_config,
         db: database_config,
         openai: openai_config,
+        embedding: embedding_config,
         oidc: oidc_config,
         qdrant: qdrant_config,
     }

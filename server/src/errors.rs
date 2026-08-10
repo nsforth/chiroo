@@ -17,6 +17,7 @@ pub enum AppError {
     Unauthorized,
     OidcError(String),
     QdrantError(String),
+    EmbeddingError(String),
     Conflict,
 }
 
@@ -30,6 +31,7 @@ impl Display for AppError {
             AppError::Unauthorized => write!(f, "Unathorized"),
             AppError::OidcError(e) => write!(f, "OIDC Error: {}", e),
             AppError::QdrantError(e) => write!(f, "Qdrant error: {}", e),
+            AppError::EmbeddingError(e) => write!(f, "Embedding error: {}", e),
             AppError::Conflict => write!(f, "Conflict"),
         }
     }
@@ -56,6 +58,10 @@ impl IntoResponse for AppError {
             Self::QdrantError(message) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Qdrant error: {message}"),
+            ),
+            Self::EmbeddingError(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Embedding error: {message}"),
             ),
             Self::Conflict => (StatusCode::CONFLICT, String::from("Conflict")),
         };
