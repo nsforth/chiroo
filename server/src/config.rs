@@ -138,6 +138,27 @@ impl OpenAiConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct RerankConfig {
+    pub base_url: String,
+    pub api_key: SecretString,
+    pub model: String,
+}
+
+impl RerankConfig {
+    pub fn base_url(&self) -> String {
+        self.base_url.clone()
+    }
+
+    pub fn api_key(&self) -> &SecretBox<str> {
+        &self.api_key
+    }
+
+    pub fn model(&self) -> String {
+        self.model.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct QdrantConfig {
     url: String,
     api_key: Option<String>,
@@ -167,6 +188,7 @@ pub struct Config {
     pub embedding: EmbeddingConfig,
     pub oidc: OidcConfig,
     pub qdrant: QdrantConfig,
+    pub rerank: RerankConfig,
 }
 
 impl Config {
@@ -239,10 +261,10 @@ async fn init_config() -> Config {
     };
 
     let embedding_config = EmbeddingConfig {
-        base_url: env::var("EMBEDDING_BASE_URL").unwrap_or(openai_base_url),
+        base_url: env::var("EMBEDDING_BASE_URL").unwrap_or(openai_base_url.clone()),
         api_key: SecretString::new(
             env::var("EMBEDDING_API_KEY")
-                .unwrap_or(openai_api_key)
+                .unwrap_or(openai_api_key.clone())
                 .into_boxed_str(),
         ),
         model: env::var("EMBEDDING_MODEL").expect("EMBEDDING_MODEL must be set"),
@@ -250,6 +272,16 @@ async fn init_config() -> Config {
             s.parse()
                 .expect("EMBEDDING_DIMENSIONS must be a positive integer")
         }),
+    };
+
+    let rerank_config = RerankConfig {
+        base_url: env::var("RERANK_BASE_URL").unwrap_or(openai_base_url),
+        api_key: SecretString::new(
+            env::var("RERANK_API_KEY")
+                .unwrap_or(openai_api_key)
+                .into_boxed_str(),
+        ),
+        model: env::var("RERANK_MODEL").expect("RERANK_MODEL must be set"),
     };
 
     let app_base_url = env::var("APP_BASE_URL").expect("APP_BASE_URL must be set");
@@ -304,6 +336,7 @@ async fn init_config() -> Config {
         db: database_config,
         openai: openai_config,
         embedding: embedding_config,
+        rerank: rerank_config,
         oidc: oidc_config,
         qdrant: qdrant_config,
     }

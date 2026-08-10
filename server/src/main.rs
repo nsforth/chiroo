@@ -22,6 +22,7 @@ use crate::config::{config, Config};
 use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
+use crate::infra::clients::rerank_client::RerankClient;
 use crate::infra::repositories::session_repository::SessionRepository;
 use crate::routes::app_router;
 use crate::routes_internal::internal_api_router;
@@ -120,6 +121,9 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
 
     let embedding_client = EmbeddingClient::new(&app_config.embedding);
 
+    let rerank_client =
+        RerankClient::new(&app_config.rerank).expect("Failed to create Rerank client");
+
     AppState {
         chat_service: ChatService::new(pool.clone(), message_service.clone()),
         message_service,
@@ -129,6 +133,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         knowledge_service: KnowledgeService::new(pool),
         qdrant_client,
         embedding_client,
+        rerank_client,
         config: app_config,
     }
 }

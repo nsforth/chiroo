@@ -18,6 +18,7 @@ pub enum AppError {
     OidcError(String),
     QdrantError(String),
     EmbeddingError(String),
+    RerankError(String),
     Conflict,
 }
 
@@ -32,6 +33,7 @@ impl Display for AppError {
             AppError::OidcError(e) => write!(f, "OIDC Error: {}", e),
             AppError::QdrantError(e) => write!(f, "Qdrant error: {}", e),
             AppError::EmbeddingError(e) => write!(f, "Embedding error: {}", e),
+            AppError::RerankError(e) => write!(f, "Rerank error: {}", e),
             AppError::Conflict => write!(f, "Conflict"),
         }
     }
@@ -62,6 +64,10 @@ impl IntoResponse for AppError {
             Self::EmbeddingError(message) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Embedding error: {message}"),
+            ),
+            Self::RerankError(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Rerank error: {message}"),
             ),
             Self::Conflict => (StatusCode::CONFLICT, String::from("Conflict")),
         };
