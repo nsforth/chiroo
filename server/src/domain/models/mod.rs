@@ -1,6 +1,7 @@
 pub mod auth_user;
 pub mod chat;
 pub mod document;
+pub mod document_chunk;
 pub mod knowledge_base;
 pub mod messages;
 pub mod session;

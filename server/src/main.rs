@@ -20,6 +20,7 @@ mod utils;
 
 use crate::config::{config, Config};
 use crate::errors::AppError;
+use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::repositories::session_repository::SessionRepository;
 use crate::routes::app_router;
 use crate::routes_internal::internal_api_router;
@@ -109,6 +110,13 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
 
     let ai_service = AiService::new(&app_config.openai, prompt_renderer, message_service.clone());
 
+    let qdrant_client = QdrantClient::new(
+        app_config.qdrant.url(),
+        app_config.qdrant.api_key(),
+        app_config.qdrant.collection_prefix().to_string(),
+    )
+    .expect("Failed to create Qdrant client");
+
     AppState {
         chat_service: ChatService::new(pool.clone(), message_service.clone()),
         message_service,
@@ -116,6 +124,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         ai_service,
         auth_service,
         knowledge_service: KnowledgeService::new(pool),
+        qdrant_client,
         config: app_config,
     }
 }

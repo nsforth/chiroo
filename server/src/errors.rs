@@ -16,6 +16,7 @@ pub enum AppError {
     BodyParsingError(String),
     Unauthorized,
     OidcError(String),
+    QdrantError(String),
     Conflict,
 }
 
@@ -28,6 +29,7 @@ impl Display for AppError {
             AppError::BodyParsingError(e) => write!(f, "Body parsing error: {}", e),
             AppError::Unauthorized => write!(f, "Unathorized"),
             AppError::OidcError(e) => write!(f, "OIDC Error: {}", e),
+            AppError::QdrantError(e) => write!(f, "Qdrant error: {}", e),
             AppError::Conflict => write!(f, "Conflict"),
         }
     }
@@ -50,6 +52,10 @@ impl IntoResponse for AppError {
             Self::OidcError(message) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("OIDC error: {message}"),
+            ),
+            Self::QdrantError(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Qdrant error: {message}"),
             ),
             Self::Conflict => (StatusCode::CONFLICT, String::from("Conflict")),
         };

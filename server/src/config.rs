@@ -112,12 +112,34 @@ impl OpenAiConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct QdrantConfig {
+    url: String,
+    api_key: Option<String>,
+    collection_prefix: String,
+}
+
+impl QdrantConfig {
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
+    }
+
+    pub fn collection_prefix(&self) -> &str {
+        &self.collection_prefix
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub internal_api: InternalApiConfig,
     pub db: DatabaseConfig,
     pub openai: OpenAiConfig,
     pub oidc: OidcConfig,
+    pub qdrant: QdrantConfig,
 }
 
 impl Config {
@@ -193,6 +215,13 @@ async fn init_config() -> Config {
     let app_base_url = env::var("APP_BASE_URL").expect("APP_BASE_URL must be set");
     let secure_cookie = !app_base_url.starts_with("http://");
 
+    let qdrant_config = QdrantConfig {
+        url: env::var("QDRANT_URL").unwrap_or_else(|_| String::from("http://localhost:6334")),
+        api_key: env::var("QDRANT_API_KEY").ok(),
+        collection_prefix: env::var("QDRANT_COLLECTION_PREFIX")
+            .unwrap_or_else(|_| String::from("chiroo")),
+    };
+
     let oidc_config = OidcConfig {
         redirect_uri: format!("{app_base_url}/api/auth/oidc/callback"),
         secure_cookie,
@@ -235,6 +264,7 @@ async fn init_config() -> Config {
         db: database_config,
         openai: openai_config,
         oidc: oidc_config,
+        qdrant: qdrant_config,
     }
 }
 

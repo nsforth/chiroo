@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
 use crate::services::chat_service::ChatService;
@@ -15,4 +16,5 @@ pub struct AppState {
     pub ai_service: AiService,
     pub auth_service: AuthService,
     pub knowledge_service: KnowledgeService,
+    pub qdrant_client: QdrantClient,
 }
