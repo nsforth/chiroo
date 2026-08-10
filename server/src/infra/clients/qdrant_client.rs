@@ -10,7 +10,7 @@ use qdrant_client::qdrant::{
     VectorParamsBuilder, Vectors,
 };
 use qdrant_client::Qdrant;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId, SearchedChunk};
@@ -218,35 +218,10 @@ fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
         })),
     };
 
-    let mut payload: HashMap<String, qdrant_client::qdrant::Value> = HashMap::new();
-    payload.insert(
-        "document_id".to_string(),
-        chunk.document_id.0.clone().into(),
-    );
-    payload.insert("chunk_index".to_string(), (chunk.chunk_index as i64).into());
-    payload.insert("chunk_total".to_string(), (chunk.chunk_total as i64).into());
-    payload.insert(
-        "chunk_offset".to_string(),
-        (chunk.chunk_offset as i64).into(),
-    );
-    payload.insert(
-        "chunk_length".to_string(),
-        (chunk.chunk_length as i64).into(),
-    );
-    payload.insert(
-        "document_total_length".to_string(),
-        (chunk.document_total_length as i64).into(),
-    );
-    payload.insert("version".to_string(), chunk.version.clone().into());
-    payload.insert("content".to_string(), chunk.content.clone().into());
-    payload.insert("title".to_string(), chunk.title.clone().into());
-    payload.insert("url".to_string(), chunk.url.clone().into());
-    payload.insert(
-        "metadata".to_string(),
-        serde_json::to_string(&chunk.metadata)
-            .unwrap_or_default()
-            .into(),
-    );
+    let cp = ChunkPayload::from(chunk);
+    let json = serde_json::to_value(&cp).expect("ChunkPayload is always serializable");
+    let payload =
+        qdrant_client::Payload::try_from(json).expect("ChunkPayload serializes to a JSON object");
 
     let point_id = PointId {
         point_id_options: Some(PointIdOptions::Uuid(chunk.id.0.clone())),
@@ -255,7 +230,7 @@ fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
     PointStruct::new(point_id, vectors, payload)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct ChunkPayload {
     document_id: String,
     chunk_index: i32,
@@ -268,6 +243,24 @@ struct ChunkPayload {
     title: String,
     url: String,
     metadata: String,
+}
+
+impl From<&DocumentChunk> for ChunkPayload {
+    fn from(chunk: &DocumentChunk) -> Self {
+        Self {
+            document_id: chunk.document_id.0.clone(),
+            chunk_index: chunk.chunk_index,
+            chunk_total: chunk.chunk_total,
+            chunk_offset: chunk.chunk_offset,
+            chunk_length: chunk.chunk_length,
+            document_total_length: chunk.document_total_length,
+            content: chunk.content.clone(),
+            version: chunk.version.clone(),
+            title: chunk.title.clone(),
+            url: chunk.url.clone(),
+            metadata: serde_json::to_string(&chunk.metadata).unwrap_or_default(),
+        }
+    }
 }
 
 impl ChunkPayload {
