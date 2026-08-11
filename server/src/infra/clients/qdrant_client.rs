@@ -233,11 +233,11 @@ fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
 #[derive(Deserialize, Serialize)]
 struct ChunkPayload {
     document_id: String,
-    chunk_index: i32,
-    chunk_total: i32,
-    chunk_offset: i32,
-    chunk_length: i32,
-    document_total_length: i32,
+    chunk_index: usize,
+    chunk_total: usize,
+    chunk_offset: usize,
+    chunk_length: usize,
+    document_total_length: usize,
     content: String,
     version: String,
     title: String,
@@ -334,7 +334,7 @@ mod tests {
     fn make_chunk(
         document_id: &str,
         kb_id: KnowledgeBaseId,
-        chunk_index: i32,
+        chunk_index: usize,
         content: &str,
         embedding: Vec<f32>,
     ) -> DocumentChunk {
@@ -346,7 +346,7 @@ mod tests {
             chunk_index,
             chunk_total: 3,
             chunk_offset: chunk_index * 100,
-            chunk_length: content.len() as i32,
+            chunk_length: content.len(),
             document_total_length: 300,
             content: content.to_string(),
             embedding,

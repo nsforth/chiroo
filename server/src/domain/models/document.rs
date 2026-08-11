@@ -38,6 +38,7 @@ pub struct CreateDocument {
     pub metadata: Value,
 }
 
+#[derive(Debug)]
 pub struct Document {
     pub id: DocumentId,
     pub kb_id: KnowledgeBaseId,

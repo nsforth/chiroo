@@ -48,6 +48,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = { version ="0.1", features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+text-splitter = { version = "0.32", features = ["markdown"] }
 qdrant-client = { version = "1.19", features = ["serde"] }
 url = "2"
 uuid = { version = "1.23", features = ["fast-rng", "v4", "serde"] }
