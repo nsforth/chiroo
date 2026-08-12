@@ -6,5 +6,6 @@ pub mod knowledge_service;
 pub mod message_service;
 pub mod prompts;
 pub mod scenarios;
+pub mod search_service;
 pub mod tools;
 pub mod vote_service;

@@ -33,6 +33,7 @@ use crate::services::chunking_service::ChunkingService;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
 use crate::services::prompts::PromptRenderer;
+use crate::services::search_service::SearchService;
 use crate::services::vote_service::VoteService;
 use crate::state::AppState;
 
@@ -129,19 +130,30 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
 
     let embedding_dimensions = app_config.embedding.dimensions();
 
+    let knowledge_service = KnowledgeService::new(
+        pool.clone(),
+        chunking_service.clone(),
+        qdrant_client.clone(),
+        embedding_client.clone(),
+        embedding_dimensions,
+    );
+
+    let search_service = SearchService::new(
+        embedding_client.clone(),
+        qdrant_client.clone(),
+        rerank_client.clone(),
+        knowledge_service.clone(),
+        app_config.search.clone(),
+    );
+
     AppState {
         chat_service: ChatService::new(pool.clone(), message_service.clone()),
         message_service,
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,
-        knowledge_service: KnowledgeService::new(
-            pool,
-            chunking_service.clone(),
-            qdrant_client.clone(),
-            embedding_client.clone(),
-            embedding_dimensions,
-        ),
+        knowledge_service,
+        search_service,
         qdrant_client,
         embedding_client,
         rerank_client,
