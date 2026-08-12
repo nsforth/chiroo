@@ -19,6 +19,7 @@ pub enum AppError {
     QdrantError(String),
     EmbeddingError(String),
     RerankError(String),
+    BadRequest(String),
     Conflict,
 }
 
@@ -34,6 +35,7 @@ impl Display for AppError {
             AppError::QdrantError(e) => write!(f, "Qdrant error: {}", e),
             AppError::EmbeddingError(e) => write!(f, "Embedding error: {}", e),
             AppError::RerankError(e) => write!(f, "Rerank error: {}", e),
+            AppError::BadRequest(e) => write!(f, "Bad request: {}", e),
             AppError::Conflict => write!(f, "Conflict"),
         }
     }
@@ -69,6 +71,7 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Rerank error: {message}"),
             ),
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             Self::Conflict => (StatusCode::CONFLICT, String::from("Conflict")),
         };
         (status, Json(json!({ "message": err_msg }))).into_response()

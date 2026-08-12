@@ -16,7 +16,7 @@ use crate::errors::AppError;
 pub struct EmbeddingClient {
     client: Client<OpenAIConfig>,
     model: String,
-    dimensions: Option<u32>,
+    dimensions: u32,
 }
 
 #[derive(Serialize)]
@@ -98,15 +98,13 @@ impl EmbeddingClient {
     }
 }
 
-fn check_dimensions(vectors: &[Vec<f32>], expected: Option<u32>) -> Result<(), AppError> {
-    if let Some(expected) = expected {
-        let expected = expected as usize;
-        if let Some(vector) = vectors.iter().find(|v| v.len() != expected) {
-            return Err(AppError::EmbeddingError(format!(
-                "embedding dimension mismatch: expected {expected}, got {}",
-                vector.len()
-            )));
-        }
+fn check_dimensions(vectors: &[Vec<f32>], expected: u32) -> Result<(), AppError> {
+    let expected = expected as usize;
+    if let Some(vector) = vectors.iter().find(|v| v.len() != expected) {
+        return Err(AppError::EmbeddingError(format!(
+            "embedding dimension mismatch: expected {expected}, got {}",
+            vector.len()
+        )));
     }
     Ok(())
 }
@@ -150,27 +148,21 @@ mod tests {
             base_url: "http://localhost:11434/v1".into(),
             api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
             model: "EMBEDDINGS".into(),
-            dimensions: None,
+            dimensions: 1024,
         };
         EmbeddingClient::new(&config)
     }
 
     #[test]
-    fn dimensions_not_validated_when_none() {
-        let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0, 5.0]];
-        check_dimensions(&vectors, None).expect("None should not validate");
-    }
-
-    #[test]
     fn dimensions_validated_when_matching() {
         let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
-        check_dimensions(&vectors, Some(3)).expect("matching size should pass");
+        check_dimensions(&vectors, 3).expect("matching size should pass");
     }
 
     #[test]
     fn dimensions_mismatch_returns_error() {
         let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0]];
-        let err = check_dimensions(&vectors, Some(3)).expect_err("mismatch should error");
+        let err = check_dimensions(&vectors, 3).expect_err("mismatch should error");
         assert!(err.to_string().contains("expected 3"), "{err}");
         assert!(err.to_string().contains("got 2"), "{err}");
     }
@@ -216,7 +208,7 @@ mod tests {
             base_url: "http://localhost:11434/v1".into(),
             api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
             model: "EMBEDDINGS".into(),
-            dimensions: Some(1),
+            dimensions: 1,
         };
         let client = EmbeddingClient::new(&config);
 
@@ -243,7 +235,7 @@ mod tests {
             base_url: "http://localhost:11434/v1".into(),
             api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
             model: "EMBEDDINGS".into(),
-            dimensions: Some(vector.len() as u32),
+            dimensions: vector.len() as u32,
         };
         let client = EmbeddingClient::new(&config);
 

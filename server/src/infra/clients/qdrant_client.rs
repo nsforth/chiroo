@@ -6,11 +6,13 @@ use qdrant_client::qdrant::{
     point_id::PointIdOptions, vectors::VectorsOptions, Condition, CreateCollectionBuilder,
     DeletePointsBuilder, Distance, DocumentBuilder, FieldCondition, Filter, Fusion, NamedVectors,
     PointId, PointStruct, PointsIdsList, PrefetchQueryBuilder, QueryPointsBuilder, ScoredPoint,
-    SparseVectorConfig, SparseVectorParamsBuilder, UpsertPointsBuilder, Vector,
-    VectorParamsBuilder, Vectors,
+    ScrollPointsBuilder, SetPayloadPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
+    UpsertPointsBuilder, Vector, VectorParamsBuilder, Vectors, VectorsOutput,
 };
-use qdrant_client::Qdrant;
+use qdrant_client::{Payload, Qdrant};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
 use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId, SearchedChunk};
@@ -104,7 +106,7 @@ impl QdrantClient {
         let ids: Vec<PointId> = chunk_ids
             .iter()
             .map(|id| PointId {
-                point_id_options: Some(PointIdOptions::Uuid(id.0.clone())),
+                point_id_options: Some(PointIdOptions::Uuid(id.0.to_string())),
             })
             .collect();
 
@@ -148,6 +150,142 @@ impl QdrantClient {
             .await
             .map_err(|e| AppError::QdrantError(e.to_string()))?;
         Ok(())
+    }
+
+    pub async fn update_chunk_metadata(
+        &self,
+        kb_id: &KnowledgeBaseId,
+        document_id: &DocumentId,
+        title: &str,
+        url: &str,
+        metadata: &Value,
+    ) -> Result<(), AppError> {
+        let name = self.collection_name(kb_id);
+
+        let payload = Payload::try_from(serde_json::json!({
+            "title": title,
+            "url": url,
+            "metadata": serde_json::to_string(metadata).unwrap_or_default(),
+        }))
+        .map_err(|e| AppError::QdrantError(e.to_string()))?;
+
+        let filter = Filter {
+            must: vec![Condition {
+                condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
+                    key: "document_id".to_string(),
+                    r#match: Some(qdrant_client::qdrant::Match {
+                        match_value: Some(qdrant_client::qdrant::r#match::MatchValue::Keyword(
+                            document_id.0.clone(),
+                        )),
+                    }),
+                    ..Default::default()
+                })),
+            }],
+            ..Default::default()
+        };
+
+        self.client
+            .set_payload(
+                SetPayloadPointsBuilder::new(&name, payload)
+                    .points_selector(PointsSelectorOneOf::Filter(filter))
+                    .wait(true),
+            )
+            .await
+            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn scroll_by_document(
+        &self,
+        kb_id: &KnowledgeBaseId,
+        document_id: &DocumentId,
+    ) -> Result<Vec<DocumentChunk>, AppError> {
+        let name = self.collection_name(kb_id);
+
+        let filter = Filter {
+            must: vec![Condition {
+                condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
+                    key: "document_id".to_string(),
+                    r#match: Some(qdrant_client::qdrant::Match {
+                        match_value: Some(qdrant_client::qdrant::r#match::MatchValue::Keyword(
+                            document_id.0.clone(),
+                        )),
+                    }),
+                    ..Default::default()
+                })),
+            }],
+            ..Default::default()
+        };
+
+        let mut results: Vec<DocumentChunk> = Vec::new();
+        let mut offset: Option<PointId> = None;
+
+        loop {
+            let mut builder = ScrollPointsBuilder::new(&name)
+                .filter(filter.clone())
+                .with_payload(true)
+                .with_vectors(true)
+                .limit(1000);
+
+            if let Some(ref off) = offset {
+                builder = builder.offset(off.clone());
+            }
+
+            let response = self
+                .client
+                .scroll(builder)
+                .await
+                .map_err(|e| AppError::QdrantError(e.to_string()))?;
+
+            for point in response.result {
+                let point_id = point
+                    .id
+                    .ok_or_else(|| AppError::QdrantError("scroll point missing ID".into()))?;
+                let id_str = match point_id.point_id_options {
+                    Some(PointIdOptions::Uuid(s)) => s,
+                    _ => {
+                        return Err(AppError::QdrantError(
+                            "scroll point ID is not a UUID".into(),
+                        ))
+                    },
+                };
+
+                let uuid = Uuid::parse_str(&id_str)
+                    .map_err(|e| AppError::QdrantError(format!("invalid chunk UUID: {e}")))?;
+
+                let payload = Payload::from(point.payload);
+                let cp: ChunkPayload = payload
+                    .deserialize()
+                    .map_err(|e| AppError::QdrantError(e.to_string()))?;
+
+                let embedding = extract_dense_vector(&point.vectors);
+                let metadata = serde_json::from_str(&cp.metadata).unwrap_or_default();
+
+                results.push(DocumentChunk {
+                    id: DocumentChunkId(uuid),
+                    document_id: DocumentId(cp.document_id),
+                    kb_id: *kb_id,
+                    chunk_index: cp.chunk_index,
+                    chunk_total: cp.chunk_total,
+                    chunk_offset: cp.chunk_offset,
+                    chunk_length: cp.chunk_length,
+                    document_total_length: cp.document_total_length,
+                    content: cp.content,
+                    embedding,
+                    version: cp.version,
+                    title: cp.title,
+                    url: cp.url,
+                    metadata,
+                });
+            }
+
+            offset = response.next_page_offset;
+            if offset.is_none() {
+                break;
+            }
+        }
+
+        Ok(results)
     }
 
     pub async fn search_hybrid(
@@ -204,6 +342,32 @@ impl QdrantClient {
     }
 }
 
+fn extract_dense_vector(vectors: &Option<VectorsOutput>) -> Vec<f32> {
+    let Some(v) = vectors else {
+        return Vec::new();
+    };
+    let Some(ref options) = v.vectors_options else {
+        return Vec::new();
+    };
+    match options {
+        qdrant_client::qdrant::vectors_output::VectorsOptions::Vectors(named) => named
+            .vectors
+            .get("")
+            .map(dense_from_vector_output)
+            .unwrap_or_default(),
+        qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(vec) => {
+            dense_from_vector_output(vec)
+        },
+    }
+}
+
+fn dense_from_vector_output(vec: &qdrant_client::qdrant::VectorOutput) -> Vec<f32> {
+    match vec.clone().into_vector() {
+        qdrant_client::qdrant::vector_output::Vector::Dense(dense) => dense.data,
+        _ => Vec::new(),
+    }
+}
+
 fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
     let mut named_vectors = HashMap::new();
     named_vectors.insert(String::new(), Vector::from(chunk.embedding.clone()));
@@ -224,7 +388,7 @@ fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
         qdrant_client::Payload::try_from(json).expect("ChunkPayload serializes to a JSON object");
 
     let point_id = PointId {
-        point_id_options: Some(PointIdOptions::Uuid(chunk.id.0.clone())),
+        point_id_options: Some(PointIdOptions::Uuid(chunk.id.0.to_string())),
     };
 
     PointStruct::new(point_id, vectors, payload)
@@ -306,7 +470,12 @@ impl TryFrom<ScoredPoint> for SearchedChunk {
             .deserialize()
             .map_err(|e| AppError::QdrantError(e.to_string()))?;
 
-        cp.into_searched_chunk(DocumentChunkId(id), point.score)
+        cp.into_searched_chunk(
+            DocumentChunkId(Uuid::parse_str(&id).map_err(|e| {
+                AppError::QdrantError(format!("invalid chunk UUID in search result: {e}"))
+            })?),
+            point.score,
+        )
     }
 }
 #[cfg(test)]
@@ -338,7 +507,7 @@ mod tests {
         content: &str,
         embedding: Vec<f32>,
     ) -> DocumentChunk {
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4();
         DocumentChunk {
             id: DocumentChunkId(id),
             document_id: DocumentId(document_id.to_string()),
@@ -389,7 +558,7 @@ mod tests {
             .await
             .expect("create collection");
 
-        let expected_id = DocumentChunkId(Uuid::new_v4().to_string());
+        let expected_id = DocumentChunkId(Uuid::new_v4());
         let expected_doc_id = DocumentId("chunk-42".to_string());
         let expected_metadata = serde_json::json!({
             "author": "Alice",
@@ -468,8 +637,8 @@ mod tests {
             .await
             .expect("create collection");
 
-        let chunk_a_id = DocumentChunkId(Uuid::new_v4().to_string());
-        let chunk_b_id = DocumentChunkId(Uuid::new_v4().to_string());
+        let chunk_a_id = DocumentChunkId(Uuid::new_v4());
+        let chunk_b_id = DocumentChunkId(Uuid::new_v4());
 
         let chunks = vec![
             DocumentChunk {
@@ -559,6 +728,52 @@ mod tests {
 
         assert_eq!(results.len(), 1, "only doc B chunk should remain");
         assert_eq!(results[0].document_id, DocumentId("doc-b".to_string()));
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete collection");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn scroll_by_document() {
+        let kb_id = make_kb_id();
+        let client = make_client("scroll_by_document");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create collection");
+
+        let chunk_a0 = make_chunk("doc-a", kb_id, 0, "content a0", small_embedding(0.3));
+        let chunk_a1 = make_chunk("doc-a", kb_id, 1, "content a1", small_embedding(0.3));
+        let chunk_b = make_chunk("doc-b", kb_id, 0, "content b0", small_embedding(0.3));
+
+        client
+            .upsert_chunks(&kb_id, &[chunk_a0.clone(), chunk_a1.clone(), chunk_b])
+            .await
+            .expect("upsert");
+
+        let results = client
+            .scroll_by_document(&kb_id, &DocumentId("doc-a".to_string()))
+            .await
+            .expect("scroll_by_document");
+
+        assert_eq!(results.len(), 2, "should return 2 chunks for doc-a");
+        let ids: Vec<&DocumentChunkId> = results.iter().map(|c| &c.id).collect();
+        assert!(ids.contains(&&chunk_a0.id), "should contain chunk_a0 id");
+        assert!(ids.contains(&&chunk_a1.id), "should contain chunk_a1 id");
+        let contents: Vec<&str> = results.iter().map(|c| c.content.as_str()).collect();
+        assert!(contents.contains(&"content a0"));
+        assert!(contents.contains(&"content a1"));
+
+        let empty = client
+            .scroll_by_document(&kb_id, &DocumentId("nonexistent".to_string()))
+            .await
+            .expect("scroll nonexistent doc");
+
+        assert!(empty.is_empty(), "nonexistent doc should return empty");
 
         client
             .delete_collection(&kb_id)

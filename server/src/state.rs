@@ -5,6 +5,7 @@ use crate::infra::clients::rerank_client::RerankClient;
 use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
 use crate::services::chat_service::ChatService;
+use crate::services::chunking_service::ChunkingService;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
 use crate::services::vote_service::VoteService;
@@ -21,4 +22,5 @@ pub struct AppState {
     pub qdrant_client: QdrantClient,
     pub embedding_client: EmbeddingClient,
     pub rerank_client: RerankClient,
+    pub chunking_service: ChunkingService,
 }

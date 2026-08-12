@@ -255,6 +255,35 @@ pub async fn update(
     .map(Into::into)
 }
 
+pub async fn update_metadata(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: &DocumentId,
+    title: &str,
+    url: &str,
+    metadata: &Value,
+) -> Result<Document, InfraError> {
+    let id_clone = id.0.clone();
+    let title = title.to_string();
+    let url = url.to_string();
+    let metadata = metadata.clone();
+    let conn = pool.get().await.map_err(InfraError::from)?;
+    conn.interact(move |conn| {
+        diesel::update(documents::table.find(&id_clone))
+            .set((
+                documents::title.eq(title),
+                documents::url.eq(url),
+                documents::metadata.eq(metadata),
+                documents::updated_at.eq(diesel::dsl::now),
+            ))
+            .returning(DocumentDb::as_returning())
+            .get_result(conn)
+    })
+    .await
+    .map_err(InfraError::from)?
+    .map_err(InfraError::from)
+    .map(Into::into)
+}
+
 pub async fn delete(
     pool: &deadpool_diesel::postgres::Pool,
     id: &DocumentId,

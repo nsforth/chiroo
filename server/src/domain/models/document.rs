@@ -51,6 +51,29 @@ pub struct Document {
     pub updated_at: NaiveDateTime,
 }
 
+impl Document {
+    pub fn with_meta(
+        &self,
+        title: String,
+        url: String,
+        version: String,
+        mime_type: MimeType,
+        metadata: Value,
+    ) -> Self {
+        Document {
+            id: self.id.clone(),
+            kb_id: self.kb_id,
+            title,
+            url,
+            version,
+            mime_type,
+            metadata,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
 pub struct DocumentData {
     pub document_id: DocumentId,
     pub data: Vec<u8>,

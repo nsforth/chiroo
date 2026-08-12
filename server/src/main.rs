@@ -29,6 +29,7 @@ use crate::routes_internal::internal_api_router;
 use crate::services::ai_service::AiService;
 use crate::services::auth_service::AuthService;
 use crate::services::chat_service::ChatService;
+use crate::services::chunking_service::ChunkingService;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
 use crate::services::prompts::PromptRenderer;
@@ -124,16 +125,27 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
     let rerank_client =
         RerankClient::new(&app_config.rerank).expect("Failed to create Rerank client");
 
+    let chunking_service = ChunkingService::new(app_config.chunking.max_chunk_size);
+
+    let embedding_dimensions = app_config.embedding.dimensions();
+
     AppState {
         chat_service: ChatService::new(pool.clone(), message_service.clone()),
         message_service,
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,
-        knowledge_service: KnowledgeService::new(pool),
+        knowledge_service: KnowledgeService::new(
+            pool,
+            chunking_service.clone(),
+            qdrant_client.clone(),
+            embedding_client.clone(),
+            embedding_dimensions,
+        ),
         qdrant_client,
         embedding_client,
         rerank_client,
+        chunking_service,
         config: app_config,
     }
 }

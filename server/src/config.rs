@@ -36,7 +36,7 @@ pub struct EmbeddingConfig {
     pub base_url: String,
     pub api_key: SecretString,
     pub model: String,
-    pub dimensions: Option<u32>,
+    pub dimensions: u32,
 }
 
 impl EmbeddingConfig {
@@ -52,7 +52,7 @@ impl EmbeddingConfig {
         self.model.clone()
     }
 
-    pub fn dimensions(&self) -> Option<u32> {
+    pub fn dimensions(&self) -> u32 {
         self.dimensions
     }
 }
@@ -180,6 +180,11 @@ impl QdrantConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChunkingConfig {
+    pub max_chunk_size: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub internal_api: InternalApiConfig,
@@ -189,6 +194,7 @@ pub struct Config {
     pub oidc: OidcConfig,
     pub qdrant: QdrantConfig,
     pub rerank: RerankConfig,
+    pub chunking: ChunkingConfig,
 }
 
 impl Config {
@@ -268,10 +274,10 @@ async fn init_config() -> Config {
                 .into_boxed_str(),
         ),
         model: env::var("EMBEDDING_MODEL").expect("EMBEDDING_MODEL must be set"),
-        dimensions: env::var("EMBEDDING_DIMENSIONS").ok().map(|s| {
-            s.parse()
-                .expect("EMBEDDING_DIMENSIONS must be a positive integer")
-        }),
+        dimensions: env::var("EMBEDDING_DIMENSIONS")
+            .expect("EMBEDDING_DIMENSIONS must be set")
+            .parse()
+            .expect("EMBEDDING_DIMENSIONS must be a positive integer"),
     };
 
     let rerank_config = RerankConfig {
@@ -330,6 +336,13 @@ async fn init_config() -> Config {
             .expect("oidc access token expires defult time must be positive integer in seconds"),
     };
 
+    let chunking_config = ChunkingConfig {
+        max_chunk_size: env::var("CHUNK_SIZE")
+            .unwrap_or_else(|_| "512".into())
+            .parse()
+            .expect("CHUNK_SIZE must be a positive integer"),
+    };
+
     Config {
         server: server_config,
         internal_api: internal_api_config,
@@ -339,6 +352,7 @@ async fn init_config() -> Config {
         rerank: rerank_config,
         oidc: oidc_config,
         qdrant: qdrant_config,
+        chunking: chunking_config,
     }
 }
 

@@ -32,13 +32,9 @@ pub struct CreateDocForm {
 #[derive(TryFromMultipart)]
 pub struct UpdateDocForm {
     pub version: String,
-    #[form_data(default)]
     pub title: String,
-    #[form_data(default)]
     pub url: String,
-    #[form_data(default)]
     pub mime_type: String,
-    #[form_data(default)]
     pub metadata: String,
     pub data: FieldData<Bytes>,
 }
@@ -177,6 +173,25 @@ pub async fn update_document(
             metadata,
             form.data.contents.to_vec(),
         )
+        .await?;
+    Ok(Json(doc.into()))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateDocMetadataRequest {
+    pub title: String,
+    pub url: String,
+    pub metadata: Value,
+}
+
+pub async fn update_document_metadata(
+    State(state): State<AppState>,
+    PathExtractor(id): PathExtractor<String>,
+    Json(req): Json<UpdateDocMetadataRequest>,
+) -> Result<Json<DocListItem>, ErrorResponse> {
+    let doc = state
+        .knowledge_service
+        .update_document_metadata(&DocumentId(id), req.title, req.url, req.metadata)
         .await?;
     Ok(Json(doc.into()))
 }
