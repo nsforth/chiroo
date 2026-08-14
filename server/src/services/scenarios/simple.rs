@@ -8,7 +8,7 @@ pub fn simple() -> Scenario {
         rounds: vec![
             RoundConfig {
                 prompt_template: "simple/search.md".into(),
-                tool_names: vec!["search_rag".into()],
+                tool_names: vec!["search_knowledge_base".into()],
                 max_llm_calls: 1,
                 reasoning_effort: None,
                 extra_body: None,
@@ -20,7 +20,7 @@ pub fn simple() -> Scenario {
             },
             RoundConfig {
                 prompt_template: "simple/extract.md".into(),
-                tool_names: vec!["extract_page".into()],
+                tool_names: vec!["extract_document".into()],
                 max_llm_calls: 1,
                 reasoning_effort: None,
                 extra_body: None,

@@ -1330,7 +1330,7 @@ mod tests {
     fn tool_call_block(id: &str, output: Value) -> MessagePart {
         MessagePart::ToolCall(ToolCallBlock {
             tool_call_id: id.to_string(),
-            tool_name: "search_rag".into(),
+            tool_name: "search_knowledge_base".into(),
             input: serde_json::json!({ "queries": ["test"] }),
             output: Some(output),
             error: None,
@@ -1371,7 +1371,10 @@ mod tests {
         assert_eq!(json[0]["role"], "assistant");
         assert_eq!(json[0]["content"], "Found relevant chunks");
         assert_eq!(json[0]["tool_calls"][0]["id"], "c1");
-        assert_eq!(json[0]["tool_calls"][0]["function"]["name"], "search_rag");
+        assert_eq!(
+            json[0]["tool_calls"][0]["function"]["name"],
+            "search_knowledge_base"
+        );
         assert_eq!(json[0]["tool_calls"][1]["id"], "c2");
 
         // Each tool call has a matching tool result
@@ -1495,10 +1498,10 @@ mod tests {
     fn converter_handles_tool_error_output() {
         let msg = assistant_msg(vec![MessagePart::ToolCall(ToolCallBlock {
             tool_call_id: "c1".into(),
-            tool_name: "extract_page".into(),
-            input: serde_json::json!({ "page_ids": ["p1"] }),
+            tool_name: "extract_document".into(),
+            input: serde_json::json!({ "document_id": "doc-1" }),
             output: None,
-            error: Some("page not found".into()),
+            error: Some("document not found".into()),
             state: ToolCallState::Error,
         })]);
 
@@ -1514,7 +1517,7 @@ mod tests {
             json[1]["content"]
                 .as_str()
                 .unwrap()
-                .contains("page not found"),
+                .contains("document not found"),
             "Tool error should be propagated to the model"
         );
     }
@@ -1663,7 +1666,12 @@ mod tests {
     #[test]
     fn accumulator_emits_consistent_tool_call_ids_when_id_comes_first() {
         let events = collect_tool_events(vec![
-            tool_chunk(0, Some("call_1"), Some("search_rag"), Some("{\"queries\":")),
+            tool_chunk(
+                0,
+                Some("call_1"),
+                Some("search_knowledge_base"),
+                Some("{\"queries\":"),
+            ),
             tool_chunk(0, None, None, Some("[\"rust\"]}")),
         ]);
 
@@ -1703,7 +1711,12 @@ mod tests {
     #[test]
     fn accumulator_defers_start_until_tool_call_id_arrives() {
         let events = collect_tool_events(vec![
-            tool_chunk(0, None, Some("search_rag"), Some("{\"queries\":")),
+            tool_chunk(
+                0,
+                None,
+                Some("search_knowledge_base"),
+                Some("{\"queries\":"),
+            ),
             tool_chunk(0, Some("call_9"), None, Some("[\"rust\"]}")),
         ]);
 

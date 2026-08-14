@@ -1,1 +1,1 @@
-pub mod rag;
+pub mod knowledge_base;

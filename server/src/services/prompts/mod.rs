@@ -80,7 +80,7 @@ mod tests {
         let result = renderer()
             .render("simple/search.md", &test_context())
             .expect("Failed to render");
-        assert!(result.contains("search_rag"));
+        assert!(result.contains("search_knowledge_base"));
         assert!(result.contains("What is Rust?"));
     }
 
@@ -89,7 +89,7 @@ mod tests {
         let result = renderer()
             .render("simple/extract.md", &test_context())
             .expect("Failed to render");
-        assert!(result.contains("extract_page"));
+        assert!(result.contains("extract_document"));
     }
 
     #[test]
@@ -105,7 +105,7 @@ mod tests {
         let result = renderer()
             .render("deep_research/search.md", &test_context())
             .expect("Failed to render");
-        assert!(result.contains("search_rag"));
+        assert!(result.contains("search_knowledge_base"));
     }
 
     #[test]

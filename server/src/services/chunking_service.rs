@@ -26,19 +26,24 @@ impl ChunkingService {
         let splitter = MarkdownSplitter::new(self.max_chunk_size);
         let chunks_raw: Vec<(usize, &str)> = splitter.chunk_indices(text).collect();
         let chunk_total = chunks_raw.len();
-        let document_total_length = text.len();
+        let document_total_length = text.chars().count();
+
+        // Offsets and lengths are character-based (Unicode scalar values), not
+        // bytes, so that the whole pipeline (chunk → search → extract) stays
+        // consistent across languages with multi-byte characters.
+        let char_starts: Vec<usize> = text.char_indices().map(|(byte, _)| byte).collect();
 
         let result: Vec<DocumentChunk> = chunks_raw
             .into_iter()
             .enumerate()
-            .map(|(chunk_index, (chunk_offset, content))| DocumentChunk {
+            .map(|(chunk_index, (byte_offset, content))| DocumentChunk {
                 id: DocumentChunkId::from_doc_id_and_chunk_idx(&document.id, chunk_index),
                 document_id: document.id.clone(),
                 kb_id,
                 chunk_index,
                 chunk_total,
-                chunk_offset,
-                chunk_length: content.len(),
+                chunk_offset: char_starts.partition_point(|&byte| byte < byte_offset),
+                chunk_length: content.chars().count(),
                 document_total_length,
                 content: content.to_string(),
                 embedding: Vec::new(),
@@ -256,13 +261,20 @@ mod tests {
         let chunks = service.chunk_markdown(kb_id, &doc, text);
 
         assert!(!chunks.is_empty(), "unicode text must produce chunks");
+        let char_starts: Vec<usize> = text.char_indices().map(|(byte, _)| byte).collect();
         for chunk in &chunks {
-            let start = chunk.chunk_offset as usize;
-            let end = start + chunk.chunk_length as usize;
-            let slice = &text[start..end];
+            let start = chunk.chunk_offset;
+            let end = start + chunk.chunk_length;
+            let start_byte = char_starts[start];
+            let end_byte = if end >= char_starts.len() {
+                text.len()
+            } else {
+                char_starts[end]
+            };
+            let slice = &text[start_byte..end_byte];
             assert_eq!(
                 slice, chunk.content,
-                "chunk content at byte offset {start} must match original text slice"
+                "chunk content at char offset {start} must match original text slice"
             );
         }
     }
