@@ -8,6 +8,7 @@ use crate::services::chat_service::ChatService;
 use crate::services::chunking_service::ChunkingService;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
+use crate::services::search_service::SearchService;
 use crate::services::vote_service::VoteService;
 
 #[derive(Clone)]
@@ -19,6 +20,7 @@ pub struct AppState {
     pub ai_service: AiService,
     pub auth_service: AuthService,
     pub knowledge_service: KnowledgeService,
+    pub search_service: SearchService,
     pub qdrant_client: QdrantClient,
     pub embedding_client: EmbeddingClient,
     pub rerank_client: RerankClient,

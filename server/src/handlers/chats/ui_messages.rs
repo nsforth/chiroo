@@ -250,9 +250,9 @@ mod tests {
             {
                 "type": "ToolCall",
                 "tool_call_id": "call-1",
-                "tool_name": "search_rag",
+                "tool_name": "search_knowledge_base",
                 "input": { "queries": ["rust ownership"] },
-                "output": { "chunks": [{ "chunk_id": "c1" }] },
+                "output": { "chunks": [{ "document_id": "doc-1" }] },
                 "error": null,
                 "state": "Done"
             }
@@ -262,13 +262,13 @@ mod tests {
         assert_eq!(ui_parts.len(), 1);
 
         let json = serde_json::to_value(&ui_parts[0]).unwrap();
-        assert_eq!(json["type"], "tool-search_rag");
+        assert_eq!(json["type"], "tool-search_knowledge_base");
         assert_eq!(json["toolCallId"], "call-1");
-        assert_eq!(json["toolName"], "search_rag");
+        assert_eq!(json["toolName"], "search_knowledge_base");
         assert_eq!(json["state"], "output-available");
         assert_eq!(json["providerExecuted"], true);
         assert_eq!(json["input"]["queries"][0], "rust ownership");
-        assert_eq!(json["output"]["chunks"][0]["chunk_id"], "c1");
+        assert_eq!(json["output"]["chunks"][0]["document_id"], "doc-1");
     }
 
     #[test]
@@ -277,19 +277,19 @@ mod tests {
             {
                 "type": "ToolCall",
                 "tool_call_id": "call-2",
-                "tool_name": "extract_page",
-                "input": { "page_ids": ["p1"] },
+                "tool_name": "extract_document",
+                "input": { "document_id": "doc-1" },
                 "output": null,
-                "error": "page not found",
+                "error": "document not found",
                 "state": "Error"
             }
         ]);
 
         let ui_parts = convert_parts_to_ui(&parts);
         let json = serde_json::to_value(&ui_parts[0]).unwrap();
-        assert_eq!(json["type"], "tool-extract_page");
+        assert_eq!(json["type"], "tool-extract_document");
         assert_eq!(json["state"], "output-error");
-        assert_eq!(json["errorText"], "page not found");
+        assert_eq!(json["errorText"], "document not found");
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod tests {
             {
                 "type": "ToolCall",
                 "tool_call_id": "call-3",
-                "tool_name": "search_rag",
+                "tool_name": "search_knowledge_base",
                 "input": { "queries": [] },
                 "output": null,
                 "error": null,

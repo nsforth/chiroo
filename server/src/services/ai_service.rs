@@ -12,9 +12,11 @@ use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{Message, MessageId, MessagePart, Role, TextBlock};
 use crate::domain::models::stream_event::MessageStreamEvent;
 use crate::infra::clients::llm_client::{LlmClient, RunRoundParams};
+use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
 use crate::services::prompts::{PromptRenderer, TemplateContext};
 use crate::services::scenarios::{create_tools, scenario_for_model};
+use crate::services::search_service::SearchService;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -22,6 +24,8 @@ pub struct AiService {
     llm_client: LlmClient,
     prompt_renderer: PromptRenderer,
     message_service: MessageService,
+    search_service: SearchService,
+    knowledge_service: KnowledgeService,
 }
 
 impl AiService {
@@ -29,6 +33,8 @@ impl AiService {
         config: &OpenAiConfig,
         prompt_renderer: PromptRenderer,
         message_service: MessageService,
+        search_service: SearchService,
+        knowledge_service: KnowledgeService,
     ) -> Self {
         let openai_config = OpenAIConfig::new()
             .with_api_base(config.base_url())
@@ -40,6 +46,8 @@ impl AiService {
             llm_client,
             prompt_renderer,
             message_service,
+            search_service,
+            knowledge_service,
         }
     }
 
@@ -57,6 +65,8 @@ impl AiService {
         let llm_client = self.llm_client.clone();
         let prompt_renderer = self.prompt_renderer.clone();
         let message_service = self.message_service.clone();
+        let search_service = self.search_service.clone();
+        let knowledge_service = self.knowledge_service.clone();
         let chat_id2 = chat_id;
         let model = model.to_string();
         let user_message = user_message.to_string(); // TODO: Fix user message only, take previous dialog, about 3-4 messages of assistant and user
@@ -69,6 +79,8 @@ impl AiService {
                 llm_client,
                 prompt_renderer,
                 message_service,
+                search_service,
+                knowledge_service,
                 chat_id2,
                 &model,
                 &user_message,
@@ -94,6 +106,8 @@ async fn run_scenario(
     llm_client: LlmClient,
     prompt_renderer: PromptRenderer,
     message_service: MessageService,
+    search_service: SearchService,
+    knowledge_service: KnowledgeService,
     chat_id: ChatId,
     model: &str,
     user_message: &str,
@@ -142,7 +156,7 @@ async fn run_scenario(
             .render(&round.prompt_template, &ctx)
             .map_err(|e| format!("Failed to render prompt '{}': {e}", round.prompt_template))?;
 
-        let tools = create_tools(&round.tool_names);
+        let tools = create_tools(&round.tool_names, &search_service, &knowledge_service);
 
         let params = RunRoundParams {
             system_prompt: prompt,

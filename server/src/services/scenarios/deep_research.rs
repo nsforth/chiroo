@@ -10,7 +10,7 @@ pub fn deep_research() -> Scenario {
         rounds: vec![
             RoundConfig {
                 prompt_template: "deep_research/search.md".into(),
-                tool_names: vec!["search_rag".into()],
+                tool_names: vec!["search_knowledge_base".into()],
                 max_llm_calls: 1,
                 reasoning_effort: Some(ReasoningEffort::High),
                 extra_body: None,
@@ -22,7 +22,7 @@ pub fn deep_research() -> Scenario {
             },
             RoundConfig {
                 prompt_template: "deep_research/explore.md".into(),
-                tool_names: vec!["search_rag".into(), "extract_page".into()],
+                tool_names: vec!["search_knowledge_base".into(), "extract_document".into()],
                 max_llm_calls: 10,
                 reasoning_effort: Some(ReasoningEffort::High),
                 extra_body: None,

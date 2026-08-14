@@ -185,6 +185,13 @@ pub struct ChunkingConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct SearchConfig {
+    pub limit: usize,
+    pub score_threshold: f32,
+    pub candidate_limit: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub internal_api: InternalApiConfig,
@@ -195,6 +202,7 @@ pub struct Config {
     pub qdrant: QdrantConfig,
     pub rerank: RerankConfig,
     pub chunking: ChunkingConfig,
+    pub search: SearchConfig,
 }
 
 impl Config {
@@ -343,6 +351,21 @@ async fn init_config() -> Config {
             .expect("CHUNK_SIZE must be a positive integer"),
     };
 
+    let search_config = SearchConfig {
+        limit: env::var("SEARCH_LIMIT")
+            .unwrap_or_else(|_| "10".into())
+            .parse()
+            .expect("SEARCH_LIMIT must be a positive integer"),
+        score_threshold: env::var("SEARCH_SCORE_THRESHOLD")
+            .unwrap_or_else(|_| "0.5".into())
+            .parse()
+            .expect("SEARCH_SCORE_THRESHOLD must be a float"),
+        candidate_limit: env::var("SEARCH_CANDIDATE_LIMIT")
+            .unwrap_or_else(|_| "30".into())
+            .parse()
+            .expect("SEARCH_CANDIDATE_LIMIT must be a positive integer"),
+    };
+
     Config {
         server: server_config,
         internal_api: internal_api_config,
@@ -353,6 +376,7 @@ async fn init_config() -> Config {
         oidc: oidc_config,
         qdrant: qdrant_config,
         chunking: chunking_config,
+        search: search_config,
     }
 }
 

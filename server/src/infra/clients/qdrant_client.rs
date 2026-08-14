@@ -335,7 +335,7 @@ impl QdrantClient {
         let results = response
             .result
             .into_iter()
-            .filter_map(|point| SearchedChunk::try_from(point).ok())
+            .filter_map(|point| searched_chunk_from_scored_point(point, *kb_id).ok())
             .collect();
 
         Ok(results)
@@ -431,6 +431,7 @@ impl ChunkPayload {
     fn into_searched_chunk(
         self,
         id: DocumentChunkId,
+        kb_id: KnowledgeBaseId,
         score: f32,
     ) -> Result<SearchedChunk, AppError> {
         let metadata = serde_json::from_str(&self.metadata)
@@ -438,6 +439,7 @@ impl ChunkPayload {
         Ok(SearchedChunk {
             id,
             document_id: DocumentId(self.document_id),
+            kb_id,
             chunk_index: self.chunk_index,
             chunk_total: self.chunk_total,
             chunk_offset: self.chunk_offset,
@@ -453,30 +455,30 @@ impl ChunkPayload {
     }
 }
 
-impl TryFrom<ScoredPoint> for SearchedChunk {
-    type Error = AppError;
+fn searched_chunk_from_scored_point(
+    point: ScoredPoint,
+    kb_id: KnowledgeBaseId,
+) -> Result<SearchedChunk, AppError> {
+    let id = point
+        .id
+        .and_then(|id| match id.point_id_options {
+            Some(PointIdOptions::Uuid(s)) => Some(s),
+            _ => None,
+        })
+        .ok_or_else(|| AppError::QdrantError("point is missing a UUID ID".into()))?;
 
-    fn try_from(point: ScoredPoint) -> Result<Self, Self::Error> {
-        let id = point
-            .id
-            .and_then(|id| match id.point_id_options {
-                Some(PointIdOptions::Uuid(s)) => Some(s),
-                _ => None,
-            })
-            .ok_or_else(|| AppError::QdrantError("point is missing a UUID ID".into()))?;
+    let payload = qdrant_client::Payload::from(point.payload);
+    let cp: ChunkPayload = payload
+        .deserialize()
+        .map_err(|e| AppError::QdrantError(e.to_string()))?;
 
-        let payload = qdrant_client::Payload::from(point.payload);
-        let cp: ChunkPayload = payload
-            .deserialize()
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
-
-        cp.into_searched_chunk(
-            DocumentChunkId(Uuid::parse_str(&id).map_err(|e| {
-                AppError::QdrantError(format!("invalid chunk UUID in search result: {e}"))
-            })?),
-            point.score,
-        )
-    }
+    cp.into_searched_chunk(
+        DocumentChunkId(Uuid::parse_str(&id).map_err(|e| {
+            AppError::QdrantError(format!("invalid chunk UUID in search result: {e}"))
+        })?),
+        kb_id,
+        point.score,
+    )
 }
 #[cfg(test)]
 mod tests {

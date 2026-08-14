@@ -2,7 +2,9 @@ use async_openai::types::chat::{ChatCompletionToolChoiceOption, ReasoningEffort}
 use serde_json::Value;
 
 use crate::domain::models::tool::LLMTool;
-use crate::services::tools::rag::{ExtractPageTool, SearchRagTool};
+use crate::services::knowledge_service::KnowledgeService;
+use crate::services::search_service::SearchService;
+use crate::services::tools::knowledge_base::{ExtractDocumentTool, SearchKnowledgeBaseTool};
 
 #[derive(Clone)]
 pub struct RoundConfig {
@@ -37,14 +39,29 @@ pub fn scenario_for_model(model: &str) -> Scenario {
     }
 }
 
-pub fn create_tools(names: &[String]) -> Vec<Box<dyn LLMTool>> {
-    names.iter().filter_map(|name| create_tool(name)).collect()
+pub fn create_tools(
+    names: &[String],
+    search_service: &SearchService,
+    knowledge_service: &KnowledgeService,
+) -> Vec<Box<dyn LLMTool>> {
+    names
+        .iter()
+        .filter_map(|name| create_tool(name, search_service, knowledge_service))
+        .collect()
 }
 
-fn create_tool(name: &str) -> Option<Box<dyn LLMTool>> {
+fn create_tool(
+    name: &str,
+    search_service: &SearchService,
+    knowledge_service: &KnowledgeService,
+) -> Option<Box<dyn LLMTool>> {
     match name {
-        "search_rag" => Some(Box::new(SearchRagTool)),
-        "extract_page" => Some(Box::new(ExtractPageTool)),
+        "search_knowledge_base" => Some(Box::new(SearchKnowledgeBaseTool::new(
+            search_service.clone(),
+        ))),
+        "extract_document" => Some(Box::new(ExtractDocumentTool::new(
+            knowledge_service.clone(),
+        ))),
         _ => None,
     }
 }
@@ -52,6 +69,15 @@ fn create_tool(name: &str) -> Option<Box<dyn LLMTool>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deadpool_diesel::postgres::{Manager, Pool};
+    use deadpool_diesel::Runtime;
+    use secrecy::SecretString;
+
+    use crate::config::{EmbeddingConfig, RerankConfig, SearchConfig};
+    use crate::infra::clients::embedding_client::EmbeddingClient;
+    use crate::infra::clients::qdrant_client::QdrantClient;
+    use crate::infra::clients::rerank_client::RerankClient;
+    use crate::services::chunking_service::ChunkingService;
 
     #[test]
     fn simple_scenario_has_three_rounds() {
@@ -65,7 +91,7 @@ mod tests {
         let scenario = simple();
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "simple/search.md");
-        assert!(r1.tool_names.contains(&"search_rag".into()));
+        assert!(r1.tool_names.contains(&"search_knowledge_base".into()));
         assert!(r1.reasoning_effort.is_none());
         assert_eq!(r1.max_llm_calls, 1);
         assert!(!r1.enable_thinking);
@@ -85,7 +111,7 @@ mod tests {
         let scenario = simple();
         let r2 = &scenario.rounds[1];
         assert_eq!(r2.prompt_template, "simple/extract.md");
-        assert!(r2.tool_names.contains(&"extract_page".into()));
+        assert!(r2.tool_names.contains(&"extract_document".into()));
         assert_eq!(r2.max_llm_calls, 1);
         assert_eq!(
             r2.tool_choice,
@@ -118,7 +144,7 @@ mod tests {
         let scenario = deep_research();
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "deep_research/search.md");
-        assert_eq!(r1.tool_names, vec!["search_rag"]);
+        assert_eq!(r1.tool_names, vec!["search_knowledge_base"]);
         assert!(r1.reasoning_effort.is_some());
         assert_eq!(r1.max_llm_calls, 1);
         assert!(r1.enable_thinking);
@@ -138,8 +164,8 @@ mod tests {
         let scenario = deep_research();
         let r2 = &scenario.rounds[1];
         assert_eq!(r2.prompt_template, "deep_research/explore.md");
-        assert!(r2.tool_names.contains(&"search_rag".into()));
-        assert!(r2.tool_names.contains(&"extract_page".into()));
+        assert!(r2.tool_names.contains(&"search_knowledge_base".into()));
+        assert!(r2.tool_names.contains(&"extract_document".into()));
         assert!(r2.tool_choice.is_none());
         assert!(r2.enable_thinking);
         assert!(r2.preserve_thinking);
@@ -168,19 +194,86 @@ mod tests {
 
     #[test]
     fn create_tools_returns_correct_instances() {
-        let tools = create_tools(&["search_rag".into(), "extract_page".into()]);
+        let search = make_search_service();
+        let knowledge = make_knowledge_service();
+        let tools = create_tools(
+            &["search_knowledge_base".into(), "extract_document".into()],
+            &search,
+            &knowledge,
+        );
         assert_eq!(tools.len(), 2);
     }
 
     #[test]
     fn create_tools_skips_unknown() {
-        let tools = create_tools(&["search_rag".into(), "nonexistent".into()]);
+        let search = make_search_service();
+        let knowledge = make_knowledge_service();
+        let tools = create_tools(
+            &["search_knowledge_base".into(), "nonexistent".into()],
+            &search,
+            &knowledge,
+        );
         assert_eq!(tools.len(), 1);
     }
 
     #[test]
     fn create_tools_empty() {
-        let tools = create_tools(&[]);
+        let search = make_search_service();
+        let knowledge = make_knowledge_service();
+        let tools = create_tools(&[], &search, &knowledge);
         assert!(tools.is_empty());
+    }
+
+    fn make_pool() -> Pool {
+        let manager = Manager::new(
+            "postgres://chiroo:1234@localhost/chiroo_tests".to_string(),
+            Runtime::Tokio1,
+        );
+        Pool::builder(manager)
+            .build()
+            .expect("failed to build pool")
+    }
+
+    fn make_embedding_client() -> EmbeddingClient {
+        EmbeddingClient::new(&EmbeddingConfig {
+            base_url: "http://localhost:11434/v1".into(),
+            api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
+            model: "EMBEDDINGS".into(),
+            dimensions: 1024,
+        })
+    }
+
+    fn make_qdrant_client() -> QdrantClient {
+        QdrantClient::new("http://localhost:6334", None, "test".to_string())
+            .expect("failed to create Qdrant client")
+    }
+
+    fn make_knowledge_service() -> KnowledgeService {
+        KnowledgeService::new(
+            make_pool(),
+            ChunkingService::new(512),
+            make_qdrant_client(),
+            make_embedding_client(),
+            1024,
+        )
+    }
+
+    fn make_search_service() -> SearchService {
+        SearchService::new(
+            make_embedding_client(),
+            make_qdrant_client(),
+            RerankClient::new(&RerankConfig {
+                base_url: "http://localhost:11434/v1".into(),
+                api_key: SecretString::new("".to_string().into_boxed_str()),
+                model: "RERANKER".into(),
+            })
+            .expect("failed to create Rerank client"),
+            make_knowledge_service(),
+            SearchConfig {
+                limit: 10,
+                score_threshold: 0.5,
+                candidate_limit: 30,
+            },
+        )
     }
 }

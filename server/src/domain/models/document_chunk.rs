@@ -46,9 +46,11 @@ impl DocumentChunk {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SearchedChunk {
     pub id: DocumentChunkId,
     pub document_id: DocumentId,
+    pub kb_id: KnowledgeBaseId,
     pub chunk_index: usize,
     pub chunk_total: usize,
     pub chunk_offset: usize,
@@ -60,4 +62,13 @@ pub struct SearchedChunk {
     pub url: String,
     pub metadata: Value,
     pub score: f32,
+}
+
+impl SearchedChunk {
+    pub fn with_score(&self, score: f32) -> Self {
+        SearchedChunk {
+            score,
+            ..self.clone()
+        }
+    }
 }
