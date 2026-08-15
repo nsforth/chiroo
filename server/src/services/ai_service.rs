@@ -125,6 +125,10 @@ async fn run_scenario(
         question: user_message.to_string(),
     };
 
+    let global_prompt = prompt_renderer
+        .render_global_system(&ctx)
+        .map_err(|e| format!("Failed to render global system prompt: {e}"))?;
+
     let mut user_msg = Message::new(chat_id, Role::User);
     user_msg.parts.push(MessagePart::Text(TextBlock {
         text: user_message.to_string(),
@@ -139,7 +143,7 @@ async fn run_scenario(
             .map_err(|e| format!("Failed to save user message: {e}"))?;
     }
 
-    let mut history: Vec<Message> = vec![user_msg];
+    let mut history: Vec<Message> = Vec::new();
     let last_round_index = scenario.rounds.len().saturating_sub(1);
 
     for (round_index, round) in scenario.rounds.clone().into_iter().enumerate() {
@@ -152,14 +156,20 @@ async fn run_scenario(
             status = "round_start"
         );
 
-        let prompt = prompt_renderer
+        let round_prompt = prompt_renderer
             .render(&round.prompt_template, &ctx)
             .map_err(|e| format!("Failed to render prompt '{}': {e}", round.prompt_template))?;
+
+        let mut round_user = Message::new(chat_id, Role::User);
+        round_user
+            .parts
+            .push(MessagePart::Text(TextBlock { text: round_prompt }));
+        history.push(round_user);
 
         let tools = create_tools(&round.tool_names, &search_service, &knowledge_service);
 
         let params = RunRoundParams {
-            system_prompt: prompt,
+            system_prompt: global_prompt.clone(),
             history: history.clone(),
             tools,
             max_llm_calls: round.max_llm_calls,

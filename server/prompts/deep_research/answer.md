@@ -4,4 +4,6 @@ Based on all the data you have collected, provide a comprehensive and well-struc
 Cite your sources. Explain your reasoning when relevant.
 Be thorough — this is a deep research response.
 
+Do NOT search. Do NOT use any tools. Provide your final answer now.
+
 User's question: {{ question }}

@@ -36,7 +36,9 @@ pub fn deep_research() -> Scenario {
                 max_llm_calls: 1,
                 reasoning_effort: Some(ReasoningEffort::High),
                 extra_body: None,
-                tool_choice: None,
+                tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
+                    ToolChoiceOptions::None,
+                )),
                 enable_thinking: true,
                 preserve_thinking: true,
             },

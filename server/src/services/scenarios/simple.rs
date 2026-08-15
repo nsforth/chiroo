@@ -36,7 +36,9 @@ pub fn simple() -> Scenario {
                 max_llm_calls: 1,
                 reasoning_effort: None,
                 extra_body: None,
-                tool_choice: None,
+                tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
+                    ToolChoiceOptions::None,
+                )),
                 enable_thinking: false,
                 preserve_thinking: false,
             },

@@ -130,7 +130,14 @@ mod tests {
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "simple/answer.md");
         assert!(r3.tool_names.is_empty());
-        assert!(r3.tool_choice.is_none());
+        assert_eq!(
+            r3.tool_choice,
+            Some(
+                async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
+                    async_openai::types::chat::ToolChoiceOptions::None
+                )
+            )
+        );
     }
 
     #[test]
@@ -178,7 +185,14 @@ mod tests {
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "deep_research/answer.md");
         assert!(r3.tool_names.is_empty());
-        assert!(r3.tool_choice.is_none());
+        assert_eq!(
+            r3.tool_choice,
+            Some(
+                async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
+                    async_openai::types::chat::ToolChoiceOptions::None
+                )
+            )
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
 export const MODELS = [
-  { label: 'LocalLLM', value: 'Qwen3.6-27B', icon: 'i-simple-icons:openai' }
+  { label: 'Simple', value: 'simple', icon: 'i-simple-icons:openai' },
+  { label: 'Deep', value: 'deep', icon: 'i-simple-icons:openai' }
 ]
