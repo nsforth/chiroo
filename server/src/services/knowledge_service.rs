@@ -210,8 +210,12 @@ impl KnowledgeService {
     }
 
     #[instrument(skip(self))]
-    pub async fn list_documents(&self, kb_id: KnowledgeBaseId) -> Result<Vec<Document>, AppError> {
-        let result = document_repository::list_by_kb(&self.pool, kb_id).await;
+    pub async fn list_documents(
+        &self,
+        kb_id: KnowledgeBaseId,
+        filter: Option<&str>,
+    ) -> Result<Vec<Document>, AppError> {
+        let result = document_repository::list_by_kb(&self.pool, kb_id, filter).await;
         match &result {
             Ok(docs) => info!(doc_count = docs.len(), status = "success"),
             Err(e) => info!(error = e.to_string(), status = "failed"),
