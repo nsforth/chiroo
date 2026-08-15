@@ -43,6 +43,8 @@ pub struct UpdateDocForm {
 pub struct ListDocsQuery {
     #[serde(rename = "kb_id")]
     pub kb_id: Uuid,
+    #[serde(default)]
+    pub filter: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -124,7 +126,7 @@ pub async fn list_documents(
 ) -> Result<Json<Vec<DocListItem>>, ErrorResponse> {
     let docs = state
         .knowledge_service
-        .list_documents(KnowledgeBaseId(query.kb_id))
+        .list_documents(KnowledgeBaseId(query.kb_id), query.filter.as_deref())
         .await?;
     Ok(Json(docs.into_iter().map(Into::into).collect()))
 }

@@ -3,6 +3,10 @@ name = "chiroo-server"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "chiroo_server"
+path = "src/lib.rs"
+
 [lints.rust]
 unsafe_code = "forbid"
 unused_must_use = "deny"
@@ -20,6 +24,7 @@ suspicious = { level = "deny", priority = -1 }
 complexity = { level = "warn", priority = -1 }
 
 [dependencies]
+anyhow = "1"
 async-openai = { version = "0.40", features = ["chat-completion", "byot", "embedding"] }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros", "tokio", "multipart"] }
@@ -28,6 +33,7 @@ axum_typed_multipart = "0.16"
 cached = { version = "1", features = ["async", "proc_macro"] }
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
 typenum = "1"
 cookie = "0.18"
 diesel = { version = "2.3", features = ["postgres", "uuid", "serde_json", "chrono"] }
@@ -36,9 +42,11 @@ deadpool-diesel = { version = "0.6", features = ["postgres"] }
 dotenvy = "0.15"
 futures = "0.3"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+indicatif = "0.17"
 openidconnect = "4"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
 secrecy = "0.10"
+sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.52", features = ["sync", "macros", "rt-multi-thread"] }

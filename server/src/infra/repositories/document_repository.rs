@@ -1,5 +1,6 @@
 use chrono::NaiveDateTime;
 use diesel::deserialize::Queryable;
+use diesel::expression_methods::{BoolExpressionMethods, PgTextExpressionMethods};
 use diesel::{
     ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl, Selectable,
     SelectableHelper,
@@ -122,11 +123,22 @@ pub async fn insert(
 pub async fn list_by_kb(
     pool: &deadpool_diesel::postgres::Pool,
     kb_id: KnowledgeBaseId,
+    filter: Option<&str>,
 ) -> Result<Vec<Document>, InfraError> {
+    let pattern = filter.map(|f| format!("%{f}%"));
     let conn = pool.get().await.map_err(InfraError::from)?;
     conn.interact(move |conn| {
-        documents::table
+        let mut query = documents::table
             .filter(documents::kb_id.eq(kb_id.0))
+            .into_boxed();
+        if let Some(pattern) = pattern {
+            query = query.filter(
+                documents::title
+                    .ilike(pattern.clone())
+                    .or(documents::url.ilike(pattern)),
+            );
+        }
+        query
             .select(DocumentDb::as_select())
             .order_by(documents::created_at.desc())
             .load::<DocumentDb>(conn)

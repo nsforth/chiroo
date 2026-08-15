@@ -1,0 +1,40 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Kb {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) public: bool,
+    pub(crate) metadata: Value,
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: String,
+    #[serde(rename = "updatedAt")]
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct KbRequest {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) public: bool,
+    pub(crate) metadata: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Doc {
+    pub(crate) id: String,
+    #[serde(rename = "kbId")]
+    pub(crate) kb_id: String,
+    pub(crate) title: String,
+    pub(crate) url: String,
+    pub(crate) version: String,
+    #[serde(rename = "mimeType")]
+    pub(crate) mime_type: String,
+    pub(crate) metadata: Value,
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: String,
+    #[serde(rename = "updatedAt")]
+    pub(crate) updated_at: String,
+}
