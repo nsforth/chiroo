@@ -33,6 +33,9 @@ pub(crate) enum KbCommand {
         /// JSON metadata, e.g. '{"team":"ml"}'
         #[arg(long)]
         metadata: Option<String>,
+        /// Language for BM25 stemming and stopwords, e.g. "russian"
+        #[arg(long)]
+        language: Option<String>,
     },
     /// Update a knowledge base; only given fields change
     Update {
@@ -61,7 +64,8 @@ pub(crate) async fn run(api: &Api, command: KbCommand) -> Result<()> {
             description,
             public,
             metadata,
-        } => cmd_kb_create(api, &name, &description, public, &metadata).await,
+            language,
+        } => cmd_kb_create(api, &name, &description, public, &metadata, &language).await,
         KbCommand::Update {
             id,
             name,
@@ -90,13 +94,22 @@ async fn cmd_kb_list(api: &Api, json: bool) -> Result<()> {
                 kb.name.clone(),
                 kb.description.clone(),
                 kb.public.to_string(),
+                kb.language.clone().unwrap_or_default(),
                 kb.created_at.clone(),
                 kb.updated_at.clone(),
             ]
         })
         .collect();
     print_table(
-        &["ID", "NAME", "DESCRIPTION", "PUBLIC", "CREATED", "UPDATED"],
+        &[
+            "ID",
+            "NAME",
+            "DESCRIPTION",
+            "PUBLIC",
+            "LANGUAGE",
+            "CREATED",
+            "UPDATED",
+        ],
         &rows,
     );
     Ok(())
@@ -115,6 +128,7 @@ async fn cmd_kb_get(api: &Api, id: &str, json: bool) -> Result<()> {
         ("description", kb.description),
         ("public", kb.public.to_string()),
         ("metadata", kb.metadata.to_string()),
+        ("language", kb.language.unwrap_or_default()),
         ("createdAt", kb.created_at),
         ("updatedAt", kb.updated_at),
     ]);
@@ -127,12 +141,14 @@ async fn cmd_kb_create(
     description: &Option<String>,
     public: bool,
     metadata: &Option<String>,
+    language: &Option<String>,
 ) -> Result<()> {
     let request = KbRequest {
         name: name.to_string(),
         description: description.clone().unwrap_or_default(),
         public,
         metadata: parse_metadata(metadata)?,
+        language: language.clone(),
     };
     let kb: Kb = api
         .send_json(
@@ -166,6 +182,7 @@ async fn cmd_kb_update(
         } else {
             new_metadata
         },
+        language: None,
     };
     let kb: Kb = api
         .send_json(

@@ -15,11 +15,15 @@ use crate::services::search_service::SearchService;
 
 pub struct SearchKnowledgeBaseTool {
     search_service: SearchService,
+    knowledge_service: KnowledgeService,
 }
 
 impl SearchKnowledgeBaseTool {
-    pub fn new(search_service: SearchService) -> Self {
-        Self { search_service }
+    pub fn new(search_service: SearchService, knowledge_service: KnowledgeService) -> Self {
+        Self {
+            search_service,
+            knowledge_service,
+        }
     }
 }
 
@@ -57,9 +61,15 @@ impl LLMTool for SearchKnowledgeBaseTool {
     async fn execute(&mut self, arguments: &str) -> Result<Value, String> {
         let queries = parse_queries(arguments)?;
 
+        let kbs = self
+            .knowledge_service
+            .list_kbs()
+            .await
+            .map_err(|e| e.to_string())?;
+
         let results = self
             .search_service
-            .search(queries, None)
+            .search(queries, &kbs)
             .await
             .map_err(|e| e.to_string())?;
 

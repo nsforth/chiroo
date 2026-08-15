@@ -59,6 +59,7 @@ diesel::table! {
         description -> Text,
         public -> Bool,
         metadata -> Json,
+        language -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }

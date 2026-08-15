@@ -58,6 +58,7 @@ fn create_tool(
     match name {
         "search_knowledge_base" => Some(Box::new(SearchKnowledgeBaseTool::new(
             search_service.clone(),
+            knowledge_service.clone(),
         ))),
         "extract_document" => Some(Box::new(ExtractDocumentTool::new(
             knowledge_service.clone(),
@@ -268,7 +269,6 @@ mod tests {
                 model: "RERANKER".into(),
             })
             .expect("failed to create Rerank client"),
-            make_knowledge_service(),
             SearchConfig {
                 limit: 10,
                 score_threshold: 0.5,

@@ -5,19 +5,17 @@ use tracing::{info, instrument};
 
 use crate::config::SearchConfig;
 use crate::domain::models::document_chunk::SearchedChunk;
-use crate::domain::models::knowledge_base::KnowledgeBaseId;
+use crate::domain::models::knowledge_base::KnowledgeBase;
 use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::clients::rerank_client::RerankClient;
-use crate::services::knowledge_service::KnowledgeService;
 
 #[derive(Clone)]
 pub struct SearchService {
     embedding_client: EmbeddingClient,
     qdrant_client: QdrantClient,
     rerank_client: RerankClient,
-    knowledge_service: KnowledgeService,
     config: SearchConfig,
 }
 
@@ -26,25 +24,23 @@ impl SearchService {
         embedding_client: EmbeddingClient,
         qdrant_client: QdrantClient,
         rerank_client: RerankClient,
-        knowledge_service: KnowledgeService,
         config: SearchConfig,
     ) -> Self {
         Self {
             embedding_client,
             qdrant_client,
             rerank_client,
-            knowledge_service,
             config,
         }
     }
 
-    #[instrument(skip(self, queries))]
+    #[instrument(skip(self, queries, kbs))]
     pub async fn search(
         &self,
         queries: Vec<String>,
-        kb_filter: Option<&[KnowledgeBaseId]>,
+        kbs: &[KnowledgeBase],
     ) -> Result<HashMap<String, Vec<SearchedChunk>>, AppError> {
-        let result = self.run_search(queries, kb_filter).await;
+        let result = self.run_search(queries, kbs).await;
         match &result {
             Ok(map) => info!(queries = map.len(), status = "success"),
             Err(e) => info!(error = e.to_string(), status = "failed"),
@@ -55,7 +51,7 @@ impl SearchService {
     async fn run_search(
         &self,
         queries: Vec<String>,
-        kb_filter: Option<&[KnowledgeBaseId]>,
+        kbs: &[KnowledgeBase],
     ) -> Result<HashMap<String, Vec<SearchedChunk>>, AppError> {
         let unique = dedup_queries(queries);
         if unique.is_empty() {
@@ -66,16 +62,7 @@ impl SearchService {
             unique.iter().map(|q| (q.clone(), q.clone())).collect();
         let embeddings = self.embedding_client.embed_map(query_map, None).await?;
 
-        let kb_ids: Vec<KnowledgeBaseId> = match kb_filter {
-            Some(ids) => ids.to_vec(),
-            None => self
-                .knowledge_service
-                .list_kbs()
-                .await?
-                .iter()
-                .map(|kb| kb.id)
-                .collect(),
-        };
+        let kbs = kbs.to_vec();
 
         let candidate_limit = self.config.candidate_limit;
         let threshold = self.config.score_threshold;
@@ -86,14 +73,14 @@ impl SearchService {
             let dense_vector = embeddings.get(query).cloned().unwrap_or_default();
             let qdrant_client = self.qdrant_client.clone();
             let rerank_client = self.rerank_client.clone();
-            let kb_ids = kb_ids.clone();
+            let kbs = kbs.clone();
             let query = query.clone();
 
             futures.push(async move {
                 let result = search_one_query(
                     &qdrant_client,
                     &rerank_client,
-                    &kb_ids,
+                    &kbs,
                     &query,
                     dense_vector,
                     candidate_limit,
@@ -116,14 +103,14 @@ impl SearchService {
 async fn search_one_query(
     qdrant_client: &QdrantClient,
     rerank_client: &RerankClient,
-    kb_ids: &[KnowledgeBaseId],
+    kbs: &[KnowledgeBase],
     query: &str,
     dense_vector: Vec<f32>,
     candidate_limit: u64,
     threshold: f32,
     limit: usize,
 ) -> Result<Vec<SearchedChunk>, AppError> {
-    let chunks = search_in_kbs(qdrant_client, kb_ids, query, dense_vector, candidate_limit).await?;
+    let chunks = search_in_kbs(qdrant_client, kbs, query, dense_vector, candidate_limit).await?;
     let chunks = dedup_chunks(chunks);
 
     let contents: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
@@ -138,19 +125,26 @@ async fn search_one_query(
 
 async fn search_in_kbs(
     qdrant_client: &QdrantClient,
-    kb_ids: &[KnowledgeBaseId],
+    kbs: &[KnowledgeBase],
     query: &str,
     dense_vector: Vec<f32>,
     candidate_limit: u64,
 ) -> Result<Vec<SearchedChunk>, AppError> {
-    let futures = kb_ids.iter().map(|kb_id| {
+    let futures = kbs.iter().map(|kb| {
         let client = qdrant_client.clone();
-        let kb_id = *kb_id;
+        let kb_id = kb.id;
+        let language = kb.language.clone();
         let dense_vector = dense_vector.clone();
         let query = query.to_string();
         async move {
             client
-                .search_hybrid(&kb_id, dense_vector, &query, candidate_limit)
+                .search_hybrid(
+                    &kb_id,
+                    dense_vector,
+                    &query,
+                    candidate_limit,
+                    language.as_deref(),
+                )
                 .await
         }
     });
@@ -206,6 +200,7 @@ mod tests {
     use super::*;
     use crate::domain::models::document::DocumentId;
     use crate::domain::models::document_chunk::DocumentChunkId;
+    use crate::domain::models::knowledge_base::KnowledgeBaseId;
 
     fn make_chunk(content: &str) -> SearchedChunk {
         SearchedChunk {
@@ -383,16 +378,17 @@ mod tests {
                 EMBEDDING_DIMENSIONS,
             );
 
-            let search_service = SearchService::new(
-                embedding,
-                qdrant.clone(),
-                rerank,
-                knowledge_service.clone(),
-                make_search_config(),
-            );
+            let search_service =
+                SearchService::new(embedding, qdrant.clone(), rerank, make_search_config());
 
             let kb = knowledge_service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 
@@ -418,7 +414,7 @@ mod tests {
             let results = search_service
                 .search(
                     vec!["What is the capital of France?".to_string()],
-                    Some(&[kb.id]),
+                    &[kb.clone()],
                 )
                 .await
                 .expect("search");

@@ -127,7 +127,6 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         embedding_client.clone(),
         qdrant_client.clone(),
         rerank_client.clone(),
-        knowledge_service.clone(),
         app_config.search.clone(),
     );
 

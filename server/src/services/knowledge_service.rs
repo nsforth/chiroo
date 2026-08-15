@@ -69,12 +69,14 @@ impl KnowledgeService {
         description: String,
         public: bool,
         metadata: Value,
+        language: Option<String>,
     ) -> Result<KnowledgeBase, AppError> {
         let cmd = CreateKnowledgeBase {
             name,
             description,
             public,
             metadata,
+            language,
         };
         let result = knowledge_base_repository::insert(&self.pool, &cmd).await;
         match &result {
@@ -133,6 +135,7 @@ impl KnowledgeService {
             description,
             public,
             metadata,
+            language: None,
             created_at: chrono::NaiveDateTime::MIN,
             updated_at: chrono::NaiveDateTime::MIN,
         };
@@ -185,6 +188,10 @@ impl KnowledgeService {
     ) -> Result<Document, AppError> {
         let text = Self::validate_document_params(&mime_type, &data)?;
 
+        let kb = knowledge_base_repository::get_by_id(&self.pool, kb_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("KB not found".into()))?;
+
         let cmd = CreateDocument {
             id: id.clone(),
             kb_id,
@@ -201,7 +208,10 @@ impl KnowledgeService {
         }
         let doc = result?;
 
-        if let Err(e) = self.index_document_text(&doc, text).await {
+        if let Err(e) = self
+            .index_document_text(&doc, text, kb.language.as_deref())
+            .await
+        {
             info!(doc_id = id, error = e.to_string(), status = "index_failed");
             return Err(e);
         }
@@ -286,6 +296,10 @@ impl KnowledgeService {
             .await?
             .ok_or_else(|| AppError::NotFound("Document not found".into()))?;
 
+        let kb = knowledge_base_repository::get_by_id(&self.pool, existing.kb_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("KB not found".into()))?;
+
         let doc = existing.with_meta(title, url, version, mime_type, metadata);
 
         let result = document_repository::update(&self.pool, &doc, &data).await;
@@ -295,7 +309,10 @@ impl KnowledgeService {
         }
         let updated_doc = result?;
 
-        if let Err(e) = self.reindex_document_text(&updated_doc, text).await {
+        if let Err(e) = self
+            .reindex_document_text(&updated_doc, text, kb.language.as_deref())
+            .await
+        {
             info!(
                 doc_id = updated_doc.id.0,
                 error = e.to_string(),
@@ -370,7 +387,12 @@ impl KnowledgeService {
         Ok(result?)
     }
 
-    async fn index_document_text(&self, document: &Document, text: &str) -> Result<(), AppError> {
+    async fn index_document_text(
+        &self,
+        document: &Document,
+        text: &str,
+        language: Option<&str>,
+    ) -> Result<(), AppError> {
         let chunks = self
             .chunking_service
             .chunk_markdown(document.kb_id, document, text);
@@ -388,7 +410,7 @@ impl KnowledgeService {
             .collect();
 
         self.qdrant_client
-            .upsert_chunks(&document.kb_id, &to_upsert)
+            .upsert_chunks(&document.kb_id, &to_upsert, language)
             .await?;
 
         info!(
@@ -399,7 +421,12 @@ impl KnowledgeService {
         Ok(())
     }
 
-    async fn reindex_document_text(&self, document: &Document, text: &str) -> Result<(), AppError> {
+    async fn reindex_document_text(
+        &self,
+        document: &Document,
+        text: &str,
+        language: Option<&str>,
+    ) -> Result<(), AppError> {
         let chunks = self
             .chunking_service
             .chunk_markdown(document.kb_id, document, text);
@@ -438,7 +465,7 @@ impl KnowledgeService {
             .await?;
 
         self.qdrant_client
-            .upsert_chunks(&document.kb_id, &to_upsert)
+            .upsert_chunks(&document.kb_id, &to_upsert, language)
             .await?;
 
         info!(
@@ -538,7 +565,13 @@ mod tests {
             );
 
             let kb = service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 
@@ -587,7 +620,13 @@ mod tests {
             );
 
             let kb = service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 
@@ -659,7 +698,13 @@ mod tests {
             );
 
             let kb = service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 
@@ -729,7 +774,13 @@ mod tests {
             );
 
             let kb = service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 
@@ -778,7 +829,13 @@ mod tests {
             );
 
             let kb = service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 
@@ -869,7 +926,13 @@ mod tests {
             );
 
             let kb = service
-                .create_kb("test".into(), "desc".into(), false, serde_json::json!({}))
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
                 .await
                 .expect("create_kb");
 

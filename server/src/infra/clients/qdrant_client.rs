@@ -86,9 +86,13 @@ impl QdrantClient {
         &self,
         kb_id: &KnowledgeBaseId,
         chunks: &[DocumentChunk],
+        language: Option<&str>,
     ) -> Result<(), AppError> {
         let name = self.collection_name(kb_id);
-        let points: Vec<PointStruct> = chunks.iter().map(chunk_to_point_struct).collect();
+        let points: Vec<PointStruct> = chunks
+            .iter()
+            .map(|chunk| chunk_to_point_struct(chunk, language))
+            .collect();
 
         self.client
             .upsert_points(UpsertPointsBuilder::new(&name, points))
@@ -294,6 +298,7 @@ impl QdrantClient {
         dense_vector: Vec<f32>,
         query_text: &str,
         limit: u64,
+        language: Option<&str>,
     ) -> Result<Vec<SearchedChunk>, AppError> {
         let name = self.collection_name(kb_id);
 
@@ -301,7 +306,7 @@ impl QdrantClient {
             .query(dense_vector)
             .limit(limit);
 
-        let bm25_doc = DocumentBuilder::new(query_text, BM25_MODEL).build();
+        let bm25_doc = bm25_document(query_text, language);
 
         let bm25_vector_input = qdrant_client::qdrant::VectorInput {
             variant: Some(qdrant_client::qdrant::vector_input::Variant::Document(
@@ -368,12 +373,12 @@ fn dense_from_vector_output(vec: &qdrant_client::qdrant::VectorOutput) -> Vec<f3
     }
 }
 
-fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
+fn chunk_to_point_struct(chunk: &DocumentChunk, language: Option<&str>) -> PointStruct {
     let mut named_vectors = HashMap::new();
     named_vectors.insert(String::new(), Vector::from(chunk.embedding.clone()));
     named_vectors.insert(
         SPARSE_VECTOR_NAME.to_string(),
-        Vector::from(DocumentBuilder::new(chunk.content.clone(), BM25_MODEL).build()),
+        Vector::from(bm25_document(&chunk.content, language)),
     );
 
     let vectors = Vectors {
@@ -392,6 +397,19 @@ fn chunk_to_point_struct(chunk: &DocumentChunk) -> PointStruct {
     };
 
     PointStruct::new(point_id, vectors, payload)
+}
+
+fn bm25_document(text: &str, language: Option<&str>) -> qdrant_client::qdrant::Document {
+    let mut builder = DocumentBuilder::new(text, BM25_MODEL);
+    if let Some(lang) = language {
+        let mut options = HashMap::new();
+        options.insert(
+            "language".to_string(),
+            qdrant_client::qdrant::Value::from(lang),
+        );
+        builder = builder.options(options);
+    }
+    builder.build()
 }
 
 #[derive(Deserialize, Serialize)]
@@ -585,7 +603,7 @@ mod tests {
         };
         let decoy = make_chunk("decoy", kb_id, 0, "unrelated", small_embedding(0.1));
         client
-            .upsert_chunks(&kb_id, &[decoy, expected])
+            .upsert_chunks(&kb_id, &[decoy, expected], None)
             .await
             .expect("upsert chunks");
 
@@ -595,6 +613,7 @@ mod tests {
                 small_embedding(0.8),
                 "largest non-negative integer",
                 5,
+                None,
             )
             .await
             .expect("search hybrid");
@@ -676,7 +695,10 @@ mod tests {
                 metadata: Value::Null,
             },
         ];
-        client.upsert_chunks(&kb_id, &chunks).await.expect("upsert");
+        client
+            .upsert_chunks(&kb_id, &chunks, None)
+            .await
+            .expect("upsert");
 
         client
             .delete_chunks(&kb_id, &[chunk_a_id])
@@ -684,7 +706,7 @@ mod tests {
             .expect("delete chunks");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "chunk", 5)
+            .search_hybrid(&kb_id, small_embedding(0.5), "chunk", 5, None)
             .await
             .expect("search");
 
@@ -714,7 +736,7 @@ mod tests {
             make_chunk("doc-b", kb_id, 0, "doc B chunk 0", small_embedding(0.3)),
         ];
         client
-            .upsert_chunks(&kb_id, &all_chunks)
+            .upsert_chunks(&kb_id, &all_chunks, None)
             .await
             .expect("upsert");
 
@@ -724,7 +746,7 @@ mod tests {
             .expect("delete by document");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.3), "chunk", 10)
+            .search_hybrid(&kb_id, small_embedding(0.3), "chunk", 10, None)
             .await
             .expect("search");
 
@@ -753,7 +775,7 @@ mod tests {
         let chunk_b = make_chunk("doc-b", kb_id, 0, "content b0", small_embedding(0.3));
 
         client
-            .upsert_chunks(&kb_id, &[chunk_a0.clone(), chunk_a1.clone(), chunk_b])
+            .upsert_chunks(&kb_id, &[chunk_a0.clone(), chunk_a1.clone(), chunk_b], None)
             .await
             .expect("upsert");
 
@@ -795,7 +817,7 @@ mod tests {
             .expect("create collection");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5)
+            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None)
             .await
             .expect("search on empty collection");
 
@@ -817,7 +839,7 @@ mod tests {
         let client = make_client("search_nonexistent");
 
         let result = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5)
+            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None)
             .await;
 
         assert!(

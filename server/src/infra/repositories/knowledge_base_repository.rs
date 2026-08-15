@@ -20,6 +20,7 @@ struct KnowledgeBaseDb {
     pub description: String,
     pub public: bool,
     pub metadata: Value,
+    pub language: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -31,6 +32,7 @@ struct NewKnowledgeBaseDb {
     description: String,
     public: bool,
     metadata: Value,
+    language: Option<String>,
 }
 
 impl Into<KnowledgeBase> for KnowledgeBaseDb {
@@ -41,6 +43,7 @@ impl Into<KnowledgeBase> for KnowledgeBaseDb {
             description: self.description,
             public: self.public,
             metadata: self.metadata,
+            language: self.language,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -56,6 +59,7 @@ pub async fn insert(
         description: cmd.description.clone(),
         public: cmd.public,
         metadata: cmd.metadata.clone(),
+        language: cmd.language.clone(),
     };
     let conn = pool.get().await.map_err(InfraError::from)?;
     conn.interact(|conn| {

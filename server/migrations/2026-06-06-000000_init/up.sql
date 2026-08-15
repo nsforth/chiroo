@@ -50,6 +50,7 @@ CREATE TABLE knowledge_bases (
     description TEXT NOT NULL DEFAULT '',
     public BOOLEAN NOT NULL DEFAULT FALSE,
     metadata JSON NOT NULL DEFAULT '{}',
+    language TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

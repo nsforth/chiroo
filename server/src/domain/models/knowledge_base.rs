@@ -14,14 +14,17 @@ pub struct CreateKnowledgeBase {
     pub description: String,
     pub public: bool,
     pub metadata: Value,
+    pub language: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct KnowledgeBase {
     pub id: KnowledgeBaseId,
     pub name: String,
     pub description: String,
     pub public: bool,
     pub metadata: Value,
+    pub language: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
