@@ -113,12 +113,14 @@ const quickChats = computed(() => [
           @submit="onSubmit"
         >
           <template #footer>
-            <ModelSelect />
+            <div class="ms-auto flex items-center gap-3">
+              <ModelSelect />
 
-            <UChatPromptSubmit
-              color="neutral"
-              size="sm"
-            />
+              <UChatPromptSubmit
+                color="neutral"
+                size="sm"
+              />
+            </div>
           </template>
         </UChatPrompt>
 

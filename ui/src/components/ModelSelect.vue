@@ -1,28 +1,42 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useModels } from '../composables/useModels'
-import { useI18n } from 'vue-i18n'
 
 const { model, models } = useModels()
 
-const { t } = useI18n()
-const searchInputAttrs = {
-      placeholder: t('placeholders.modelSelectSearch'),
-      icon: 'i-lucide-search'
-    }
+const selected = computed(() => models.value.find((m) => m.value === model.value))
+
+const items = computed(() => models.value.map(({ label, value, icon }) => ({ label, value, icon })))
+
+function descriptionOf(value: string): string | undefined {
+  return models.value.find((m) => m.value === value)?.description
+}
 </script>
 
 <template>
   <USelectMenu
     v-model="model"
-    :items="models"
-    size="sm"    
-    :icon="models.find(m => m.value === model)?.icon"
+    :items="items"
+    size="sm"
+    :icon="selected?.icon"
     variant="ghost"
     value-key="value"
-    :search-input="searchInputAttrs"
+    :search-input="false"
     class="data-[state=open]:bg-elevated"
     :ui="{
       trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200'
     }"
-  />
+  >
+    <template #default>
+      <UTooltip :text="selected?.description">
+        <span class="truncate">{{ selected?.label ?? model }}</span>
+      </UTooltip>
+    </template>
+
+    <template #item-label="{ item }">
+      <UTooltip :text="descriptionOf(item.value)">
+        <span class="truncate">{{ item.label }}</span>
+      </UTooltip>
+    </template>
+  </USelectMenu>
 </template>

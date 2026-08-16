@@ -269,15 +269,17 @@ onMounted(() => {
           @submit="handleSubmit"
         >
           <template #footer>
-            <ModelSelect v-model="model" />
+            <div class="ms-auto flex items-center gap-3">
+              <ModelSelect v-model="model" />
 
-            <UChatPromptSubmit
-              :status="chat.status"
-              color="neutral"
-              size="sm"
-              @stop="chat.stop()"
-              @reload="chat.regenerate()"
-            />
+              <UChatPromptSubmit
+                :status="chat.status"
+                color="neutral"
+                size="sm"
+                @stop="chat.stop()"
+                @reload="chat.regenerate()"
+              />
+            </div>
           </template>
         </UChatPrompt>
       </UContainer>

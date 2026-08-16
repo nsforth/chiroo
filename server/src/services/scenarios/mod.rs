@@ -58,24 +58,24 @@ const SCENARIOS: &[ScenarioInfo] = &[
         id: "simple",
         icon: "sparkles",
         label: LocalizedText {
-            en: "Simple",
-            ru: "Простой",
+            en: "Fast",
+            ru: "Быстро",
         },
         description: LocalizedText {
-            en: "A single search, one extraction, then a final answer.",
-            ru: "Один поиск, одно извлечение, затем итоговый ответ.",
+            en: "Search answer with first found as a result",
+            ru: "Ищет ответ на вопрос и выдает первое найденное",
         },
     },
     ScenarioInfo {
         id: "deep_research",
         icon: "compass",
         label: LocalizedText {
-            en: "Deep research",
-            ru: "Глубокое исследование",
+            en: "Deep",
+            ru: "Глубоко",
         },
         description: LocalizedText {
-            en: "Iterative search and extraction for a thorough answer.",
-            ru: "Итеративный поиск и извлечение для подробного ответа.",
+            en: "Iterative search for a thorough answer.",
+            ru: "Итеративный поиск для подробного ответа.",
         },
     },
 ];
