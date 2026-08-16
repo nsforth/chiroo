@@ -30,12 +30,65 @@ mod simple;
 pub use deep_research::deep_research;
 pub use simple::simple;
 
-pub fn scenario_for_model(model: &str) -> Scenario {
-    let model_lower = model.to_lowercase();
-    if model_lower.contains("deep") || model_lower.contains("research") {
-        deep_research()
-    } else {
-        simple()
+#[derive(Clone, Copy)]
+pub struct LocalizedText {
+    pub en: &'static str,
+    pub ru: &'static str,
+}
+
+impl LocalizedText {
+    pub fn get(&self, lang: &str) -> &'static str {
+        match lang {
+            "ru" => self.ru,
+            _ => self.en,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ScenarioInfo {
+    pub id: &'static str,
+    pub icon: &'static str,
+    pub label: LocalizedText,
+    pub description: LocalizedText,
+}
+
+const SCENARIOS: &[ScenarioInfo] = &[
+    ScenarioInfo {
+        id: "simple",
+        icon: "sparkles",
+        label: LocalizedText {
+            en: "Simple",
+            ru: "Простой",
+        },
+        description: LocalizedText {
+            en: "A single search, one extraction, then a final answer.",
+            ru: "Один поиск, одно извлечение, затем итоговый ответ.",
+        },
+    },
+    ScenarioInfo {
+        id: "deep_research",
+        icon: "compass",
+        label: LocalizedText {
+            en: "Deep research",
+            ru: "Глубокое исследование",
+        },
+        description: LocalizedText {
+            en: "Iterative search and extraction for a thorough answer.",
+            ru: "Итеративный поиск и извлечение для подробного ответа.",
+        },
+    },
+];
+
+pub fn list_scenarios() -> &'static [ScenarioInfo] {
+    SCENARIOS
+}
+
+pub fn scenario_by_name(name: &str) -> Option<Scenario> {
+    match name {
+        "simple" => Some(simple()),
+        "deep_research" => Some(deep_research()),
+        _ => None,
     }
 }
 
@@ -196,15 +249,36 @@ mod tests {
     }
 
     #[test]
-    fn scenario_for_model_defaults_to_simple() {
-        assert_eq!(scenario_for_model("Qwen3.6-27B").name, "simple");
-        assert_eq!(scenario_for_model("gpt-4").name, "simple");
+    fn scenario_by_name_resolves_known_ids() {
+        assert_eq!(scenario_by_name("simple").unwrap().name, "simple");
+        assert_eq!(
+            scenario_by_name("deep_research").unwrap().name,
+            "deep_research"
+        );
     }
 
     #[test]
-    fn scenario_for_model_deep_research() {
-        assert_eq!(scenario_for_model("deep-research-v1").name, "deep_research");
-        assert_eq!(scenario_for_model("Qwen-Research").name, "deep_research");
+    fn scenario_by_name_unknown_returns_none() {
+        assert!(scenario_by_name("Qwen3.6-27B").is_none());
+        assert!(scenario_by_name("deep-research-v1").is_none());
+        assert!(scenario_by_name("").is_none());
+    }
+
+    #[test]
+    fn list_scenarios_localizes_labels() {
+        let scenarios = list_scenarios();
+        assert_eq!(scenarios.len(), 2);
+        let simple = scenarios
+            .iter()
+            .find(|s| s.id == "simple")
+            .expect("simple scenario must be listed");
+        assert_eq!(simple.label.get("en"), "Simple");
+        assert_eq!(simple.label.get("ru"), "Простой");
+        assert_eq!(
+            simple.label.get("fr"),
+            "Simple",
+            "unknown lang falls back to en"
+        );
     }
 
     #[test]

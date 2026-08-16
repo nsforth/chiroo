@@ -124,7 +124,7 @@ pub async fn send_message(
         .await?;
 
     let user_text = extract_last_user_text(&body.messages);
-    let model = body.model.unwrap_or_else(|| "Qwen3.6-27B".into());
+    let model = body.model.unwrap_or_else(|| "simple".into());
 
     // A regenerate re-runs an already-persisted user message; an edit targets an
     // existing one. Only brand-new user messages should be persisted.

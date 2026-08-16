@@ -1,4 +1,15 @@
-export const MODELS = [
-  { label: 'Simple', value: 'simple', icon: 'i-simple-icons:openai' },
-  { label: 'Deep', value: 'deep', icon: 'i-simple-icons:openai' }
-]
+export interface ModelOption {
+  label: string
+  value: string
+  icon: string
+  description?: string
+}
+
+const ICONS: Record<string, string> = {
+  sparkles: 'i-lucide-sparkles',
+  compass: 'i-lucide-compass'
+}
+
+export function iconByName(name: string): string {
+  return ICONS[name] ?? 'i-lucide-bot'
+}

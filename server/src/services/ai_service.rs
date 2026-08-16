@@ -15,7 +15,7 @@ use crate::infra::clients::llm_client::{LlmClient, RunRoundParams};
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::message_service::MessageService;
 use crate::services::prompts::{PromptRenderer, TemplateContext};
-use crate::services::scenarios::{create_tools, scenario_for_model};
+use crate::services::scenarios::{create_tools, scenario_by_name, simple};
 use crate::services::search_service::SearchService;
 use uuid::Uuid;
 
@@ -115,7 +115,7 @@ async fn run_scenario(
     assistant_id: MessageId,
     tx: &mpsc::Sender<MessageStreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let scenario = scenario_for_model(model);
+    let scenario = scenario_by_name(model).unwrap_or_else(simple);
 
     // TODO Fix hardcoded template params, move general to config, other take from input params
     let ctx = TemplateContext {

@@ -3,6 +3,7 @@ use crate::handlers::chats::{
     create_chat, delete_chat, delete_messages_after, get_chat, get_chats, get_votes, send_message,
     update_title, update_visibility, vote,
 };
+use crate::handlers::models::list_models;
 use crate::handlers::session::get_session;
 use crate::middleware::auth::auth_middleware;
 use crate::middleware::csrf::csrf_middleware;
@@ -25,6 +26,7 @@ pub fn app_router(state: AppState) -> Router {
 
     let protected = Router::new()
         .route("/api/session", get(get_session))
+        .route("/api/models", get(list_models))
         .nest("/api/chats", chat_router)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
