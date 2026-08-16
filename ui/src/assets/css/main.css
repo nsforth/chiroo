@@ -12,7 +12,13 @@
 }
 
 :root {
-  --ui-container: var(--container-5xl);
+  --ui-container: var(--container-4xl);
+}
+
+@media (min-aspect-ratio: 21/9) {
+  :root {
+    --ui-container: var(--container-7xl);
+  }
 }
 
 html.dark .shiki span {
