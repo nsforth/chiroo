@@ -1,4 +1,5 @@
 use crate::domain::models::messages::Message;
+use crate::domain::models::source::Source;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +71,8 @@ pub enum MessageStreamEvent {
         tool_call_id: String,
         error_text: String,
     },
+
+    SourceUrl(Source),
 
     LlmCallStart,
     LlmCallFinish {

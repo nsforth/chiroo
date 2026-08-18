@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, provide } from 'vue'
 import { isReasoningUIPart, isTextUIPart, isToolUIPart, getToolName } from 'ai'
 import type { UIMessage } from 'ai'
 import { isPartStreaming, isToolStreaming } from '@nuxt/ui/utils/ai'
@@ -8,18 +9,29 @@ import ChatToolChart from '../tool/Chart.vue'
 import ChatToolWeather from '../tool/Weather.vue'
 import ChatToolSources from '../tool/Sources.vue'
 import ChatToolGeneric from '../tool/Generic.vue'
+import ChatMessageSources from './ChatMessageSources.vue'
 import ChatMessageEdit from './MessageEdit.vue'
-import { getMergedParts } from '../../../utils/ai'
+import { getMergedParts, getMessageSources } from '../../../utils/ai'
 import { formatToolInput, formatToolOutput, getSearchQuery, getSources } from '../../../utils/tool'
 import type { WeatherUIToolInvocation } from '../../../tools/weather'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
 
 const { t } = useI18n()
 
-defineProps<{
+const props = defineProps<{
   message: UIMessage
   editing: boolean
 }>()
+
+const sources = computed(() => getMessageSources(props.message))
+
+const sourceIndex = computed(() => {
+  const map = new Map<string, number>()
+  sources.value.forEach((source, index) => map.set(source.url, index + 1))
+  return map
+})
+
+provide('sourceIndex', sourceIndex)
 
 const emit = defineEmits<{
   save: [message: UIMessage, text: string]
@@ -95,5 +107,9 @@ const emit = defineEmits<{
         </p>
       </template>
     </template>
+  </template>
+
+  <template v-if="message.role === 'assistant' && sources.length">
+    <ChatMessageSources :sources="sources" />
   </template>
 </template>

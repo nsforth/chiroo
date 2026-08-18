@@ -3,6 +3,7 @@ use async_openai::Client;
 use chrono::Utc;
 use futures::StreamExt;
 use secrecy::ExposeSecret;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, instrument};
@@ -10,6 +11,7 @@ use tracing::{debug, instrument};
 use crate::config::OpenAiConfig;
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{Message, MessageId, MessagePart, Role, TextBlock};
+use crate::domain::models::source::Source;
 use crate::domain::models::stream_event::MessageStreamEvent;
 use crate::infra::clients::llm_client::{LlmClient, RunRoundParams};
 use crate::services::knowledge_service::KnowledgeService;
@@ -146,6 +148,9 @@ async fn run_scenario(
     let mut history: Vec<Message> = Vec::new();
     let last_round_index = scenario.rounds.len().saturating_sub(1);
 
+    let mut sources: Vec<Source> = Vec::new();
+    let mut source_indices: HashMap<String, usize> = HashMap::new();
+
     for (round_index, round) in scenario.rounds.clone().into_iter().enumerate() {
         debug!(
             round_index,
@@ -184,6 +189,26 @@ async fn run_scenario(
         let mut round_message = None;
 
         while let Some(event) = round_stream.next().await {
+            if let MessageStreamEvent::SourceUrl(source) = &event {
+                match source_indices.get(&source.source_id) {
+                    Some(&idx) => {
+                        let prev = &mut sources[idx];
+                        prev.score = match (prev.score, source.score) {
+                            (Some(a), Some(b)) => Some(a.max(b)),
+                            (None, Some(s)) => Some(s),
+                            _ => prev.score,
+                        };
+                        if prev.title.is_none() {
+                            prev.title = source.title.clone();
+                        }
+                    },
+                    None => {
+                        source_indices.insert(source.source_id.clone(), sources.len());
+                        sources.push(source.clone());
+                    },
+                }
+            }
+
             if let MessageStreamEvent::LlmCallFinish {
                 finish_reason: crate::domain::models::stream_event::FinishReason::Stop,
                 ref message,
@@ -197,7 +222,7 @@ async fn run_scenario(
             }
         }
         // TODO: Accumulate all messages and write full round instead of one by one steps
-        if let Some(msg) = round_message {
+        if let Some(mut msg) = round_message {
             let tool_calls = msg
                 .parts
                 .iter()
@@ -209,6 +234,12 @@ async fn run_scenario(
                 tool_calls,
                 status = "round_end"
             );
+
+            if round_index == last_round_index {
+                for source in &sources {
+                    msg.parts.push(MessagePart::SourceUrl(source.clone()));
+                }
+            }
 
             if let Err(e) = message_service.insert_message(&msg).await {
                 tracing::error!(

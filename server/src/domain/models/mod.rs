@@ -5,6 +5,7 @@ pub mod document_chunk;
 pub mod knowledge_base;
 pub mod messages;
 pub mod session;
+pub mod source;
 pub mod stream_event;
 pub mod tool;
 pub mod user;

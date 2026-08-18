@@ -85,6 +85,17 @@ pub enum SseChunk {
         provider_executed: bool,
     },
 
+    #[serde(rename = "source-url")]
+    SourceUrl {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        url: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "providerMetadata")]
+        provider_metadata: Option<serde_json::Value>,
+    },
+
     #[serde(rename = "finish")]
     Finish {
         #[serde(skip_serializing_if = "Option::is_none", rename = "finishReason")]
@@ -249,6 +260,14 @@ fn domain_to_sse_chunks(
             tool_call_id: tool_call_id.clone(),
             error_text: error_text.clone(),
             provider_executed: true,
+        }],
+        MessageStreamEvent::SourceUrl(source) => vec![SseChunk::SourceUrl {
+            source_id: source.source_id.clone(),
+            url: source.url.clone(),
+            title: source.title.clone(),
+            provider_metadata: source
+                .score
+                .map(|score| serde_json::json!({ "chiroo": { "score": score } })),
         }],
         MessageStreamEvent::LlmCallFinish {
             finish_reason,

@@ -85,7 +85,7 @@ function copyLink() {
       <UButton
         color="neutral"
         variant="ghost"
-        icon="i-lucide-share"
+        icon="i-lucide-share-2"
         :aria-label="t('chatActions.shareChat')"
       />
     </UTooltip>

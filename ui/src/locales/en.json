@@ -38,7 +38,10 @@
     "untitled": "Untitled",
     "notFound": "Chat not found",
     "thinking": "Thinking...",
-    "searchPlaceholder": "Search chats..."
+    "searchPlaceholder": "Search chats...",
+    "sources": "Sources",
+    "sourcesShowMore": "Show {count} more",
+    "sourcesShowLess": "Show less"
   },
   "visibility": {
     "private": "Keep private",

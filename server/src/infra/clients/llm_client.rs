@@ -25,7 +25,7 @@ use crate::domain::models::messages::{
     Message, MessageId, MessagePart, ReasoningBlock, Role, TextBlock, ToolCallBlock, ToolCallState,
 };
 use crate::domain::models::stream_event::{FinishReason as DomainFinishReason, MessageStreamEvent};
-use crate::domain::models::tool::LLMTool;
+use crate::domain::models::tool::{LLMTool, ToolExecution};
 
 // ─── BYOT response types ───
 
@@ -637,7 +637,8 @@ async fn run_round(
                     if let Some(idx) = tool {
                         let tool = &mut params.tools[idx];
                         match tool.execute(&tc.function.arguments).await {
-                            Ok(output) => {
+                            Ok(execution) => {
+                                let ToolExecution { output, sources } = execution;
                                 update_tool_output(
                                     &mut round_message,
                                     &tc.id,
@@ -645,6 +646,12 @@ async fn run_round(
                                     None,
                                 );
                                 messages.push(tool_result_message(&tc.id, &output));
+
+                                for source in sources {
+                                    send_or_bail(&tx, MessageStreamEvent::SourceUrl(source))
+                                        .await?;
+                                }
+
                                 send_or_bail(
                                     &tx,
                                     MessageStreamEvent::ToolResult {
@@ -871,6 +878,7 @@ fn split_segments(parts: &[MessagePart], preserve_thinking: bool) -> Vec<Segment
                     seg.tool_blocks.push(tc);
                 }
             },
+            MessagePart::SourceUrl(_) => {},
         }
     }
     segments
@@ -1078,7 +1086,7 @@ mod tests {
         Message, MessagePart, ReasoningBlock, Role, TextBlock, ToolCallBlock, ToolCallState,
     };
     use crate::domain::models::stream_event::MessageStreamEvent;
-    use crate::domain::models::tool::LLMTool;
+    use crate::domain::models::tool::{LLMTool, ToolExecution};
     use crate::infra::clients::llm_client::{Accumulator, CustomDelta, LlmClient, RunRoundParams};
 
     use futures::StreamExt;
@@ -1122,13 +1130,13 @@ mod tests {
             })
         }
 
-        async fn execute(&mut self, arguments: &str) -> Result<Value, String> {
+        async fn execute(&mut self, arguments: &str) -> Result<ToolExecution, String> {
             self.calls.lock().unwrap().push(arguments.to_string());
 
             let _input: Value =
                 serde_json::from_str(arguments).map_err(|e| format!("Invalid args: {e}"))?;
 
-            Ok(serde_json::json!({
+            Ok(ToolExecution::new(serde_json::json!({
                 "location": "London",
                 "temperature": 18,
                 "temperatureHigh": 22,
@@ -1147,7 +1155,7 @@ mod tests {
                     {"day": "Fri", "high": 20, "low": 11,
                      "condition": {"text": "Rainy", "icon": "i-lucide-cloud-rain"}}
                 ]
-            }))
+            })))
         }
     }
 

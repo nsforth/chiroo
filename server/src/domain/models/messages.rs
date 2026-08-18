@@ -1,4 +1,5 @@
 use crate::domain::models::chat::ChatId;
+use crate::domain::models::source::Source;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -61,6 +62,8 @@ pub enum MessagePart {
     Text(TextBlock),
     #[serde(rename = "reasoning")]
     Reasoning(ReasoningBlock),
+    #[serde(rename = "source-url")]
+    SourceUrl(Source),
     ToolCall(ToolCallBlock),
 }
 

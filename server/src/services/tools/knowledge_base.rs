@@ -7,7 +7,8 @@ use serde_json::Value;
 
 use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::SearchedChunk;
-use crate::domain::models::tool::LLMTool;
+use crate::domain::models::source::Source;
+use crate::domain::models::tool::{LLMTool, ToolExecution};
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::search_service::SearchService;
 
@@ -58,7 +59,7 @@ impl LLMTool for SearchKnowledgeBaseTool {
         })
     }
 
-    async fn execute(&mut self, arguments: &str) -> Result<Value, String> {
+    async fn execute(&mut self, arguments: &str) -> Result<ToolExecution, String> {
         let queries = parse_queries(arguments)?;
 
         let kbs = self
@@ -74,7 +75,11 @@ impl LLMTool for SearchKnowledgeBaseTool {
             .map_err(|e| e.to_string())?;
 
         let chunks = flatten_search_results(results);
-        Ok(serde_json::json!({ "chunks": search_chunks_to_json(&chunks) }))
+        let sources: Vec<Source> = chunks.iter().map(Source::from).collect();
+        Ok(ToolExecution {
+            output: serde_json::json!({ "chunks": search_chunks_to_json(&chunks) }),
+            sources,
+        })
     }
 }
 
@@ -120,6 +125,7 @@ fn search_chunks_to_json(chunks: &[SearchedChunk]) -> Value {
                 "chunk_offset": chunk.chunk_offset,
                 "chunk_length": chunk.chunk_length,
                 "document_total_length": chunk.document_total_length,
+                "score": chunk.score,
             })
         })
         .collect();
@@ -175,7 +181,7 @@ impl LLMTool for ExtractDocumentTool {
         })
     }
 
-    async fn execute(&mut self, arguments: &str) -> Result<Value, String> {
+    async fn execute(&mut self, arguments: &str) -> Result<ToolExecution, String> {
         let args = parse_extract_args(arguments)?;
 
         let (doc, doc_data) = self
@@ -190,15 +196,25 @@ impl LLMTool for ExtractDocumentTool {
 
         let extracted = extract_document_slice(&text, args.offset, args.size)?;
 
-        Ok(serde_json::json!({
-            "document_id": doc.id.0,
-            "title": doc.title,
-            "url": doc.url,
-            "content": extracted.content,
-            "offset": extracted.offset,
-            "size": extracted.size,
-            "document_total_length": extracted.document_total_length,
-        }))
+        let source = Source {
+            source_id: doc.id.0.clone(),
+            url: doc.url.clone(),
+            title: Some(doc.title.clone()),
+            score: None,
+        };
+
+        Ok(ToolExecution {
+            output: serde_json::json!({
+                "document_id": doc.id.0,
+                "title": doc.title,
+                "url": doc.url,
+                "content": extracted.content,
+                "offset": extracted.offset,
+                "size": extracted.size,
+                "document_total_length": extracted.document_total_length,
+            }),
+            sources: vec![source],
+        })
     }
 }
 
@@ -305,6 +321,18 @@ mod tests {
         assert_eq!(first["chunk_offset"], 10);
         assert_eq!(first["chunk_length"], 5);
         assert_eq!(first["document_total_length"], 100);
+        assert_eq!(first["score"].as_f64().unwrap() as f32, 0.9f32);
+    }
+
+    #[test]
+    fn source_from_searched_chunk_maps_domain_fields() {
+        let chunk = make_chunk("doc-1", 10, 5, "hello", 0.9);
+        let source = Source::from(&chunk);
+
+        assert_eq!(source.source_id, "doc-1");
+        assert_eq!(source.url, "https://example.com");
+        assert_eq!(source.title.as_deref(), Some("Title"));
+        assert_eq!(source.score, Some(0.9));
     }
 
     #[test]

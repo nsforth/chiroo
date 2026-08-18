@@ -272,11 +272,11 @@ mod tests {
             .iter()
             .find(|s| s.id == "simple")
             .expect("simple scenario must be listed");
-        assert_eq!(simple.label.get("en"), "Simple");
-        assert_eq!(simple.label.get("ru"), "Простой");
+        assert_eq!(simple.label.get("en"), "Fast");
+        assert_eq!(simple.label.get("ru"), "Быстро");
         assert_eq!(
             simple.label.get("fr"),
-            "Simple",
+            "Fast",
             "unknown lang falls back to en"
         );
     }

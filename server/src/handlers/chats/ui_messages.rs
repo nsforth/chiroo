@@ -150,6 +150,12 @@ pub struct SourceUrlUIPart {
     pub url: String,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "providerMetadata"
+    )]
+    pub provider_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +224,14 @@ fn domain_part_to_ui(part: &MessagePart) -> UIMessagePart {
         MessagePart::Reasoning(r) => UIMessagePart::Reasoning(ReasoningUIPart {
             text: r.text.clone(),
             state: Some(ReasoningState::Done),
+        }),
+        MessagePart::SourceUrl(s) => UIMessagePart::SourceUrl(SourceUrlUIPart {
+            source_id: s.source_id.clone(),
+            url: s.url.clone(),
+            title: s.title.clone(),
+            provider_metadata: s
+                .score
+                .map(|score| serde_json::json!({ "chiroo": { "score": score } })),
         }),
         MessagePart::ToolCall(tc) => {
             let state = match tc.state {

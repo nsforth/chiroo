@@ -38,7 +38,10 @@
     "untitled": "Без названия",
     "notFound": "Чат не найден",
     "thinking": "Думаю...",
-    "searchPlaceholder": "Поиск чатов..."
+    "searchPlaceholder": "Поиск чатов...",
+    "sources": "Источники",
+    "sourcesShowMore": "Ещё {count}",
+    "sourcesShowLess": "Свернуть"
   },
   "visibility": {
     "private": "Оставить приватным",

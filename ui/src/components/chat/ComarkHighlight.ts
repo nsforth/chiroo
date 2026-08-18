@@ -18,7 +18,7 @@ import dockerfile from '@shikijs/langs/dockerfile'
 import xml from '@shikijs/langs/xml'
 import toml from '@shikijs/langs/toml'
 import graphql from '@shikijs/langs/graphql'
-import SourceLink from './SourceLink.vue'
+import ChatMarkdownLink from './ChatMarkdownLink.vue'
 
 export default defineComarkComponent({
   name: 'ChatComarkHighlight',
@@ -28,7 +28,7 @@ export default defineComarkComponent({
     })
   ],
   components: {
-    'source-link': SourceLink
+    a: ChatMarkdownLink
   },
   class: '*:first:mt-0 *:last:mb-0'
 })
