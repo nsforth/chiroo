@@ -55,36 +55,7 @@ function onSubmit() {
   createChat(input.value)
 }
 
-const quickChats = computed(() => [
-  {
-    label: t('quick.nuxtUI'),
-    icon: 'i-logos-nuxt-icon'
-  },
-  {
-    label: t('quick.vueComposable'),
-    icon: 'i-logos-vue'
-  },
-  {
-    label: t('quick.unjs'),
-    icon: 'i-logos-unjs'
-  },
-  {
-    label: t('quick.vueUse'),
-    icon: 'i-logos-vueuse'
-  },
-  {
-    label: t('quick.tailwindCSS'),
-    icon: 'i-logos-tailwindcss-icon'
-  },
-  {
-    label: t('quick.weather'),
-    icon: 'i-lucide-sun'
-  },
-  {
-    label: t('quick.chart'),
-    icon: 'i-lucide-line-chart'
-  }
-])
+const quickChats = ref<{ label: string; icon: string }[]>([])
 </script>
 
 <template>

@@ -105,14 +105,5 @@
     "documentation": "Documentation",
     "githubRepo": "GitHub repository",
     "logout": "Log out"
-  },
-  "quick": {
-    "nuxtUI": "Why use Nuxt UI?",
-    "vueComposable": "Help me create a Vue composable",
-    "unjs": "Tell me more about UnJS",
-    "vueUse": "Why should I consider VueUse?",
-    "tailwindCSS": "Tailwind CSS best practices",
-    "weather": "What is the weather in Bordeaux?",
-    "chart": "Show me a chart of sales data"
   }
 }

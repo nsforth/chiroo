@@ -105,14 +105,5 @@
     "documentation": "Документация",
     "githubRepo": "GitHub репозиторий",
     "logout": "Выйти"
-  },
-  "quick": {
-    "nuxtUI": "Зачем использовать Nuxt UI?",
-    "vueComposable": "Помоги создать Vue composable",
-    "unjs": "Расскажи больше о UnJS",
-    "vueUse": "Почему стоит рассмотреть VueUse?",
-    "tailwindCSS": "Лучшие практики Tailwind CSS",
-    "weather": "Какая погода в Бордо?",
-    "chart": "Покажи график продаж"
   }
 }
