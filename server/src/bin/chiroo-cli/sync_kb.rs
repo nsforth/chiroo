@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::api::{build_doc_form, Api};
 use crate::models::Doc;
-use crate::util::{file_stem, make_bar, sha256_hex};
+use crate::util::{file_stem, make_bar, map_concurrent, sha256_hex};
 
 #[derive(Subcommand)]
 pub(crate) enum SyncKbCommand {
@@ -33,6 +33,9 @@ pub(crate) enum SyncKbCommand {
         /// Show the plan without making any changes
         #[arg(long)]
         dry_run: bool,
+        /// Maximum number of concurrent create/update operations
+        #[arg(long, default_value_t = 5)]
+        concurrency: usize,
     },
 }
 
@@ -79,7 +82,20 @@ pub(crate) async fn run(api: &Api, command: SyncKbCommand) -> Result<()> {
             verbose,
             no_delete,
             dry_run,
-        } => cmd_sync_kb_markdown(api, &dir, &kb, no_progress, verbose, no_delete, dry_run).await,
+            concurrency,
+        } => {
+            cmd_sync_kb_markdown(
+                api,
+                &dir,
+                &kb,
+                no_progress,
+                verbose,
+                no_delete,
+                dry_run,
+                concurrency,
+            )
+            .await
+        },
     }
 }
 
@@ -238,7 +254,11 @@ async fn cmd_sync_kb_markdown(
     verbose: bool,
     no_delete: bool,
     dry_run: bool,
+    concurrency: usize,
 ) -> Result<()> {
+    if concurrency == 0 {
+        bail!("--concurrency must be >= 1");
+    }
     let scan = scan_dir(dir);
     let mut failed = scan.errors.len();
     println!(
@@ -291,28 +311,33 @@ async fn cmd_sync_kb_markdown(
         let bar = mp
             .as_ref()
             .map(|m| make_bar(m, plan.to_create.len(), "creating"));
-        for doc in &plan.to_create {
-            if let Some(bar) = &bar {
-                bar.set_message(doc.id.clone());
+        let outcomes = map_concurrent(plan.to_create, concurrency, |doc| {
+            let bar = bar.clone();
+            async move {
+                let result = create_document(api, doc, kb).await;
+                if let Some(bar) = &bar {
+                    bar.inc(1);
+                }
+                (doc.id.clone(), result)
             }
-            match create_document(api, doc, kb).await {
+        })
+        .await;
+        if let Some(bar) = &bar {
+            bar.finish();
+        }
+        for (id, result) in outcomes {
+            match result {
                 Ok(_) => {
                     created += 1;
                     if show_actions {
-                        println!("created {}", doc.id);
+                        println!("created {id}");
                     }
                 },
                 Err(e) => {
                     failed += 1;
-                    eprintln!("error {}: {e:#}", doc.id);
+                    eprintln!("error {id}: {e:#}");
                 },
             }
-            if let Some(bar) = &bar {
-                bar.inc(1);
-            }
-        }
-        if let Some(bar) = &bar {
-            bar.finish();
         }
     }
 
@@ -320,28 +345,33 @@ async fn cmd_sync_kb_markdown(
         let bar = mp
             .as_ref()
             .map(|m| make_bar(m, plan.to_update.len(), "updating"));
-        for doc in &plan.to_update {
-            if let Some(bar) = &bar {
-                bar.set_message(doc.id.clone());
+        let outcomes = map_concurrent(plan.to_update, concurrency, |doc| {
+            let bar = bar.clone();
+            async move {
+                let result = update_document(api, doc).await;
+                if let Some(bar) = &bar {
+                    bar.inc(1);
+                }
+                (doc.id.clone(), result)
             }
-            match update_document(api, doc).await {
+        })
+        .await;
+        if let Some(bar) = &bar {
+            bar.finish();
+        }
+        for (id, result) in outcomes {
+            match result {
                 Ok(_) => {
                     updated += 1;
                     if show_actions {
-                        println!("updated {}", doc.id);
+                        println!("updated {id}");
                     }
                 },
                 Err(e) => {
                     failed += 1;
-                    eprintln!("error {}: {e:#}", doc.id);
+                    eprintln!("error {id}: {e:#}");
                 },
             }
-            if let Some(bar) = &bar {
-                bar.inc(1);
-            }
-        }
-        if let Some(bar) = &bar {
-            bar.finish();
         }
     }
 

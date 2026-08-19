@@ -1,7 +1,9 @@
+use std::future::Future;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use futures::{stream, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -51,4 +53,20 @@ pub(crate) fn file_stem(path: &Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("document")
         .to_string()
+}
+
+pub(crate) async fn map_concurrent<T, R, F, Fut>(
+    items: impl IntoIterator<Item = T>,
+    concurrency: usize,
+    f: F,
+) -> Vec<R>
+where
+    F: Fn(T) -> Fut,
+    Fut: Future<Output = R>,
+{
+    stream::iter(items)
+        .map(f)
+        .buffer_unordered(concurrency)
+        .collect()
+        .await
 }
