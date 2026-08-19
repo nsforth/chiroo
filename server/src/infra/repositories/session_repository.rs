@@ -9,6 +9,7 @@ use diesel::{
 };
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::session::SessionId;
@@ -74,6 +75,7 @@ impl SessionRepository {
         })
     }
 
+    #[instrument(level = "debug", skip(self, pool))]
     pub async fn upsert(
         &self,
         pool: &deadpool_diesel::postgres::Pool,
@@ -116,6 +118,7 @@ impl SessionRepository {
         self.session_from_db(res)
     }
 
+    #[instrument(level = "debug", skip(self, pool))]
     pub async fn find_by_provider_sid(
         &self,
         pool: &deadpool_diesel::postgres::Pool,
@@ -142,6 +145,7 @@ impl SessionRepository {
     }
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete_expired(pool: &deadpool_diesel::postgres::Pool) -> Result<usize, InfraError> {
     let conn = pool.get().await.map_err(InfraError::from)?;
     let res = conn

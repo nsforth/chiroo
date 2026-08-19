@@ -5,6 +5,7 @@ use diesel::{
     SelectableHelper,
 };
 use serde_json::Value;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::knowledge_base::{CreateKnowledgeBase, KnowledgeBase, KnowledgeBaseId};
@@ -50,6 +51,7 @@ impl Into<KnowledgeBase> for KnowledgeBaseDb {
     }
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     cmd: &CreateKnowledgeBase,
@@ -74,6 +76,7 @@ pub async fn insert(
     .map(Into::into)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn list_all(
     pool: &deadpool_diesel::postgres::Pool,
 ) -> Result<Vec<KnowledgeBase>, InfraError> {
@@ -90,6 +93,7 @@ pub async fn list_all(
     .map(|v| v.into_iter().map(Into::into).collect())
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: KnowledgeBaseId,
@@ -108,6 +112,7 @@ pub async fn get_by_id(
     .map(|opt| opt.map(Into::into))
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn update(
     pool: &deadpool_diesel::postgres::Pool,
     kb: &KnowledgeBase,
@@ -136,6 +141,7 @@ pub async fn update(
     .map(Into::into)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete(
     pool: &deadpool_diesel::postgres::Pool,
     id: KnowledgeBaseId,

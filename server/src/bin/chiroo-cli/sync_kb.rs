@@ -312,7 +312,7 @@ async fn cmd_sync_kb_markdown(
             }
         }
         if let Some(bar) = &bar {
-            bar.finish_and_clear();
+            bar.finish();
         }
     }
 
@@ -341,7 +341,7 @@ async fn cmd_sync_kb_markdown(
             }
         }
         if let Some(bar) = &bar {
-            bar.finish_and_clear();
+            bar.finish();
         }
     }
 
@@ -370,7 +370,7 @@ async fn cmd_sync_kb_markdown(
             }
         }
         if let Some(bar) = &bar {
-            bar.finish_and_clear();
+            bar.finish();
         }
     }
 

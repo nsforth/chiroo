@@ -13,6 +13,7 @@ use qdrant_client::qdrant::{
 use qdrant_client::{Payload, Qdrant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::document::DocumentId;
@@ -54,6 +55,7 @@ impl QdrantClient {
         format!("{}_{}", self.collection_prefix, kb_id.0)
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub async fn create_collection(
         &self,
         kb_id: &KnowledgeBaseId,
@@ -76,6 +78,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub async fn delete_collection(&self, kb_id: &KnowledgeBaseId) -> Result<(), AppError> {
         let name = self.collection_name(kb_id);
         self.client
@@ -85,6 +88,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, chunks))]
     pub async fn upsert_chunks(
         &self,
         kb_id: &KnowledgeBaseId,
@@ -104,6 +108,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub async fn delete_chunks(
         &self,
         kb_id: &KnowledgeBaseId,
@@ -128,6 +133,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub async fn delete_by_document(
         &self,
         kb_id: &KnowledgeBaseId,
@@ -159,6 +165,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, metadata))]
     pub async fn update_chunk_metadata(
         &self,
         kb_id: &KnowledgeBaseId,
@@ -202,6 +209,7 @@ impl QdrantClient {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub async fn scroll_by_document(
         &self,
         kb_id: &KnowledgeBaseId,
@@ -295,6 +303,7 @@ impl QdrantClient {
         Ok(results)
     }
 
+    #[instrument(level = "debug", skip(self, dense_vector))]
     pub async fn search_hybrid(
         &self,
         kb_id: &KnowledgeBaseId,

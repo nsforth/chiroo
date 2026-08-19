@@ -1,6 +1,7 @@
 use diesel::deserialize::Queryable;
 use diesel::{ExpressionMethods, Insertable, QueryDsl, RunQueryDsl, Selectable, SelectableHelper};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
@@ -18,7 +19,7 @@ pub struct VoteDb {
     pub is_upvoted: bool,
 }
 
-#[derive(Deserialize, Insertable)]
+#[derive(Deserialize, Insertable, Debug)]
 #[diesel(table_name = votes)]
 pub struct NewVoteDb {
     pub chat_id: Uuid,
@@ -26,6 +27,7 @@ pub struct NewVoteDb {
     pub is_upvoted: bool,
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_votes_for_chat(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: ChatId,
@@ -44,6 +46,7 @@ pub async fn get_votes_for_chat(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn upsert_vote(
     pool: &deadpool_diesel::postgres::Pool,
     new_vote: NewVoteDb,
@@ -66,6 +69,7 @@ pub async fn upsert_vote(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete_vote(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: Uuid,

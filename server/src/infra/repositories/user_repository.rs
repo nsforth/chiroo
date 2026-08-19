@@ -6,6 +6,7 @@ use diesel::{
     SelectableHelper,
 };
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::user::User;
@@ -39,6 +40,7 @@ struct UpsertUser {
 }
 
 // TODO: Change to save and User model from caller
+#[instrument(level = "debug", skip(pool, avatar_url))]
 pub async fn upsert(
     pool: &deadpool_diesel::postgres::Pool,
     sso_id: &str,
@@ -85,6 +87,7 @@ pub async fn upsert(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn find_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: Uuid,
@@ -105,6 +108,7 @@ pub async fn find_by_id(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn find_by_sso_id(
     pool: &deadpool_diesel::postgres::Pool,
     sso_id: &str,

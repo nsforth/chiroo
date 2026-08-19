@@ -172,6 +172,26 @@ pub async fn delete_chat(&self, chat_id: &ChatId, user_id: &UserId) -> Result<()
 Structured fields instead of format strings — result data goes as `key = value` in the macro,
 not in the message string. The `status` field must always be the last field.
 
+## Repository & client logging
+
+All public functions in `server/src/infra/repositories/*.rs` and public methods in
+`server/src/infra/clients/*.rs` get `#[instrument(level = "debug", skip(...))]`:
+
+- Debug level keeps `info` logs clean in production; enable with `RUST_LOG=debug`
+  (or a target filter) to see the call tree nested under the service spans.
+- Spans only record the call and its args — do NOT add manual exit `info!`/`debug!`
+  events here (that rule is for services only).
+- Skip `self` and `pool` always, plus any argument that is large, not `Debug`, or
+  secret: byte blobs (`&[u8]`, `Vec<f32>`), content payloads (`NewMessageDb`,
+  `DocumentChunk`, `CreateDocument`), `SecretBox`, tokens/codes, `metadata: &Value`.
+- Do NOT instrument constructors (`new`) or private/helper methods.
+
+Example:
+```rust
+#[instrument(level = "debug", skip(pool, new_chat))]
+pub async fn insert(pool: &Pool, new_chat: NewChatDb) -> Result<ChatDb, InfraError> { /* ... */ }
+```
+
 ## Formatting
 
 - After making changes to Rust code under `server/` and verifying it compiles (`cargo check`), always run `cargo fmt` in the `server/` directory.

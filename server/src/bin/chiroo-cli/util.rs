@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -24,10 +25,14 @@ pub(crate) fn parse_reindex_mode(mode: &str) -> Result<&str> {
 pub(crate) fn make_bar(mp: &MultiProgress, total: usize, prefix: &str) -> ProgressBar {
     let bar = mp.add(ProgressBar::new(total as u64));
     bar.set_style(
-        ProgressStyle::with_template("{prefix:>10} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .expect("valid progress template"),
+        ProgressStyle::with_template(
+            "{prefix:>10} {percent:>3}%|{bar:40.cyan/blue}| {pos}/{len} \
+             [{elapsed_precise}<{eta_precise}, {per_sec}] {msg}",
+        )
+        .expect("valid progress template"),
     );
     bar.set_prefix(prefix.to_string());
+    bar.enable_steady_tick(Duration::from_millis(100));
     bar
 }
 

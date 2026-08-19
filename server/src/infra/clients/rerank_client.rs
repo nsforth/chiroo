@@ -4,6 +4,7 @@ use std::hash::Hash;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use crate::config::RerankConfig;
 use crate::errors::AppError;
@@ -60,6 +61,7 @@ impl RerankClient {
         Ok(Self { client, url, model })
     }
 
+    #[instrument(level = "debug", skip(self, documents))]
     pub async fn rerank(
         &self,
         query: &str,
@@ -109,6 +111,7 @@ impl RerankClient {
         Ok(results)
     }
 
+    #[instrument(level = "debug", skip(self, documents))]
     pub async fn rerank_map<K>(
         &self,
         query: &str,

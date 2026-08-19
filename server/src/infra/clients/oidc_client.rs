@@ -12,6 +12,7 @@ use openidconnect::{
 };
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use url::Url;
 
 use crate::config::OidcConfig;
@@ -197,6 +198,7 @@ impl OidcClient {
         })
     }
 
+    #[instrument(level = "debug", skip(self, redirect))]
     pub fn build_auth_url(&self, redirect: &str) -> Result<AuthUrlResult, AppError> {
         let nonce_value = Nonce::new_random();
         let signed_state = encode_state_token(redirect, nonce_value.secret(), &self.state_secret)?;
@@ -221,6 +223,7 @@ impl OidcClient {
         Ok(AuthUrlResult { url: auth_url })
     }
 
+    #[instrument(level = "debug", skip(self, code, state))]
     pub async fn exchange_code(
         &self,
         code: &str,
@@ -288,6 +291,7 @@ impl OidcClient {
     }
 
     // TODO: retries for refresh_token on transient errors
+    #[instrument(level = "debug", skip(self, refresh_token))]
     pub async fn refresh_token(
         &self,
         refresh_token: &SecretBox<str>,
@@ -344,6 +348,7 @@ impl OidcClient {
         ))
     }
 
+    #[instrument(level = "debug", skip(self, token))]
     pub async fn verify_access_token(
         &self,
         token: &SecretBox<str>,

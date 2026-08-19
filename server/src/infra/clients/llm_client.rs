@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, info, trace};
+use tracing::{debug, info, instrument, trace};
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
@@ -102,6 +102,7 @@ impl LlmClient {
         Self { client, model }
     }
 
+    #[instrument(level = "debug", skip(self, params))]
     pub fn execute_round(
         &self,
         chat_id: ChatId,

@@ -8,6 +8,7 @@ use async_openai::types::embeddings::{
 use async_openai::Client;
 use secrecy::ExposeSecret;
 use serde::Serialize;
+use tracing::instrument;
 
 use crate::config::EmbeddingConfig;
 use crate::errors::AppError;
@@ -40,6 +41,7 @@ impl EmbeddingClient {
         }
     }
 
+    #[instrument(level = "debug", skip(self, text))]
     pub async fn embed(&self, text: &str, priority: Option<u32>) -> Result<Vec<f32>, AppError> {
         let mut vectors = self.embed_vecs(vec![text.to_string()], priority).await?;
         vectors
@@ -47,6 +49,7 @@ impl EmbeddingClient {
             .ok_or_else(|| AppError::EmbeddingError("unexpected embeddings response".into()))
     }
 
+    #[instrument(level = "debug", skip(self, inputs))]
     pub async fn embed_map<K>(
         &self,
         inputs: HashMap<K, String>,

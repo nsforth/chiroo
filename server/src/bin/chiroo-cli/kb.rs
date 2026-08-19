@@ -273,7 +273,7 @@ async fn cmd_kb_reindex(api: &Api, id: &str, mode: &str, no_progress: bool) -> R
     }
 
     if let Some(bar) = &bar {
-        bar.finish_and_clear();
+        bar.finish();
     }
 
     println!("Reindexed: {reindexed} reindexed, {up_to_date} up to date, {failed} failed");

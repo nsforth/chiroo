@@ -6,6 +6,7 @@ use diesel::{
     Selectable, SelectableHelper,
 };
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::chat::{Chat, ChatId};
@@ -24,13 +25,14 @@ pub struct ChatDb {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Deserialize, Insertable)]
+#[derive(Debug, Deserialize, Insertable)]
 #[diesel(table_name = chats)]
 pub struct NewChatDb {
     pub title: Option<String>,
     pub owner: Uuid,
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     new_chat: NewChatDb,
@@ -50,6 +52,7 @@ pub async fn insert(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_all(
     pool: &deadpool_diesel::postgres::Pool,
     user_id: UserId,
@@ -71,6 +74,7 @@ pub async fn get_all(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: ChatId,
@@ -93,6 +97,7 @@ pub async fn get_by_id(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete(
     pool: &deadpool_diesel::postgres::Pool,
     id: ChatId,
@@ -111,6 +116,7 @@ pub async fn delete(
     Ok(res > 0)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn update_title(
     pool: &deadpool_diesel::postgres::Pool,
     id: ChatId,
@@ -132,6 +138,7 @@ pub async fn update_title(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn update_visibility(
     pool: &deadpool_diesel::postgres::Pool,
     id: ChatId,
@@ -153,6 +160,7 @@ pub async fn update_visibility(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn is_owner(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: ChatId,

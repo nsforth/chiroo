@@ -37,6 +37,7 @@ pub enum ReindexMode {
     Full,
 }
 
+#[derive(Debug)]
 pub struct CreateDocument {
     pub id: String,
     pub kb_id: KnowledgeBaseId,

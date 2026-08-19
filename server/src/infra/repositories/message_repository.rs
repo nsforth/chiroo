@@ -5,6 +5,7 @@ use diesel::{
     Selectable, SelectableHelper,
 };
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::messages::Role;
@@ -42,6 +43,7 @@ pub struct NewMessageDb {
 }
 
 /// Get all messages for a specific chat, ordered by created_at ascending.
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_messages_for_chat(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: Uuid,
@@ -63,6 +65,7 @@ pub async fn get_messages_for_chat(
 }
 
 /// Insert a new message and return it.
+#[instrument(level = "debug", skip(pool, new_message))]
 pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     new_message: NewMessageDb,
@@ -84,6 +87,7 @@ pub async fn insert(
 
 /// Delete all messages created after the given message_id for a specific chat.
 /// Used for truncating history when user edits or regenerates a message.
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete_after_message(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: Uuid,

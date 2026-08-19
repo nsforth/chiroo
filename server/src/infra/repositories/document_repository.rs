@@ -6,6 +6,7 @@ use diesel::{
     SelectableHelper,
 };
 use serde_json::Value;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::document::{
@@ -82,6 +83,7 @@ impl Into<DocumentData> for DocumentDataDb {
     }
 }
 
+#[instrument(level = "debug", skip(pool, data))]
 pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     cmd: &CreateDocument,
@@ -120,6 +122,7 @@ pub async fn insert(
     .map(Into::into)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn list_by_kb(
     pool: &deadpool_diesel::postgres::Pool,
     kb_id: KnowledgeBaseId,
@@ -149,6 +152,7 @@ pub async fn list_by_kb(
     .map(|v| v.into_iter().map(Into::into).collect())
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: &DocumentId,
@@ -168,6 +172,7 @@ pub async fn get_by_id(
     .map(|opt| opt.map(Into::into))
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_data_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: &DocumentId,
@@ -187,6 +192,7 @@ pub async fn get_data_by_id(
     .map(|opt| opt.map(Into::into))
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn get_with_data(
     pool: &deadpool_diesel::postgres::Pool,
     id: &DocumentId,
@@ -220,6 +226,7 @@ pub async fn get_with_data(
     .map(|opt| opt.map(|(doc, data)| (doc.into(), data)))
 }
 
+#[instrument(level = "debug", skip(pool, data))]
 pub async fn update(
     pool: &deadpool_diesel::postgres::Pool,
     doc: &Document,
@@ -267,6 +274,7 @@ pub async fn update(
     .map(Into::into)
 }
 
+#[instrument(level = "debug", skip(pool, metadata))]
 pub async fn update_metadata(
     pool: &deadpool_diesel::postgres::Pool,
     id: &DocumentId,
@@ -296,6 +304,7 @@ pub async fn update_metadata(
     .map(Into::into)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete(
     pool: &deadpool_diesel::postgres::Pool,
     id: &DocumentId,
@@ -309,6 +318,7 @@ pub async fn delete(
     Ok(true)
 }
 
+#[instrument(level = "debug", skip(pool))]
 pub async fn delete_by_kb(
     pool: &deadpool_diesel::postgres::Pool,
     kb_id: KnowledgeBaseId,

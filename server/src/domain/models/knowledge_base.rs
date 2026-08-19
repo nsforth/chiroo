@@ -9,6 +9,7 @@ use crate::errors::AppError;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeBaseId(pub Uuid);
 
+#[derive(Debug)]
 pub struct CreateKnowledgeBase {
     pub name: String,
     pub description: String,
@@ -17,7 +18,7 @@ pub struct CreateKnowledgeBase {
     pub language: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KnowledgeBase {
     pub id: KnowledgeBaseId,
     pub name: String,
