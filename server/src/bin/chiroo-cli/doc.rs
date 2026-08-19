@@ -7,9 +7,9 @@ use clap::Subcommand;
 use uuid::Uuid;
 
 use crate::api::{build_doc_form, Api};
-use crate::models::Doc;
+use crate::models::{Doc, ReindexRequest, ReindexResponse};
 use crate::output::{print_json, print_kv, print_table};
-use crate::util::{file_stem, parse_metadata, sha256_hex};
+use crate::util::{file_stem, parse_metadata, parse_reindex_mode, sha256_hex};
 
 #[derive(Subcommand)]
 pub(crate) enum DocCommand {
@@ -61,6 +61,13 @@ pub(crate) enum DocCommand {
     },
     /// Delete a document
     Delete { id: String },
+    /// Reindex a document's chunks in Qdrant from its DB content
+    Reindex {
+        id: String,
+        /// compare | force | full
+        #[arg(long, default_value = "compare")]
+        mode: String,
+    },
 }
 
 pub(crate) async fn run(api: &Api, command: DocCommand) -> Result<()> {
@@ -82,6 +89,7 @@ pub(crate) async fn run(api: &Api, command: DocCommand) -> Result<()> {
             metadata,
         } => cmd_doc_upload(api, &file, &kb, &id, &title, &url, &metadata).await,
         DocCommand::Delete { id } => cmd_doc_delete(api, &id).await,
+        DocCommand::Reindex { id, mode } => cmd_doc_reindex(api, &id, &mode).await,
     }
 }
 
@@ -236,5 +244,27 @@ async fn cmd_doc_upload(
 async fn cmd_doc_delete(api: &Api, id: &str) -> Result<()> {
     api.delete(&format!("/internal/api/documents/{id}")).await?;
     println!("Deleted document {id}");
+    Ok(())
+}
+
+async fn cmd_doc_reindex(api: &Api, id: &str, mode: &str) -> Result<()> {
+    let mode = parse_reindex_mode(mode)?;
+    let response: ReindexResponse = api
+        .send_json(
+            reqwest::Method::POST,
+            &format!("/internal/api/documents/{id}/reindex"),
+            &ReindexRequest {
+                mode: mode.to_string(),
+            },
+        )
+        .await?;
+    if response.reindexed {
+        println!("Reindexed document {id} ({} chunks)", response.chunks);
+    } else {
+        println!(
+            "Document {id} already up to date ({} chunks)",
+            response.chunks
+        );
+    }
     Ok(())
 }

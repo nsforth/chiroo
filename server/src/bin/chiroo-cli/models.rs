@@ -42,3 +42,15 @@ pub(crate) struct Doc {
     #[serde(rename = "updatedAt")]
     pub(crate) updated_at: String,
 }
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ReindexRequest {
+    pub(crate) mode: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReindexResponse {
+    #[serde(rename = "reindexed")]
+    pub(crate) reindexed: bool,
+    pub(crate) chunks: usize,
+}

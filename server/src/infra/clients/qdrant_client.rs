@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use qdrant_client::qdrant::condition::ConditionOneOf;
 use qdrant_client::qdrant::points_selector::PointsSelectorOneOf;
@@ -33,12 +34,14 @@ impl QdrantClient {
         url: &str,
         api_key: Option<&str>,
         collection_prefix: String,
+        timeout: Duration,
     ) -> Result<Self, AppError> {
         let mut builder = Qdrant::from_url(url);
         if let Some(key) = api_key {
             builder = builder.api_key(key);
         }
         let client = builder
+            .timeout(timeout)
             .build()
             .map_err(|e| AppError::QdrantError(e.to_string()))?;
         Ok(Self {
@@ -500,6 +503,8 @@ fn searched_chunk_from_scored_point(
 }
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -513,7 +518,8 @@ mod tests {
 
     fn make_client(test_id: &str) -> QdrantClient {
         let prefix = format!("test_{test_id}");
-        QdrantClient::new(QDRANT_URL, None, prefix).expect("failed to create QdrantClient")
+        QdrantClient::new(QDRANT_URL, None, prefix, Duration::from_secs(30))
+            .expect("failed to create QdrantClient")
     }
 
     fn make_kb_id() -> KnowledgeBaseId {

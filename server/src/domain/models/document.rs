@@ -28,6 +28,15 @@ impl MimeType {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct DocumentId(pub String);
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReindexMode {
+    #[default]
+    Compare,
+    Force,
+    Full,
+}
+
 pub struct CreateDocument {
     pub id: String,
     pub kb_id: KnowledgeBaseId,

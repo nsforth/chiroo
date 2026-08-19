@@ -103,6 +103,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         app_config.qdrant.url(),
         app_config.qdrant.api_key(),
         app_config.qdrant.collection_prefix().to_string(),
+        app_config.qdrant.timeout(),
     )
     .expect("Failed to create Qdrant client");
 

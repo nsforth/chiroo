@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::domain::models::document::{Document, DocumentId, MimeType};
+use crate::domain::models::document::{Document, DocumentId, MimeType, ReindexMode};
 use crate::domain::models::knowledge_base::KnowledgeBaseId;
 use crate::state::AppState;
 use crate::utils::PathExtractor;
@@ -207,4 +207,32 @@ pub async fn delete_document(
         .delete_document(&DocumentId(id))
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ReindexDocRequest {
+    #[serde(default)]
+    pub mode: ReindexMode,
+}
+
+#[derive(Serialize)]
+pub struct ReindexDocResponse {
+    #[serde(rename = "reindexed")]
+    pub reindexed: bool,
+    pub chunks: usize,
+}
+
+pub async fn reindex_document(
+    State(state): State<AppState>,
+    PathExtractor(id): PathExtractor<String>,
+    Json(req): Json<ReindexDocRequest>,
+) -> Result<Json<ReindexDocResponse>, ErrorResponse> {
+    let outcome = state
+        .knowledge_service
+        .reindex_document(&DocumentId(id), req.mode)
+        .await?;
+    Ok(Json(ReindexDocResponse {
+        reindexed: outcome.reindexed,
+        chunks: outcome.chunks,
+    }))
 }

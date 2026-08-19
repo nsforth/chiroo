@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::api::{build_doc_form, Api};
 use crate::models::Doc;
-use crate::util::{file_stem, sha256_hex};
+use crate::util::{file_stem, make_bar, sha256_hex};
 
 #[derive(Subcommand)]
 pub(crate) enum SyncKbCommand {
@@ -228,16 +228,6 @@ async fn update_document(api: &Api, doc: &LocalDoc) -> Result<Doc> {
         form,
     )
     .await
-}
-
-fn make_bar(mp: &MultiProgress, total: usize, prefix: &str) -> ProgressBar {
-    let bar = mp.add(ProgressBar::new(total as u64));
-    bar.set_style(
-        ProgressStyle::with_template("{prefix:>10} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .expect("valid progress template"),
-    );
-    bar.set_prefix(prefix.to_string());
-    bar
 }
 
 async fn cmd_sync_kb_markdown(

@@ -5,7 +5,7 @@ use serde_json::Value;
 use tracing::{info, instrument};
 
 use crate::domain::models::document::{
-    CreateDocument, Document, DocumentData, DocumentId, MimeType,
+    CreateDocument, Document, DocumentData, DocumentId, MimeType, ReindexMode,
 };
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};
 use crate::domain::models::knowledge_base::{CreateKnowledgeBase, KnowledgeBase, KnowledgeBaseId};
@@ -23,6 +23,12 @@ pub struct KnowledgeService {
     qdrant_client: QdrantClient,
     embedding_client: EmbeddingClient,
     embedding_dimensions: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReindexOutcome {
+    pub reindexed: bool,
+    pub chunks: usize,
 }
 
 impl KnowledgeService {
@@ -392,7 +398,7 @@ impl KnowledgeService {
         document: &Document,
         text: &str,
         language: Option<&str>,
-    ) -> Result<(), AppError> {
+    ) -> Result<usize, AppError> {
         let chunks = self
             .chunking_service
             .chunk_markdown(document.kb_id, document, text);
@@ -418,7 +424,7 @@ impl KnowledgeService {
             chunks_total = to_upsert.len(),
             status = "success"
         );
-        Ok(())
+        Ok(to_upsert.len())
     }
 
     async fn reindex_document_text(
@@ -426,7 +432,7 @@ impl KnowledgeService {
         document: &Document,
         text: &str,
         language: Option<&str>,
-    ) -> Result<(), AppError> {
+    ) -> Result<usize, AppError> {
         let chunks = self
             .chunking_service
             .chunk_markdown(document.kb_id, document, text);
@@ -473,13 +479,142 @@ impl KnowledgeService {
             chunks_total = to_upsert.len(),
             status = "success"
         );
-        Ok(())
+        Ok(to_upsert.len())
     }
+
+    #[instrument(skip(self))]
+    pub async fn reindex_document(
+        &self,
+        id: &DocumentId,
+        mode: ReindexMode,
+    ) -> Result<ReindexOutcome, AppError> {
+        let (doc, data) = self
+            .get_document_with_data(id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Document not found".into()))?;
+
+        let text = Self::validate_document_params(&doc.mime_type, &data.data)?;
+
+        let kb = knowledge_base_repository::get_by_id(&self.pool, doc.kb_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("KB not found".into()))?;
+
+        let language = kb.language.as_deref();
+
+        let (reindexed, chunks) = match mode {
+            ReindexMode::Full => {
+                self.qdrant_client
+                    .delete_by_document(&doc.kb_id, id)
+                    .await?;
+                let chunks = self.index_document_text(&doc, text, language).await?;
+                (true, chunks)
+            },
+            ReindexMode::Force => {
+                let chunks = self.reindex_document_text(&doc, text, language).await?;
+                (true, chunks)
+            },
+            ReindexMode::Compare => {
+                let actual = self
+                    .qdrant_client
+                    .scroll_by_document(&doc.kb_id, id)
+                    .await?;
+                if chunks_up_to_date(&actual, &doc.version) {
+                    (false, actual.len())
+                } else {
+                    let chunks = self.reindex_document_text(&doc, text, language).await?;
+                    (true, chunks)
+                }
+            },
+        };
+
+        info!(
+            doc_id = id.0,
+            mode = ?mode,
+            reindexed,
+            chunks,
+            status = "success"
+        );
+        Ok(ReindexOutcome { reindexed, chunks })
+    }
+}
+
+fn chunks_up_to_date(actual: &[DocumentChunk], version: &str) -> bool {
+    if actual.is_empty() {
+        return false;
+    }
+
+    let n = actual.len();
+    let mut indices: Vec<usize> = actual.iter().map(|c| c.chunk_index).collect();
+    indices.sort_unstable();
+
+    indices.into_iter().eq(0..n)
+        && actual
+            .iter()
+            .all(|c| c.version == version && c.chunk_total == n)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod unit {
+        use uuid::Uuid;
+
+        use super::*;
+        use crate::domain::models::knowledge_base::KnowledgeBaseId;
+
+        fn make_chunk(index: usize, total: usize, version: &str) -> DocumentChunk {
+            DocumentChunk {
+                id: DocumentChunkId(Uuid::new_v4()),
+                document_id: DocumentId("doc".to_string()),
+                kb_id: KnowledgeBaseId(Uuid::new_v4()),
+                chunk_index: index,
+                chunk_total: total,
+                chunk_offset: 0,
+                chunk_length: 0,
+                document_total_length: 0,
+                content: String::new(),
+                embedding: Vec::new(),
+                version: version.to_string(),
+                title: String::new(),
+                url: String::new(),
+                metadata: serde_json::Value::Null,
+            }
+        }
+
+        #[test]
+        fn up_to_date_accepts_contiguous_matching_version() {
+            let chunks = vec![
+                make_chunk(0, 3, "v1"),
+                make_chunk(1, 3, "v1"),
+                make_chunk(2, 3, "v1"),
+            ];
+            assert!(chunks_up_to_date(&chunks, "v1"));
+        }
+
+        #[test]
+        fn up_to_date_rejects_empty() {
+            assert!(!chunks_up_to_date(&[], "v1"));
+        }
+
+        #[test]
+        fn up_to_date_rejects_version_mismatch() {
+            let chunks = vec![make_chunk(0, 2, "v1"), make_chunk(1, 2, "v2")];
+            assert!(!chunks_up_to_date(&chunks, "v1"));
+        }
+
+        #[test]
+        fn up_to_date_rejects_gap_in_indices() {
+            let chunks = vec![make_chunk(0, 3, "v1"), make_chunk(2, 3, "v1")];
+            assert!(!chunks_up_to_date(&chunks, "v1"));
+        }
+
+        #[test]
+        fn up_to_date_rejects_wrong_chunk_total() {
+            let chunks = vec![make_chunk(0, 3, "v1"), make_chunk(1, 2, "v1")];
+            assert!(!chunks_up_to_date(&chunks, "v1"));
+        }
+    }
 
     mod integration {
         use deadpool_diesel::postgres::{Manager, Pool};
@@ -541,7 +676,8 @@ mod tests {
 
         fn make_qdrant_client(test_id: &str) -> QdrantClient {
             let prefix = format!("test_knowledge_{test_id}");
-            QdrantClient::new(QDRANT_URL, None, prefix).expect("Failed to create Qdrant client")
+            QdrantClient::new(QDRANT_URL, None, prefix, std::time::Duration::from_secs(30))
+                .expect("Failed to create Qdrant client")
         }
 
         fn make_chunking_service() -> ChunkingService {
@@ -958,6 +1094,87 @@ mod tests {
                 .await
                 .expect("get_document");
             assert!(doc.is_none(), "document should be cascade-deleted with KB");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, and embedding service"]
+        async fn reindex_document_modes() {
+            let pool = get_or_create_test_pool().await;
+            let qdrant = make_qdrant_client("reindex_modes");
+            let embedding = make_embedding_client();
+            let chunking = make_chunking_service();
+
+            let service = KnowledgeService::new(
+                pool.clone(),
+                chunking,
+                qdrant.clone(),
+                embedding,
+                EMBEDDING_DIMENSIONS,
+            );
+
+            let kb = service
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
+                .await
+                .expect("create_kb");
+
+            let doc_id = DocumentId(Uuid::new_v4().to_string());
+            let text = "Reindex test content that produces some chunks for indexing.";
+            service
+                .create_document(
+                    doc_id.0.clone(),
+                    kb.id,
+                    "Test Doc".into(),
+                    "https://example.com/test".into(),
+                    "v1".into(),
+                    MimeType::TextPlain,
+                    serde_json::json!({}),
+                    text.as_bytes().to_vec(),
+                )
+                .await
+                .expect("create_document");
+
+            // Compare on an up-to-date document: no reindex.
+            let outcome = service
+                .reindex_document(&doc_id, ReindexMode::Compare)
+                .await
+                .expect("compare up-to-date");
+            assert!(!outcome.reindexed, "up-to-date document must not reindex");
+
+            // Simulate a failed save: drop all chunks from Qdrant.
+            qdrant
+                .delete_by_document(&kb.id, &doc_id)
+                .await
+                .expect("delete chunks");
+
+            let outcome = service
+                .reindex_document(&doc_id, ReindexMode::Compare)
+                .await
+                .expect("compare after delete");
+            assert!(outcome.reindexed, "missing chunks must trigger reindex");
+            assert!(outcome.chunks > 0, "reindexed chunks must be non-empty");
+
+            // Force always reindexes.
+            let outcome = service
+                .reindex_document(&doc_id, ReindexMode::Force)
+                .await
+                .expect("force");
+            assert!(outcome.reindexed, "force must always reindex");
+
+            // Full always reindexes.
+            let outcome = service
+                .reindex_document(&doc_id, ReindexMode::Full)
+                .await
+                .expect("full");
+            assert!(outcome.reindexed, "full must always reindex");
+            assert!(outcome.chunks > 0, "full reindex must produce chunks");
+
+            service.delete_kb(kb.id).await.expect("delete_kb");
         }
     }
 }

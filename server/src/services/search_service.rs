@@ -346,7 +346,8 @@ mod tests {
 
         fn make_qdrant_client(test_id: &str) -> QdrantClient {
             let prefix = format!("test_search_{test_id}");
-            QdrantClient::new(QDRANT_URL, None, prefix).expect("Failed to create Qdrant client")
+            QdrantClient::new(QDRANT_URL, None, prefix, std::time::Duration::from_secs(30))
+                .expect("Failed to create Qdrant client")
         }
 
         fn make_chunking_service() -> ChunkingService {

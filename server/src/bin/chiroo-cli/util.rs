@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -9,6 +10,25 @@ pub(crate) fn parse_metadata(raw: &Option<String>) -> Result<Value> {
         None => Ok(Value::Null),
         Some(text) => serde_json::from_str(text).context("invalid --metadata JSON"),
     }
+}
+
+pub(crate) fn parse_reindex_mode(mode: &str) -> Result<&str> {
+    match mode {
+        "compare" | "force" | "full" => Ok(mode),
+        _ => Err(anyhow!(
+            "invalid --mode '{mode}', expected compare|force|full"
+        )),
+    }
+}
+
+pub(crate) fn make_bar(mp: &MultiProgress, total: usize, prefix: &str) -> ProgressBar {
+    let bar = mp.add(ProgressBar::new(total as u64));
+    bar.set_style(
+        ProgressStyle::with_template("{prefix:>10} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .expect("valid progress template"),
+    );
+    bar.set_prefix(prefix.to_string());
+    bar
 }
 
 pub(crate) fn sha256_hex(data: &[u8]) -> String {

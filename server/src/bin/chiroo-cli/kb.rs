@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Subcommand;
+use indicatif::MultiProgress;
 
 use crate::api::Api;
-use crate::models::{Kb, KbRequest};
+use crate::models::{Doc, Kb, KbRequest, ReindexRequest, ReindexResponse};
 use crate::output::{print_json, print_kv, print_table};
-use crate::util::parse_metadata;
+use crate::util::{make_bar, parse_metadata, parse_reindex_mode};
 
 #[derive(Subcommand)]
 pub(crate) enum KbCommand {
@@ -53,6 +54,16 @@ pub(crate) enum KbCommand {
     },
     /// Delete a knowledge base
     Delete { id: String },
+    /// Reindex every document in a knowledge base
+    Reindex {
+        id: String,
+        /// compare | force | full
+        #[arg(long, default_value = "compare")]
+        mode: String,
+        /// Disable progress bar; print actions to the console instead
+        #[arg(long)]
+        no_progress: bool,
+    },
 }
 
 pub(crate) async fn run(api: &Api, command: KbCommand) -> Result<()> {
@@ -74,6 +85,11 @@ pub(crate) async fn run(api: &Api, command: KbCommand) -> Result<()> {
             metadata,
         } => cmd_kb_update(api, &id, &name, &description, &public, &metadata).await,
         KbCommand::Delete { id } => cmd_kb_delete(api, &id).await,
+        KbCommand::Reindex {
+            id,
+            mode,
+            no_progress,
+        } => cmd_kb_reindex(api, &id, &mode, no_progress).await,
     }
 }
 
@@ -199,5 +215,72 @@ async fn cmd_kb_delete(api: &Api, id: &str) -> Result<()> {
     api.delete(&format!("/internal/api/knowledge-bases/{id}"))
         .await?;
     println!("Deleted knowledge base {id}");
+    Ok(())
+}
+
+async fn cmd_kb_reindex(api: &Api, id: &str, mode: &str, no_progress: bool) -> Result<()> {
+    let mode = parse_reindex_mode(mode)?;
+    let docs: Vec<Doc> = api
+        .get_json("/internal/api/documents", &[("kb_id", id.to_string())])
+        .await?;
+
+    if docs.is_empty() {
+        println!("No documents found");
+        return Ok(());
+    }
+
+    let total = docs.len();
+    let mp = if no_progress {
+        None
+    } else {
+        Some(MultiProgress::new())
+    };
+    let bar = mp.as_ref().map(|m| make_bar(m, total, "reindexing"));
+
+    let mut reindexed = 0usize;
+    let mut up_to_date = 0usize;
+    let mut failed = 0usize;
+
+    for doc in &docs {
+        if let Some(bar) = &bar {
+            bar.set_message(doc.id.clone());
+        }
+        let result: Result<ReindexResponse> = api
+            .send_json(
+                reqwest::Method::POST,
+                &format!("/internal/api/documents/{}/reindex", doc.id),
+                &ReindexRequest {
+                    mode: mode.to_string(),
+                },
+            )
+            .await;
+        match result {
+            Ok(response) => {
+                if response.reindexed {
+                    reindexed += 1;
+                } else {
+                    up_to_date += 1;
+                }
+            },
+            Err(e) => {
+                failed += 1;
+                eprintln!("error {}: {e:#}", doc.id);
+            },
+        }
+        if let Some(bar) = &bar {
+            bar.inc(1);
+        }
+    }
+
+    if let Some(bar) = &bar {
+        bar.finish_and_clear();
+    }
+
+    println!("Reindexed: {reindexed} reindexed, {up_to_date} up to date, {failed} failed");
+
+    if failed > 0 {
+        bail!("reindex finished with {failed} failures");
+    }
+
     Ok(())
 }

@@ -333,8 +333,13 @@ mod tests {
     }
 
     fn make_qdrant_client() -> QdrantClient {
-        QdrantClient::new("http://localhost:6334", None, "test".to_string())
-            .expect("failed to create Qdrant client")
+        QdrantClient::new(
+            "http://localhost:6334",
+            None,
+            "test".to_string(),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("failed to create Qdrant client")
     }
 
     fn make_knowledge_service() -> KnowledgeService {

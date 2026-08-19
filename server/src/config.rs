@@ -163,6 +163,7 @@ pub struct QdrantConfig {
     url: String,
     api_key: Option<String>,
     collection_prefix: String,
+    timeout: Duration,
 }
 
 impl QdrantConfig {
@@ -176,6 +177,10 @@ impl QdrantConfig {
 
     pub fn collection_prefix(&self) -> &str {
         &self.collection_prefix
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.timeout
     }
 }
 
@@ -306,6 +311,11 @@ async fn init_config() -> Config {
         api_key: env::var("QDRANT_API_KEY").ok(),
         collection_prefix: env::var("QDRANT_COLLECTION_PREFIX")
             .unwrap_or_else(|_| String::from("chiroo")),
+        timeout: env::var("QDRANT_TIMEOUT_SECS")
+            .unwrap_or_else(|_| "30".into())
+            .parse()
+            .map(Duration::from_secs)
+            .expect("QDRANT_TIMEOUT_SECS must be positive integer in seconds"),
     };
 
     let oidc_config = OidcConfig {

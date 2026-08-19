@@ -7,7 +7,7 @@ use axum::{
 
 use crate::handlers::internal::documents::{
     create_document, delete_document, get_document, get_document_data, list_documents,
-    update_document, update_document_metadata,
+    reindex_document, update_document, update_document_metadata,
 };
 use crate::handlers::internal::knowledge_bases::{
     create_kb, delete_kb, get_kb, list_kbs, update_kb,
@@ -26,6 +26,7 @@ pub fn internal_api_router(state: AppState) -> Router {
         .route("/", post(create_document))
         .route("/", get(list_documents))
         .route("/{id}/data", get(get_document_data))
+        .route("/{id}/reindex", post(reindex_document))
         .route("/{id}", get(get_document))
         .route("/{id}", put(update_document))
         .route("/{id}", patch(update_document_metadata))

@@ -12,7 +12,7 @@ pub fn deep_research() -> Scenario {
                 prompt_template: "deep_research/search.md".into(),
                 tool_names: vec!["search_knowledge_base".into()],
                 max_llm_calls: 1,
-                reasoning_effort: Some(ReasoningEffort::High),
+                reasoning_effort: Some(ReasoningEffort::Medium),
                 extra_body: None,
                 tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
                     ToolChoiceOptions::Required,
@@ -24,9 +24,11 @@ pub fn deep_research() -> Scenario {
                 prompt_template: "deep_research/explore.md".into(),
                 tool_names: vec!["search_knowledge_base".into(), "extract_document".into()],
                 max_llm_calls: 10,
-                reasoning_effort: Some(ReasoningEffort::High),
+                reasoning_effort: Some(ReasoningEffort::Medium),
                 extra_body: None,
-                tool_choice: None,
+                tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
+                    ToolChoiceOptions::Auto,
+                )),
                 enable_thinking: true,
                 preserve_thinking: true,
             },
@@ -34,7 +36,7 @@ pub fn deep_research() -> Scenario {
                 prompt_template: "deep_research/answer.md".into(),
                 tool_names: vec![],
                 max_llm_calls: 1,
-                reasoning_effort: Some(ReasoningEffort::High),
+                reasoning_effort: Some(ReasoningEffort::Medium),
                 extra_body: None,
                 tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
                     ToolChoiceOptions::None,
