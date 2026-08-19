@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::domain::models::user::User;
 use crate::domain::models::user::UserId;
 use crate::infra::db::schema::users;
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 
 #[derive(Serialize, Queryable, Selectable)]
 #[diesel(table_name = users)]
@@ -57,7 +57,7 @@ pub async fn upsert(
     let email_owned = email.map(|s| s.to_string());
     let avatar_url_owned = avatar_url.map(|s| s.to_string());
 
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::insert_into(users::table)
@@ -81,8 +81,8 @@ pub async fn upsert(
                 .get_result(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -92,7 +92,7 @@ pub async fn find_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: Uuid,
 ) -> Result<Option<UserDb>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             users::table
@@ -102,8 +102,8 @@ pub async fn find_by_id(
                 .optional()
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -114,7 +114,7 @@ pub async fn find_by_sso_id(
     sso_id: &str,
 ) -> Result<Option<UserDb>, InfraError> {
     let sso_id_owned = sso_id.to_string();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             users::table
@@ -124,8 +124,8 @@ pub async fn find_by_sso_id(
                 .optional()
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }

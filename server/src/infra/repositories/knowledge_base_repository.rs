@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::domain::models::knowledge_base::{CreateKnowledgeBase, KnowledgeBase, KnowledgeBaseId};
 use crate::infra::db::schema::knowledge_bases;
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 
 #[derive(Queryable, Selectable)]
 #[diesel(table_name = knowledge_bases)]
@@ -63,7 +63,7 @@ pub async fn insert(
         metadata: cmd.metadata.clone(),
         language: cmd.language.clone(),
     };
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(|conn| {
         diesel::insert_into(knowledge_bases::table)
             .values(new_kb)
@@ -71,8 +71,8 @@ pub async fn insert(
             .get_result(conn)
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(Into::into)
 }
 
@@ -80,7 +80,7 @@ pub async fn insert(
 pub async fn list_all(
     pool: &deadpool_diesel::postgres::Pool,
 ) -> Result<Vec<KnowledgeBase>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(|conn| {
         knowledge_bases::table
             .select(KnowledgeBaseDb::as_select())
@@ -88,8 +88,8 @@ pub async fn list_all(
             .load::<KnowledgeBaseDb>(conn)
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(|v| v.into_iter().map(Into::into).collect())
 }
 
@@ -98,7 +98,7 @@ pub async fn get_by_id(
     pool: &deadpool_diesel::postgres::Pool,
     id: KnowledgeBaseId,
 ) -> Result<Option<KnowledgeBase>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         knowledge_bases::table
             .find(id.0)
@@ -107,8 +107,8 @@ pub async fn get_by_id(
             .optional()
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(|opt| opt.map(Into::into))
 }
 
@@ -122,7 +122,7 @@ pub async fn update(
     let description = kb.description.clone();
     let public = kb.public;
     let metadata = kb.metadata.clone();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         diesel::update(knowledge_bases::table.find(id))
             .set((
@@ -136,8 +136,8 @@ pub async fn update(
             .get_result(conn)
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(Into::into)
 }
 
@@ -146,10 +146,10 @@ pub async fn delete(
     pool: &deadpool_diesel::postgres::Pool,
     id: KnowledgeBaseId,
 ) -> Result<bool, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| diesel::delete(knowledge_bases::table.find(id.0)).execute(conn))
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
     Ok(true)
 }

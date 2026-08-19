@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::domain::models::messages::Role;
 use crate::infra::db::schema::messages;
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 
 pub fn message_role_to_db_role(role: &Role) -> &'static str {
     match role {
@@ -48,7 +48,7 @@ pub async fn get_messages_for_chat(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: Uuid,
 ) -> Result<Vec<MessageDb>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             messages::table
@@ -58,8 +58,8 @@ pub async fn get_messages_for_chat(
                 .load::<MessageDb>(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -70,7 +70,7 @@ pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     new_message: NewMessageDb,
 ) -> Result<MessageDb, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(|conn| {
             diesel::insert_into(messages::table)
@@ -79,8 +79,8 @@ pub async fn insert(
                 .get_result(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -93,7 +93,7 @@ pub async fn delete_after_message(
     chat_id: Uuid,
     target_message_id: Uuid,
 ) -> Result<usize, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     // First, get the created_at of the target message
     let target_created_at = conn
         .interact(move |conn| {
@@ -104,8 +104,8 @@ pub async fn delete_after_message(
                 .optional()
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     let Some(target_created_at) = target_created_at else {
         return Ok(0);
@@ -124,8 +124,8 @@ pub async fn delete_after_message(
             .execute(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res as usize)
 }

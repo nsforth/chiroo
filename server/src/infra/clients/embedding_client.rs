@@ -8,7 +8,7 @@ use async_openai::types::embeddings::{
 use async_openai::Client;
 use secrecy::ExposeSecret;
 use serde::Serialize;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use crate::config::EmbeddingConfig;
 use crate::errors::AppError;
@@ -89,7 +89,11 @@ impl EmbeddingClient {
             .embeddings()
             .create_byot(CreateEmbeddingRequestWithPriority { request, priority })
             .await
-            .map_err(|e| AppError::EmbeddingError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::EmbeddingError(msg)
+            })?;
 
         let mut data = response.data;
         data.sort_by_key(|e| e.index);

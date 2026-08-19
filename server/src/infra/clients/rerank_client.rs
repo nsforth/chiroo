@@ -4,7 +4,7 @@ use std::hash::Hash;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use crate::config::RerankConfig;
 use crate::errors::AppError;
@@ -87,9 +87,15 @@ impl RerankClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| AppError::RerankError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::RerankError(msg)
+            })?;
 
         if !response.status().is_success() {
+            let http_status = response.status().as_u16();
+            debug!(http_status, status = "failed");
             return Err(AppError::RerankError(format!(
                 "rerank request failed: {}",
                 response.status()

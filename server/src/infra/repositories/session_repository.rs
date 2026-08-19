@@ -16,7 +16,7 @@ use crate::domain::models::session::SessionId;
 use crate::domain::models::session::{ProviderSessionId, Session};
 use crate::domain::models::user::UserId;
 use crate::infra::db::schema::sessions;
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 use crate::utils::crypto::{self, KEY_LEN};
 
 #[derive(Serialize, Queryable, Selectable)]
@@ -89,7 +89,7 @@ impl SessionRepository {
         let at_bytes = self.encrypt_token(access_token)?;
         let rt_bytes = self.encrypt_token(refresh_token)?;
 
-        let conn = pool.get().await.map_err(InfraError::from)?;
+        let conn = pool.get().await.map_err(map_infra_error)?;
         let res = conn
             .interact(move |conn| {
                 diesel::insert_into(sessions::table)
@@ -112,8 +112,8 @@ impl SessionRepository {
                     .get_result(conn)
             })
             .await
-            .map_err(InfraError::from)?
-            .map_err(InfraError::from)?;
+            .map_err(map_infra_error)?
+            .map_err(map_infra_error)?;
 
         self.session_from_db(res)
     }
@@ -125,7 +125,7 @@ impl SessionRepository {
         provider_sid: &ProviderSessionId,
     ) -> Result<Option<Session>, InfraError> {
         let sid_owned = provider_sid.0.clone();
-        let conn = pool.get().await.map_err(InfraError::from)?;
+        let conn = pool.get().await.map_err(map_infra_error)?;
         let res = conn
             .interact(move |conn| {
                 sessions::table
@@ -135,8 +135,8 @@ impl SessionRepository {
                     .optional()
             })
             .await
-            .map_err(InfraError::from)?
-            .map_err(InfraError::from)?;
+            .map_err(map_infra_error)?
+            .map_err(map_infra_error)?;
 
         match res {
             Some(db) => Ok(Some(self.session_from_db(db)?)),
@@ -147,15 +147,15 @@ impl SessionRepository {
 
 #[instrument(level = "debug", skip(pool))]
 pub async fn delete_expired(pool: &deadpool_diesel::postgres::Pool) -> Result<usize, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(|conn| {
             diesel::delete(sessions::table.filter(sessions::expires_at.lt(diesel::dsl::now)))
                 .execute(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }

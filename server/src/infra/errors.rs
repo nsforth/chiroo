@@ -2,6 +2,7 @@ use std::fmt;
 
 use deadpool_diesel::InteractError;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
+use tracing::debug;
 
 #[derive(Debug)]
 pub enum InfraError {
@@ -43,4 +44,13 @@ impl From<InteractError> for InfraError {
     fn from(_error: InteractError) -> Self {
         Self::InternalServerError
     }
+}
+
+pub(crate) fn map_infra_error<E>(e: E) -> InfraError
+where
+    E: fmt::Display,
+    InfraError: From<E>,
+{
+    debug!(error = e.to_string(), status = "failed");
+    InfraError::from(e)
 }

@@ -179,17 +179,34 @@ All public functions in `server/src/infra/repositories/*.rs` and public methods 
 
 - Debug level keeps `info` logs clean in production; enable with `RUST_LOG=debug`
   (or a target filter) to see the call tree nested under the service spans.
-- Spans only record the call and its args — do NOT add manual exit `info!`/`debug!`
-  events here (that rule is for services only).
+- Log errors at the point they are caught — no entry logging, no exit `status`
+  logging (that rule is for services only). Use `debug!(error = ..., status = "failed")`.
+- Clients: inline `debug!` inside the `map_err` closure of each network call.
+- Repositories: route DB errors through `map_infra_error` (`infra/errors.rs`),
+  which logs and converts to `InfraError`.
 - Skip `self` and `pool` always, plus any argument that is large, not `Debug`, or
   secret: byte blobs (`&[u8]`, `Vec<f32>`), content payloads (`NewMessageDb`,
   `DocumentChunk`, `CreateDocument`), `SecretBox`, tokens/codes, `metadata: &Value`.
 - Do NOT instrument constructors (`new`) or private/helper methods.
 
-Example:
+Examples:
 ```rust
-#[instrument(level = "debug", skip(pool, new_chat))]
-pub async fn insert(pool: &Pool, new_chat: NewChatDb) -> Result<ChatDb, InfraError> { /* ... */ }
+// client — network call error
+.map_err(|e| {
+    let msg = e.to_string();
+    debug!(error = msg, status = "failed");
+    AppError::QdrantError(msg)
+})?;
+
+// repository — DB error via shared helper
+pub(crate) fn map_infra_error<E>(e: E) -> InfraError
+where
+    E: fmt::Display,
+    InfraError: From<E>,
+{
+    debug!(error = e.to_string(), status = "failed");
+    InfraError::from(e)
+}
 ```
 
 ## Formatting

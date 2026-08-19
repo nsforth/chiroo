@@ -14,7 +14,7 @@ use crate::domain::models::document::{
 };
 use crate::domain::models::knowledge_base::KnowledgeBaseId;
 use crate::infra::db::schema::{document_data, documents};
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 
 #[derive(Queryable, Selectable)]
 #[diesel(table_name = documents)]
@@ -102,7 +102,7 @@ pub async fn insert(
         document_id: cmd.id.clone(),
         data: data.to_vec(),
     };
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         conn.build_transaction()
             .run::<DocumentDb, diesel::result::Error, _>(|conn| {
@@ -117,8 +117,8 @@ pub async fn insert(
             })
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(Into::into)
 }
 
@@ -129,7 +129,7 @@ pub async fn list_by_kb(
     filter: Option<&str>,
 ) -> Result<Vec<Document>, InfraError> {
     let pattern = filter.map(|f| format!("%{f}%"));
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         let mut query = documents::table
             .filter(documents::kb_id.eq(kb_id.0))
@@ -147,8 +147,8 @@ pub async fn list_by_kb(
             .load::<DocumentDb>(conn)
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(|v| v.into_iter().map(Into::into).collect())
 }
 
@@ -158,7 +158,7 @@ pub async fn get_by_id(
     id: &DocumentId,
 ) -> Result<Option<Document>, InfraError> {
     let id_clone = id.0.clone();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         documents::table
             .find(&id_clone)
@@ -167,8 +167,8 @@ pub async fn get_by_id(
             .optional()
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(|opt| opt.map(Into::into))
 }
 
@@ -178,7 +178,7 @@ pub async fn get_data_by_id(
     id: &DocumentId,
 ) -> Result<Option<DocumentData>, InfraError> {
     let id_clone = id.0.clone();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         document_data::table
             .find(&id_clone)
@@ -187,8 +187,8 @@ pub async fn get_data_by_id(
             .optional()
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(|opt| opt.map(Into::into))
 }
 
@@ -198,7 +198,7 @@ pub async fn get_with_data(
     id: &DocumentId,
 ) -> Result<Option<(Document, Vec<u8>)>, InfraError> {
     let id_clone = id.0.clone();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(
         move |conn| -> Result<Option<(DocumentDb, Vec<u8>)>, diesel::result::Error> {
             let doc: Option<DocumentDb> = documents::table
@@ -221,8 +221,8 @@ pub async fn get_with_data(
         },
     )
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(|opt| opt.map(|(doc, data)| (doc.into(), data)))
 }
 
@@ -239,7 +239,7 @@ pub async fn update(
     let mime_type = doc.mime_type.as_str().to_string();
     let metadata = doc.metadata.clone();
     let data_vec = data.to_vec();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         conn.build_transaction()
             .run::<DocumentDb, diesel::result::Error, _>(|conn| {
@@ -269,8 +269,8 @@ pub async fn update(
             })
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(Into::into)
 }
 
@@ -286,7 +286,7 @@ pub async fn update_metadata(
     let title = title.to_string();
     let url = url.to_string();
     let metadata = metadata.clone();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         diesel::update(documents::table.find(&id_clone))
             .set((
@@ -299,8 +299,8 @@ pub async fn update_metadata(
             .get_result(conn)
     })
     .await
-    .map_err(InfraError::from)?
-    .map_err(InfraError::from)
+    .map_err(map_infra_error)?
+    .map_err(map_infra_error)
     .map(Into::into)
 }
 
@@ -310,11 +310,11 @@ pub async fn delete(
     id: &DocumentId,
 ) -> Result<bool, InfraError> {
     let id_clone = id.0.clone();
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| diesel::delete(documents::table.find(&id_clone)).execute(conn))
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
     Ok(true)
 }
 
@@ -323,13 +323,13 @@ pub async fn delete_by_kb(
     pool: &deadpool_diesel::postgres::Pool,
     kb_id: KnowledgeBaseId,
 ) -> Result<u64, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let count = conn
         .interact(move |conn| {
             diesel::delete(documents::table.filter(documents::kb_id.eq(kb_id.0))).execute(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
     Ok(count as u64)
 }

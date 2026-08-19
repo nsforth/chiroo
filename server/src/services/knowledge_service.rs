@@ -488,12 +488,10 @@ impl KnowledgeService {
         id: &DocumentId,
         mode: ReindexMode,
     ) -> Result<ReindexOutcome, AppError> {
-        let (doc, data) = self
-            .get_document_with_data(id)
+        let doc = self
+            .get_document(id)
             .await?
             .ok_or_else(|| AppError::NotFound("Document not found".into()))?;
-
-        let text = Self::validate_document_params(&doc.mime_type, &data.data)?;
 
         let kb = knowledge_base_repository::get_by_id(&self.pool, doc.kb_id)
             .await?
@@ -503,6 +501,11 @@ impl KnowledgeService {
 
         let (reindexed, chunks) = match mode {
             ReindexMode::Full => {
+                let data = self
+                    .get_document_data(id)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound("Document data not found".into()))?;
+                let text = Self::validate_document_params(&doc.mime_type, &data.data)?;
                 self.qdrant_client
                     .delete_by_document(&doc.kb_id, id)
                     .await?;
@@ -510,17 +513,27 @@ impl KnowledgeService {
                 (true, chunks)
             },
             ReindexMode::Force => {
+                let data = self
+                    .get_document_data(id)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound("Document data not found".into()))?;
+                let text = Self::validate_document_params(&doc.mime_type, &data.data)?;
                 let chunks = self.reindex_document_text(&doc, text, language).await?;
                 (true, chunks)
             },
             ReindexMode::Compare => {
                 let actual = self
                     .qdrant_client
-                    .scroll_by_document(&doc.kb_id, id)
+                    .scroll_payload_by_document(&doc.kb_id, id)
                     .await?;
                 if chunks_up_to_date(&actual, &doc.version) {
                     (false, actual.len())
                 } else {
+                    let data = self
+                        .get_document_data(id)
+                        .await?
+                        .ok_or_else(|| AppError::NotFound("Document data not found".into()))?;
+                    let text = Self::validate_document_params(&doc.mime_type, &data.data)?;
                     let chunks = self.reindex_document_text(&doc, text, language).await?;
                     (true, chunks)
                 }

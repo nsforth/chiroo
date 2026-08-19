@@ -749,11 +749,15 @@ async fn run_one_llm_call(
         tool_choice,
     );
 
-    let mut stream: CustomStream = client.chat().create_stream_byot(request).await?;
+    let mut stream: CustomStream = client
+        .chat()
+        .create_stream_byot(request)
+        .await
+        .inspect_err(|e| debug!(error = e.to_string(), status = "failed"))?;
     let mut acc = Accumulator::new(chat_id);
 
     while let Some(result) = stream.next().await {
-        let response = result?;
+        let response = result.inspect_err(|e| debug!(error = e.to_string(), status = "failed"))?;
 
         for choice in response.choices {
             for event in acc.process_delta(&choice.delta) {

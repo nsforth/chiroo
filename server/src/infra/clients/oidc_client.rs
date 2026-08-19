@@ -12,7 +12,7 @@ use openidconnect::{
 };
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
+use tracing::{debug, instrument};
 use url::Url;
 
 use crate::config::OidcConfig;
@@ -71,7 +71,11 @@ async fn fetch_jwk_set(jwks_uri: String) -> Result<JwkSet, AppError> {
         .get(&jwks_uri)
         .send()
         .await
-        .map_err(|e| AppError::OidcError(format!("Failed to fetch JWK: {e}")))?
+        .map_err(|e| {
+            let msg = format!("Failed to fetch JWK: {e}");
+            debug!(error = msg, status = "failed");
+            AppError::OidcError(msg)
+        })?
         .json()
         .await
         .map_err(|e| AppError::OidcError(format!("Failed to parse JWK set: {e}")))?;
@@ -180,7 +184,11 @@ impl OidcClient {
             &http_client,
         )
         .await
-        .map_err(|e| AppError::OidcError(format!("Provider discovery: {e:?}")))?;
+        .map_err(|e| {
+            let msg = format!("Provider discovery: {e:?}");
+            debug!(error = msg, status = "failed");
+            AppError::OidcError(msg)
+        })?;
 
         let jwks_uri = metadata.jwks_uri().to_string();
 
@@ -247,7 +255,11 @@ impl OidcClient {
             .map_err(|e| AppError::OidcError(format!("Token exchange setup: {e:?}")))?
             .request_async(&self.http_client)
             .await
-            .map_err(|e| AppError::OidcError(format!("Token exchange: {e:?}")))?;
+            .map_err(|e| {
+                let msg = format!("Token exchange: {e:?}");
+                debug!(error = msg, status = "failed");
+                AppError::OidcError(msg)
+            })?;
 
         let id_token = token_response
             .id_token()
@@ -314,7 +326,11 @@ impl OidcClient {
             .map_err(|e| AppError::OidcError(format!("Token refresh setup: {e:?}")))?
             .request_async(&self.http_client)
             .await
-            .map_err(|e| AppError::OidcError(format!("Token refresh: {e:?}")))?;
+            .map_err(|e| {
+                let msg = format!("Token refresh: {e:?}");
+                debug!(error = msg, status = "failed");
+                AppError::OidcError(msg)
+            })?;
 
         let access_token = From::from(token_response.access_token().secret().as_str());
         match verify_token::<AccessTokenClaims>(&access_token, &jwks, &self.issuer_url) {

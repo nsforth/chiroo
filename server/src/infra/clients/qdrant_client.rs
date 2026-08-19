@@ -5,15 +5,16 @@ use qdrant_client::qdrant::condition::ConditionOneOf;
 use qdrant_client::qdrant::points_selector::PointsSelectorOneOf;
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, vectors::VectorsOptions, Condition, CreateCollectionBuilder,
-    DeletePointsBuilder, Distance, DocumentBuilder, FieldCondition, Filter, Fusion, NamedVectors,
-    PointId, PointStruct, PointsIdsList, PrefetchQueryBuilder, QueryPointsBuilder, ScoredPoint,
-    ScrollPointsBuilder, SetPayloadPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
-    UpsertPointsBuilder, Vector, VectorParamsBuilder, Vectors, VectorsOutput,
+    CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance, DocumentBuilder,
+    FieldCondition, FieldType, Filter, Fusion, NamedVectors, PointId, PointStruct, PointsIdsList,
+    PrefetchQueryBuilder, QueryPointsBuilder, ScoredPoint, ScrollPointsBuilder,
+    SetPayloadPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder, UpsertPointsBuilder,
+    Vector, VectorParamsBuilder, Vectors, VectorsOutput,
 };
 use qdrant_client::{Payload, Qdrant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{debug, instrument};
 use uuid::Uuid;
 
 use crate::domain::models::document::DocumentId;
@@ -74,17 +75,36 @@ impl QdrantClient {
                     .sparse_vectors_config(SparseVectorConfig { map }),
             )
             .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
+
+        self.client
+            .create_field_index(CreateFieldIndexCollectionBuilder::new(
+                &name,
+                "document_id",
+                FieldType::Keyword,
+            ))
+            .await
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
+
         Ok(())
     }
 
     #[instrument(level = "debug", skip(self))]
     pub async fn delete_collection(&self, kb_id: &KnowledgeBaseId) -> Result<(), AppError> {
         let name = self.collection_name(kb_id);
-        self.client
-            .delete_collection(&name)
-            .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+        self.client.delete_collection(&name).await.map_err(|e| {
+            let msg = e.to_string();
+            debug!(error = msg, status = "failed");
+            AppError::QdrantError(msg)
+        })?;
         Ok(())
     }
 
@@ -104,7 +124,11 @@ impl QdrantClient {
         self.client
             .upsert_points(UpsertPointsBuilder::new(&name, points))
             .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
         Ok(())
     }
 
@@ -129,7 +153,11 @@ impl QdrantClient {
                 })),
             )
             .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
         Ok(())
     }
 
@@ -161,7 +189,11 @@ impl QdrantClient {
                 DeletePointsBuilder::new(name).points(PointsSelectorOneOf::Filter(filter)),
             )
             .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
         Ok(())
     }
 
@@ -205,7 +237,11 @@ impl QdrantClient {
                     .wait(true),
             )
             .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
         Ok(())
     }
 
@@ -214,6 +250,26 @@ impl QdrantClient {
         &self,
         kb_id: &KnowledgeBaseId,
         document_id: &DocumentId,
+    ) -> Result<Vec<DocumentChunk>, AppError> {
+        self.scroll_by_document_with_vectors(kb_id, document_id, true)
+            .await
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    pub async fn scroll_payload_by_document(
+        &self,
+        kb_id: &KnowledgeBaseId,
+        document_id: &DocumentId,
+    ) -> Result<Vec<DocumentChunk>, AppError> {
+        self.scroll_by_document_with_vectors(kb_id, document_id, false)
+            .await
+    }
+
+    async fn scroll_by_document_with_vectors(
+        &self,
+        kb_id: &KnowledgeBaseId,
+        document_id: &DocumentId,
+        with_vectors: bool,
     ) -> Result<Vec<DocumentChunk>, AppError> {
         let name = self.collection_name(kb_id);
 
@@ -239,18 +295,18 @@ impl QdrantClient {
             let mut builder = ScrollPointsBuilder::new(&name)
                 .filter(filter.clone())
                 .with_payload(true)
-                .with_vectors(true)
+                .with_vectors(with_vectors)
                 .limit(1000);
 
             if let Some(ref off) = offset {
                 builder = builder.offset(off.clone());
             }
 
-            let response = self
-                .client
-                .scroll(builder)
-                .await
-                .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            let response = self.client.scroll(builder).await.map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
 
             for point in response.result {
                 let point_id = point
@@ -347,7 +403,11 @@ impl QdrantClient {
                     .limit(limit),
             )
             .await
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                debug!(error = msg, status = "failed");
+                AppError::QdrantError(msg)
+            })?;
 
         let results = response
             .result

@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::domain::models::chat::{Chat, ChatId};
 use crate::domain::models::user::{User, UserId};
 use crate::infra::db::schema::chats::{self, owner};
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 
 #[derive(Serialize, Queryable, Selectable)]
 #[diesel(table_name = chats)]
@@ -37,7 +37,7 @@ pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,
     new_chat: NewChatDb,
 ) -> Result<ChatDb, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(|conn| {
             diesel::insert_into(chats::table)
@@ -46,8 +46,8 @@ pub async fn insert(
                 .get_result(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -57,7 +57,7 @@ pub async fn get_all(
     pool: &deadpool_diesel::postgres::Pool,
     user_id: UserId,
 ) -> Result<Vec<ChatDb>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             let query = chats::table.into_boxed::<diesel::pg::Pg>();
@@ -68,8 +68,8 @@ pub async fn get_all(
                 .load::<ChatDb>(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -80,7 +80,7 @@ pub async fn get_by_id(
     id: ChatId,
     user_id: UserId,
 ) -> Result<Option<ChatDb>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             chats::table
@@ -91,8 +91,8 @@ pub async fn get_by_id(
                 .optional()
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -103,15 +103,15 @@ pub async fn delete(
     id: ChatId,
     user_id: UserId,
 ) -> Result<bool, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::delete(chats::table.filter(chats::id.eq(id.0).and(chats::owner.eq(user_id.0))))
                 .execute(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res > 0)
 }
@@ -123,7 +123,7 @@ pub async fn update_title(
     user_id: UserId,
     title: String,
 ) -> Result<ChatDb, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::update(chats::table.filter(chats::id.eq(id.0).and(chats::owner.eq(user_id.0))))
@@ -132,8 +132,8 @@ pub async fn update_title(
                 .get_result(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -145,7 +145,7 @@ pub async fn update_visibility(
     user_id: UserId,
     is_public: bool,
 ) -> Result<ChatDb, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::update(chats::table.filter(chats::id.eq(id.0).and(chats::owner.eq(user_id.0))))
@@ -154,8 +154,8 @@ pub async fn update_visibility(
                 .get_result(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -166,7 +166,7 @@ pub async fn is_owner(
     chat_id: ChatId,
     user_id: UserId,
 ) -> Result<bool, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::select(exists(
@@ -175,8 +175,8 @@ pub async fn is_owner(
             .get_result::<bool>(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
     Ok(res)
 }
 

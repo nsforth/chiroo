@@ -8,7 +8,7 @@ use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::MessageId;
 use crate::domain::models::votes::{Vote, VoteType};
 use crate::infra::db::schema::votes;
-use crate::infra::errors::InfraError;
+use crate::infra::errors::{map_infra_error, InfraError};
 
 #[derive(Serialize, Selectable, Queryable, Debug)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -32,7 +32,7 @@ pub async fn get_votes_for_chat(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: ChatId,
 ) -> Result<Vec<VoteDb>, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             votes::table
@@ -40,8 +40,8 @@ pub async fn get_votes_for_chat(
                 .load::<VoteDb>(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -51,7 +51,7 @@ pub async fn upsert_vote(
     pool: &deadpool_diesel::postgres::Pool,
     new_vote: NewVoteDb,
 ) -> Result<VoteDb, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::insert_into(votes::table)
@@ -63,8 +63,8 @@ pub async fn upsert_vote(
                 .get_result(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res)
 }
@@ -75,7 +75,7 @@ pub async fn delete_vote(
     chat_id: Uuid,
     message_id: Uuid,
 ) -> Result<bool, InfraError> {
-    let conn = pool.get().await.map_err(InfraError::from)?;
+    let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
         .interact(move |conn| {
             diesel::delete(
@@ -86,8 +86,8 @@ pub async fn delete_vote(
             .execute(conn)
         })
         .await
-        .map_err(InfraError::from)?
-        .map_err(InfraError::from)?;
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
 
     Ok(res > 0)
 }
