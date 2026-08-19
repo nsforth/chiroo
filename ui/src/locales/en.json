@@ -73,7 +73,16 @@
     "loadingChart": "Loading chart data...",
     "loadingWeather": "Loading weather data...",
     "weatherError": "Can't get weather data, please try again later",
-    "noForecast": "No forecast available"
+    "noForecast": "No forecast available",
+    "searchingKnowledgeBase": "Searching knowledge base...",
+    "foundResults": "Found {count} results",
+    "searchError": "Search failed",
+    "readingDocument": "Reading document...",
+    "readDocument": "Read document",
+    "readError": "Failed to read document",
+    "noResults": "No results found",
+    "showContent": "Show content",
+    "hideContent": "Hide content"
   },
   "placeholders": {
     "modelSelectSearch": "Search...",

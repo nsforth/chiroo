@@ -73,7 +73,16 @@
     "loadingChart": "Загружаю данные графика...",
     "loadingWeather": "Загружаю данные о погоде...",
     "weatherError": "Не удалось получить данные о погоде, попробуйте позже",
-    "noForecast": "Прогноз недоступен"
+    "noForecast": "Прогноз недоступен",
+    "searchingKnowledgeBase": "Ищу в базе знаний...",
+    "foundResults": "Найдено результатов: {count}",
+    "searchError": "Не удалось выполнить поиск",
+    "readingDocument": "Читаю документ...",
+    "readDocument": "Документ прочитан",
+    "readError": "Не удалось прочитать документ",
+    "noResults": "Ничего не найдено",
+    "showContent": "Показать текст",
+    "hideContent": "Скрыть текст"
   },
   "placeholders": {
     "modelSelectSearch": "Поиск...",

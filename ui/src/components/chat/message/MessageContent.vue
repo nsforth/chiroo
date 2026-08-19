@@ -9,10 +9,12 @@ import ChatToolChart from '../tool/Chart.vue'
 import ChatToolWeather from '../tool/Weather.vue'
 import ChatToolSources from '../tool/Sources.vue'
 import ChatToolGeneric from '../tool/Generic.vue'
+import ChatToolSearchKnowledgeBase from '../tool/SearchKnowledgeBase.vue'
+import ChatToolExtractDocument from '../tool/ExtractDocument.vue'
 import ChatMessageSources from './ChatMessageSources.vue'
 import ChatMessageEdit from './MessageEdit.vue'
 import { getMergedParts, getMessageSources } from '../../../utils/ai'
-import { formatToolInput, formatToolOutput, getSearchQuery, getSources } from '../../../utils/tool'
+import { formatToolInput, formatToolOutput, getSearchQuery, getSources, getSearchQueries, getSearchChunks, getExtractedDocument } from '../../../utils/tool'
 import type { WeatherUIToolInvocation } from '../../../tools/weather'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
 
@@ -74,6 +76,20 @@ const emit = defineEmits<{
       >
         <ChatToolSources :sources="getSources(part)" />
       </UChatTool>
+
+      <ChatToolSearchKnowledgeBase
+        v-else-if="getToolName(part) === 'search_knowledge_base'"
+        :streaming="isToolStreaming(part)"
+        :queries="getSearchQueries(part)"
+        :chunks="getSearchChunks(part)"
+        :error-text="part.errorText"
+      />
+      <ChatToolExtractDocument
+        v-else-if="getToolName(part) === 'extract_document'"
+        :streaming="isToolStreaming(part)"
+        :document="getExtractedDocument(part)"
+        :error-text="part.errorText"
+      />
 
       <ChatToolGeneric
         v-else
