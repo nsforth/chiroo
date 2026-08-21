@@ -1,10 +1,10 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use futures::future::join_all;
 use tracing::{info, instrument};
 
-use crate::config::SearchConfig;
-use crate::domain::models::document_chunk::SearchedChunk;
+use crate::domain::models::document_chunk::{DocumentChunkId, SearchedChunk};
 use crate::domain::models::knowledge_base::KnowledgeBase;
 use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
@@ -16,7 +16,8 @@ pub struct SearchService {
     embedding_client: EmbeddingClient,
     qdrant_client: QdrantClient,
     rerank_client: RerankClient,
-    config: SearchConfig,
+    score_threshold: f32,
+    candidate_limit: u64,
 }
 
 impl SearchService {
@@ -24,38 +25,78 @@ impl SearchService {
         embedding_client: EmbeddingClient,
         qdrant_client: QdrantClient,
         rerank_client: RerankClient,
-        config: SearchConfig,
+        score_threshold: f32,
+        candidate_limit: u64,
     ) -> Self {
         Self {
             embedding_client,
             qdrant_client,
             rerank_client,
-            config,
+            score_threshold,
+            candidate_limit,
         }
     }
 
-    #[instrument(skip(self, queries, kbs))]
-    pub async fn search(
+    #[instrument(skip(self, query, kbs))]
+    pub async fn search_one(
         &self,
-        queries: Vec<String>,
+        query: &str,
         kbs: &[KnowledgeBase],
-    ) -> Result<HashMap<String, Vec<SearchedChunk>>, AppError> {
-        let result = self.run_search(queries, kbs).await;
+        limit: usize,
+    ) -> Result<Vec<SearchedChunk>, AppError> {
+        let result = self
+            .search_impl(vec![query.to_string()], kbs, None, limit)
+            .await;
         match &result {
-            Ok(map) => info!(queries = map.len(), status = "success"),
+            Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
             Err(e) => info!(error = e.to_string(), status = "failed"),
         }
         result
     }
 
-    async fn run_search(
+    #[instrument(skip(self, queries, kbs))]
+    pub async fn search_many(
         &self,
         queries: Vec<String>,
         kbs: &[KnowledgeBase],
-    ) -> Result<HashMap<String, Vec<SearchedChunk>>, AppError> {
+        limit: usize,
+    ) -> Result<Vec<SearchedChunk>, AppError> {
+        let result = self.search_impl(queries, kbs, None, limit).await;
+        match &result {
+            Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
+            Err(e) => info!(error = e.to_string(), status = "failed"),
+        }
+        result
+    }
+
+    #[instrument(skip(self, queries, kbs))]
+    pub async fn search_grouped(
+        &self,
+        queries: Vec<String>,
+        kbs: &[KnowledgeBase],
+        per_query_limit: usize,
+        total_limit: usize,
+    ) -> Result<Vec<SearchedChunk>, AppError> {
+        let result = self
+            .search_impl(queries, kbs, Some(per_query_limit), total_limit)
+            .await;
+        match &result {
+            Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
+            Err(e) => info!(error = e.to_string(), status = "failed"),
+        }
+        result
+    }
+
+    async fn search_impl(
+        &self,
+        queries: Vec<String>,
+        kbs: &[KnowledgeBase],
+        per_query_limit: Option<usize>,
+        total_limit: usize,
+    ) -> Result<Vec<SearchedChunk>, AppError> {
         let unique = dedup_queries(queries);
         if unique.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(Vec::new());
         }
 
         let query_map: HashMap<String, String> =
@@ -64,9 +105,8 @@ impl SearchService {
 
         let kbs = kbs.to_vec();
 
-        let candidate_limit = self.config.candidate_limit;
-        let threshold = self.config.score_threshold;
-        let limit = self.config.limit;
+        let candidate_limit = self.candidate_limit;
+        let threshold = self.score_threshold;
 
         let mut futures = Vec::new();
         for query in &unique {
@@ -77,7 +117,7 @@ impl SearchService {
             let query = query.clone();
 
             futures.push(async move {
-                let result = search_one_query(
+                search_one_query(
                     &qdrant_client,
                     &rerank_client,
                     &kbs,
@@ -85,18 +125,21 @@ impl SearchService {
                     dense_vector,
                     candidate_limit,
                     threshold,
-                    limit,
                 )
-                .await;
-                (query, result)
+                .await
             });
         }
 
-        let mut output = HashMap::new();
-        for (query, result) in join_all(futures).await {
-            output.insert(query, result?);
+        let mut all = Vec::new();
+        for result in join_all(futures).await {
+            let mut chunks = result?;
+            if let Some(limit) = per_query_limit {
+                chunks.truncate(limit);
+            }
+            all.extend(chunks);
         }
-        Ok(output)
+
+        Ok(merge_top(all, total_limit))
     }
 }
 
@@ -108,7 +151,6 @@ async fn search_one_query(
     dense_vector: Vec<f32>,
     candidate_limit: u64,
     threshold: f32,
-    limit: usize,
 ) -> Result<Vec<SearchedChunk>, AppError> {
     let chunks = search_in_kbs(qdrant_client, kbs, query, dense_vector, candidate_limit).await?;
     let chunks = dedup_chunks(chunks);
@@ -120,7 +162,7 @@ async fn search_one_query(
         .map(|r| (r.index as usize, r.relevance_score))
         .collect();
 
-    Ok(select_chunks(chunks, scores, threshold, limit))
+    Ok(filter_chunks(chunks, scores, threshold))
 }
 
 async fn search_in_kbs(
@@ -172,25 +214,41 @@ fn dedup_queries(queries: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn select_chunks(
+fn filter_chunks(
     chunks: Vec<SearchedChunk>,
     scores: Vec<(usize, f32)>,
     threshold: f32,
-    limit: usize,
 ) -> Vec<SearchedChunk> {
-    let mut selected: Vec<SearchedChunk> = scores
+    scores
         .into_iter()
         .filter(|(_, score)| *score >= threshold)
         .filter_map(|(index, score)| chunks.get(index).map(|chunk| chunk.with_score(score)))
-        .collect();
+        .collect()
+}
 
-    selected.sort_by(|a, b| {
+fn merge_top(chunks: Vec<SearchedChunk>, limit: usize) -> Vec<SearchedChunk> {
+    let mut best: HashMap<DocumentChunkId, SearchedChunk> = HashMap::new();
+    for chunk in chunks {
+        match best.entry(chunk.id.clone()) {
+            Entry::Occupied(mut e) => {
+                if chunk.score > e.get().score {
+                    e.insert(chunk);
+                }
+            },
+            Entry::Vacant(e) => {
+                e.insert(chunk);
+            },
+        }
+    }
+
+    let mut ranked: Vec<SearchedChunk> = best.into_values().collect();
+    ranked.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    selected.truncate(limit);
-    selected
+    ranked.truncate(limit);
+    ranked
 }
 
 #[cfg(test)]
@@ -222,25 +280,44 @@ mod tests {
     }
 
     #[test]
-    fn select_chunks_filters_below_threshold() {
+    fn filter_chunks_filters_below_threshold() {
         let chunks = vec![make_chunk("a"), make_chunk("b"), make_chunk("c")];
         let scores = vec![(0, 0.9), (1, 0.4), (2, 0.6)];
-        let selected = select_chunks(chunks, scores, 0.5, 10);
+        let selected = filter_chunks(chunks, scores, 0.5);
         let contents: Vec<&str> = selected.iter().map(|c| c.content.as_str()).collect();
         assert_eq!(contents, vec!["a", "c"]);
         assert!(selected.iter().all(|c| c.score >= 0.5));
     }
 
     #[test]
-    fn select_chunks_sorts_descending_and_truncates_to_limit() {
-        let chunks: Vec<SearchedChunk> = (0..12).map(|i| make_chunk(&format!("c{i}"))).collect();
-        let scores: Vec<(usize, f32)> = (0..12).map(|i| (i, i as f32 * 0.1)).collect();
-        let selected = select_chunks(chunks, scores, 0.0, 10);
-        assert_eq!(selected.len(), 10);
-        assert_eq!(selected[0].content, "c11");
-        assert_eq!(selected[9].content, "c2");
-        for pair in selected.windows(2) {
-            assert!(pair[0].score >= pair[1].score);
+    fn merge_top_keeps_higher_score_for_duplicate_chunk() {
+        let shared = make_chunk("shared");
+        let shared_high = shared.with_score(0.9);
+        let shared_low = shared.with_score(0.4);
+        let other = make_chunk("other").with_score(0.7);
+
+        let merged = merge_top(vec![shared_low, shared_high, other.clone()], 10);
+
+        assert_eq!(merged.len(), 2, "duplicate chunk must appear exactly once");
+        let shared_in = merged.iter().find(|c| c.content == "shared").unwrap();
+        assert_eq!(shared_in.score, 0.9, "the higher score must win");
+        assert!(merged.iter().any(|c| c.content == "other"));
+    }
+
+    #[test]
+    fn merge_top_truncates_globally() {
+        let chunks: Vec<SearchedChunk> = (0..15)
+            .map(|i| make_chunk(&format!("c{i}")).with_score(i as f32 * 0.1))
+            .collect();
+
+        let merged = merge_top(chunks, 4);
+
+        assert_eq!(merged.len(), 4, "global limit must cap the combined result");
+        for pair in merged.windows(2) {
+            assert!(
+                pair[0].score >= pair[1].score,
+                "chunks must be globally sorted"
+            );
         }
     }
 
@@ -281,7 +358,7 @@ mod tests {
         use uuid::Uuid;
 
         use super::*;
-        use crate::config::{EmbeddingConfig, RerankConfig, SearchConfig};
+        use crate::config::{EmbeddingConfig, RerankConfig};
         use crate::domain::models::document::MimeType;
         use crate::infra::clients::embedding_client::EmbeddingClient;
         use crate::infra::clients::qdrant_client::QdrantClient;
@@ -354,14 +431,6 @@ mod tests {
             ChunkingService::new(512)
         }
 
-        fn make_search_config() -> SearchConfig {
-            SearchConfig {
-                limit: 10,
-                score_threshold: 0.5,
-                candidate_limit: 30,
-            }
-        }
-
         #[tokio::test]
         #[ignore = "requires Postgres, Qdrant, and embedding service"]
         async fn search_returns_reranked_chunks() {
@@ -379,8 +448,7 @@ mod tests {
                 EMBEDDING_DIMENSIONS,
             );
 
-            let search_service =
-                SearchService::new(embedding, qdrant.clone(), rerank, make_search_config());
+            let search_service = SearchService::new(embedding, qdrant.clone(), rerank, 0.5, 30);
 
             let kb = knowledge_service
                 .create_kb(
@@ -412,19 +480,15 @@ mod tests {
                 .await
                 .expect("create_document");
 
-            let results = search_service
-                .search(
+            let chunks = search_service
+                .search_many(
                     vec!["What is the capital of France?".to_string()],
                     &[kb.clone()],
+                    10,
                 )
                 .await
                 .expect("search");
 
-            assert!(
-                results.contains_key("What is the capital of France?"),
-                "results should be keyed by query"
-            );
-            let chunks = &results["What is the capital of France?"];
             assert!(!chunks.is_empty(), "search should return chunks");
             assert!(
                 chunks.iter().all(|c| c.kb_id == kb.id),

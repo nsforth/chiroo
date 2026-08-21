@@ -1,6 +1,3 @@
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-
 use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObject};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -17,13 +14,19 @@ use crate::services::search_service::SearchService;
 pub struct SearchKnowledgeBaseTool {
     search_service: SearchService,
     knowledge_service: KnowledgeService,
+    limit: usize,
 }
 
 impl SearchKnowledgeBaseTool {
-    pub fn new(search_service: SearchService, knowledge_service: KnowledgeService) -> Self {
+    pub fn new(
+        search_service: SearchService,
+        knowledge_service: KnowledgeService,
+        limit: usize,
+    ) -> Self {
         Self {
             search_service,
             knowledge_service,
+            limit,
         }
     }
 }
@@ -68,13 +71,12 @@ impl LLMTool for SearchKnowledgeBaseTool {
             .await
             .map_err(|e| e.to_string())?;
 
-        let results = self
+        let chunks = self
             .search_service
-            .search(queries, &kbs)
+            .search_many(queries, &kbs, self.limit)
             .await
             .map_err(|e| e.to_string())?;
 
-        let chunks = flatten_search_results(results);
         let sources: Vec<Source> = chunks.iter().map(Source::from).collect();
         Ok(ToolExecution {
             output: serde_json::json!({ "chunks": search_chunks_to_json(&chunks) }),
@@ -98,19 +100,6 @@ fn parse_queries(arguments: &str) -> Result<Vec<String>, String> {
     }
 
     Ok(queries)
-}
-
-fn flatten_search_results(results: HashMap<String, Vec<SearchedChunk>>) -> Vec<SearchedChunk> {
-    let mut seen = HashSet::new();
-    let mut chunks: Vec<SearchedChunk> = results
-        .into_values()
-        .flatten()
-        .filter(|chunk| seen.insert(chunk.id.clone()))
-        .collect();
-
-    chunks.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-
-    chunks
 }
 
 fn search_chunks_to_json(chunks: &[SearchedChunk]) -> Value {
@@ -333,23 +322,6 @@ mod tests {
         assert_eq!(source.url, "https://example.com");
         assert_eq!(source.title.as_deref(), Some("Title"));
         assert_eq!(source.score, Some(0.9));
-    }
-
-    #[test]
-    fn flatten_search_results_dedupes_and_sorts_by_score() {
-        let a = make_chunk("doc-1", 0, 3, "low", 0.2);
-        let b = make_chunk("doc-2", 0, 3, "high", 0.9);
-        let mut results = HashMap::new();
-        results.insert("q1".to_string(), vec![a.clone()]);
-        results.insert("q2".to_string(), vec![a.clone(), b.clone()]);
-
-        let flattened = flatten_search_results(results);
-        assert_eq!(
-            flattened.len(),
-            2,
-            "duplicates across queries must be removed"
-        );
-        assert!(flattened[0].score >= flattened[1].score);
     }
 
     #[test]

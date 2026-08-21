@@ -28,6 +28,7 @@ pub struct AiService {
     message_service: MessageService,
     search_service: SearchService,
     knowledge_service: KnowledgeService,
+    search_limit: usize,
 }
 
 impl AiService {
@@ -37,6 +38,7 @@ impl AiService {
         message_service: MessageService,
         search_service: SearchService,
         knowledge_service: KnowledgeService,
+        search_limit: usize,
     ) -> Self {
         let openai_config = OpenAIConfig::new()
             .with_api_base(config.base_url())
@@ -50,6 +52,7 @@ impl AiService {
             message_service,
             search_service,
             knowledge_service,
+            search_limit,
         }
     }
 
@@ -69,6 +72,7 @@ impl AiService {
         let message_service = self.message_service.clone();
         let search_service = self.search_service.clone();
         let knowledge_service = self.knowledge_service.clone();
+        let search_limit = self.search_limit;
         let chat_id2 = chat_id;
         let model = model.to_string();
         let user_message = user_message.to_string(); // TODO: Fix user message only, take previous dialog, about 3-4 messages of assistant and user
@@ -83,6 +87,7 @@ impl AiService {
                 message_service,
                 search_service,
                 knowledge_service,
+                search_limit,
                 chat_id2,
                 &model,
                 &user_message,
@@ -110,6 +115,7 @@ async fn run_scenario(
     message_service: MessageService,
     search_service: SearchService,
     knowledge_service: KnowledgeService,
+    search_limit: usize,
     chat_id: ChatId,
     model: &str,
     user_message: &str,
@@ -171,7 +177,12 @@ async fn run_scenario(
             .push(MessagePart::Text(TextBlock { text: round_prompt }));
         history.push(round_user);
 
-        let tools = create_tools(&round.tool_names, &search_service, &knowledge_service);
+        let tools = create_tools(
+            &round.tool_names,
+            &search_service,
+            &knowledge_service,
+            search_limit,
+        );
 
         let params = RunRoundParams {
             system_prompt: global_prompt.clone(),

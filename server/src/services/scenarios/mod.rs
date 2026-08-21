@@ -96,10 +96,11 @@ pub fn create_tools(
     names: &[String],
     search_service: &SearchService,
     knowledge_service: &KnowledgeService,
+    limit: usize,
 ) -> Vec<Box<dyn LLMTool>> {
     names
         .iter()
-        .filter_map(|name| create_tool(name, search_service, knowledge_service))
+        .filter_map(|name| create_tool(name, search_service, knowledge_service, limit))
         .collect()
 }
 
@@ -107,11 +108,13 @@ fn create_tool(
     name: &str,
     search_service: &SearchService,
     knowledge_service: &KnowledgeService,
+    limit: usize,
 ) -> Option<Box<dyn LLMTool>> {
     match name {
         "search_knowledge_base" => Some(Box::new(SearchKnowledgeBaseTool::new(
             search_service.clone(),
             knowledge_service.clone(),
+            limit,
         ))),
         "extract_document" => Some(Box::new(ExtractDocumentTool::new(
             knowledge_service.clone(),
@@ -127,7 +130,7 @@ mod tests {
     use deadpool_diesel::Runtime;
     use secrecy::SecretString;
 
-    use crate::config::{EmbeddingConfig, RerankConfig, SearchConfig};
+    use crate::config::{EmbeddingConfig, RerankConfig};
     use crate::infra::clients::embedding_client::EmbeddingClient;
     use crate::infra::clients::qdrant_client::QdrantClient;
     use crate::infra::clients::rerank_client::RerankClient;
@@ -227,7 +230,7 @@ mod tests {
         assert_eq!(r2.prompt_template, "deep_research/explore.md");
         assert!(r2.tool_names.contains(&"search_knowledge_base".into()));
         assert!(r2.tool_names.contains(&"extract_document".into()));
-        assert!(r2.tool_choice.is_none());
+        assert!(r2.tool_choice.is_some());
         assert!(r2.enable_thinking);
         assert!(r2.preserve_thinking);
     }
@@ -289,6 +292,7 @@ mod tests {
             &["search_knowledge_base".into(), "extract_document".into()],
             &search,
             &knowledge,
+            10,
         );
         assert_eq!(tools.len(), 2);
     }
@@ -301,6 +305,7 @@ mod tests {
             &["search_knowledge_base".into(), "nonexistent".into()],
             &search,
             &knowledge,
+            10,
         );
         assert_eq!(tools.len(), 1);
     }
@@ -309,7 +314,7 @@ mod tests {
     fn create_tools_empty() {
         let search = make_search_service();
         let knowledge = make_knowledge_service();
-        let tools = create_tools(&[], &search, &knowledge);
+        let tools = create_tools(&[], &search, &knowledge, 10);
         assert!(tools.is_empty());
     }
 
@@ -362,11 +367,8 @@ mod tests {
                 model: "RERANKER".into(),
             })
             .expect("failed to create Rerank client"),
-            SearchConfig {
-                limit: 10,
-                score_threshold: 0.5,
-                candidate_limit: 30,
-            },
+            0.5,
+            30,
         )
     }
 }

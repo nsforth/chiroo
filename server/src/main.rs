@@ -128,7 +128,8 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         embedding_client.clone(),
         qdrant_client.clone(),
         rerank_client.clone(),
-        app_config.search.clone(),
+        app_config.search.score_threshold,
+        app_config.search.candidate_limit,
     );
 
     let ai_service = AiService::new(
@@ -137,6 +138,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         message_service.clone(),
         search_service.clone(),
         knowledge_service.clone(),
+        app_config.search.limit,
     );
 
     AppState {
