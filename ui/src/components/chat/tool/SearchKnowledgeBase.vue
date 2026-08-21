@@ -86,7 +86,7 @@ const suffix = computed(() => props.queries.join(', '))
           </template>
           <template #content>
             <div class="max-h-64 overflow-auto">
-              <ComarkTool :markdown="chunk.content" />
+              <ComarkTool :value="chunk.content" />
             </div>
           </template>
         </UCollapsible>

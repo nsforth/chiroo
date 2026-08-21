@@ -1,6 +1,6 @@
-import { defineComarkComponent } from '@comark/vue'
+import { defineMarkdownComponent } from '@comark/vue'
 
-export default defineComarkComponent({
+export default defineMarkdownComponent({
   name: 'ComarkTool',
   plugins: [],
   class: 'text-xs text-muted'

@@ -89,3 +89,7 @@ Affected:
 ### Stream errors: make them specific
 
 `stream_event.rs:66` — `LlmCallFinish::Error` carries no reason. Replace with a structured variant containing an error text or code.
+
+### Markdown render: defensive fallback on parse failure
+
+Comark parses LLM/assistant and tool (search/extract) markdown without a `.catch` in its async `setup`, so a parser crash blanks the whole part (no console error). Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and the tool content components (`SearchKnowledgeBase.vue`, `ExtractDocument.vue`). Deferred after the comark 0.3→0.6 upgrade, which fixed the known nested-bracket link crash.

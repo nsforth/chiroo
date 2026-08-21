@@ -62,7 +62,7 @@ const suffix = computed(() => props.document?.title ?? '')
         >{{ getDomain(document.url) }}</span>
       </ULink>
 
-      <ComarkTool :markdown="document.content" />
+      <ComarkTool :value="document.content" />
     </div>
   </UChatTool>
 </template>
