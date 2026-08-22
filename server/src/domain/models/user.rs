@@ -17,8 +17,9 @@ pub struct User {
     pub sso_id: String,
     pub sso_provider: String,
     pub name: Option<String>,
-    pub username: Option<String>,
+    pub username: String,
     pub email: Option<String>,
     pub avatar_url: Option<String>,
+    pub admin: bool,
     pub created_at: NaiveDateTime,
 }

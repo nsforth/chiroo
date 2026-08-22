@@ -10,7 +10,7 @@ pub async fn get_session(
     State(state): State<AppState>,
     auth_user: AuthUser,
 ) -> Result<Json<SessionResponse>, ErrorResponse> {
-    let user = state.auth_service.get_user(auth_user.user_id).await?;
+    let user = state.user_service.get_user(auth_user.user_id).await?;
 
     let session = SessionResponse {
         created_at: user.created_at.and_utc().timestamp(),
@@ -18,8 +18,9 @@ pub async fn get_session(
         user: Some(UserResponse {
             id: auth_user.user_id.to_string(),
             name: user.name.unwrap_or_default(),
-            username: user.username.unwrap_or_default(),
+            username: user.username,
             avatar: user.avatar_url,
+            admin: user.admin,
         }),
     };
     Ok(Json(session))

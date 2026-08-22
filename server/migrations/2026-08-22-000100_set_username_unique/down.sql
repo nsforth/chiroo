@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS users_username_key;
+
+ALTER TABLE users ALTER COLUMN username DROP NOT NULL;

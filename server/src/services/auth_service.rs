@@ -8,7 +8,6 @@ use secrecy::{ExposeSecret, SecretBox};
 use crate::config::OidcConfig;
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::session::ProviderSessionId;
-use crate::domain::models::user::{User, UserId};
 use crate::errors::AppError;
 use crate::infra::clients::oidc_client::{AccessTokenClaims, OidcClient, TokenStatus};
 use crate::infra::repositories::session_repository::{self, SessionRepository};
@@ -137,12 +136,17 @@ impl AuthService {
                 return Err(AppError::OidcError("No ID claims in token exchange".into()));
             };
 
+        let username = match preferred_username.as_ref().or(email.as_ref()) {
+            Some(username) => username.clone(),
+            None => format!("user_{sub}"),
+        };
+
         let user = user_repository::upsert(
             &self.pool,
             &sub,
             "oidc",
             name.as_deref(),
-            preferred_username.as_deref(),
+            &username,
             email.as_deref(),
             picture.as_deref(),
         )
@@ -226,19 +230,6 @@ impl AuthService {
         match &result {
             Ok(count) if *count > 0usize => info!(deleted = count, status = result.status()),
             Ok(count) => debug!(deleted = count, status = result.status()),
-            Err(e) => info!(error = e.to_string(), status = result.status()),
-        }
-        result
-    }
-
-    #[instrument(skip(self))]
-    pub async fn get_user(&self, user_id: UserId) -> Result<User, AppError> {
-        let result = user_repository::find_by_id(&self.pool, user_id.0)
-            .await?
-            .map(Into::into)
-            .ok_or_else(|| AppError::NotFound("User not found".into()));
-        match &result {
-            Ok(_) => info!(status = result.status()),
             Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result

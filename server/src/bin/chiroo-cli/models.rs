@@ -54,3 +54,14 @@ pub(crate) struct ReindexResponse {
     pub(crate) reindexed: bool,
     pub(crate) chunks: usize,
 }
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct User {
+    pub(crate) id: String,
+    pub(crate) admin: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct UpdateUserRequest {
+    pub(crate) admin: bool,
+}

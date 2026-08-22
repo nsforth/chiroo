@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use crate::doc::DocCommand;
 use crate::kb::KbCommand;
 use crate::sync_kb::SyncKbCommand;
+use crate::user::UserCommand;
 
 pub(crate) const DEFAULT_API_URL: &str = "http://127.0.0.1:3001";
 
@@ -37,5 +38,10 @@ pub(crate) enum Command {
     SyncKb {
         #[command(subcommand)]
         command: SyncKbCommand,
+    },
+    /// User operations
+    User {
+        #[command(subcommand)]
+        command: UserCommand,
     },
 }

@@ -33,9 +33,10 @@ diesel::table! {
         sso_id -> Text,
         sso_provider -> Text,
         name -> Nullable<Text>,
-        username -> Nullable<Text>,
+        username -> Text,
         email -> Nullable<Text>,
         avatar_url -> Nullable<Text>,
+        admin -> Bool,
         created_at -> Timestamptz,
     }
 }

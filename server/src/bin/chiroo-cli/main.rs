@@ -5,6 +5,7 @@ mod kb;
 mod models;
 mod output;
 mod sync_kb;
+mod user;
 mod util;
 
 use clap::Parser;
@@ -21,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Kb { command } => kb::run(&api, command).await?,
         Command::Doc { command } => doc::run(&api, command).await?,
         Command::SyncKb { command } => sync_kb::run(&api, command).await?,
+        Command::User { command } => user::run(&api, command).await?,
     }
 
     Ok(())

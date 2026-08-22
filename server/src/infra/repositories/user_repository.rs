@@ -22,9 +22,10 @@ pub struct UserDb {
     pub sso_id: String,
     pub sso_provider: String,
     pub name: Option<String>,
-    pub username: Option<String>,
+    pub username: String,
     pub email: Option<String>,
     pub avatar_url: Option<String>,
+    pub admin: bool,
     pub created_at: NaiveDateTime,
 }
 
@@ -34,7 +35,7 @@ struct UpsertUser {
     sso_id: String,
     sso_provider: String,
     name: Option<String>,
-    username: Option<String>,
+    username: String,
     email: Option<String>,
     avatar_url: Option<String>,
 }
@@ -46,14 +47,14 @@ pub async fn upsert(
     sso_id: &str,
     sso_provider: &str,
     name: Option<&str>,
-    username: Option<&str>,
+    username: &str,
     email: Option<&str>,
     avatar_url: Option<&str>,
 ) -> Result<UserDb, InfraError> {
     let sso_id_owned = sso_id.to_string();
     let sso_provider_owned = sso_provider.to_string();
     let name_owned = name.map(|s| s.to_string());
-    let username_owned = username.map(|s| s.to_string());
+    let username_owned = username.to_string();
     let email_owned = email.map(|s| s.to_string());
     let avatar_url_owned = avatar_url.map(|s| s.to_string());
 
@@ -130,6 +131,51 @@ pub async fn find_by_sso_id(
     Ok(res)
 }
 
+#[instrument(level = "debug", skip(pool))]
+pub async fn find_by_username(
+    pool: &deadpool_diesel::postgres::Pool,
+    username: &str,
+) -> Result<Option<UserDb>, InfraError> {
+    let username_owned = username.to_string();
+    let conn = pool.get().await.map_err(map_infra_error)?;
+    let res = conn
+        .interact(move |conn| {
+            users::table
+                .filter(users::username.eq(username_owned))
+                .select(UserDb::as_select())
+                .first(conn)
+                .optional()
+        })
+        .await
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
+
+    Ok(res)
+}
+
+#[instrument(level = "debug", skip(pool))]
+pub async fn set_admin(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: Uuid,
+    admin: bool,
+) -> Result<Option<UserDb>, InfraError> {
+    let conn = pool.get().await.map_err(map_infra_error)?;
+    let res = conn
+        .interact(move |conn| {
+            diesel::update(users::table)
+                .filter(users::id.eq(id))
+                .set(users::admin.eq(admin))
+                .returning(UserDb::as_returning())
+                .get_result::<UserDb>(conn)
+                .optional()
+        })
+        .await
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
+
+    Ok(res)
+}
+
 impl From<UserDb> for User {
     fn from(db: UserDb) -> Self {
         User {
@@ -140,6 +186,7 @@ impl From<UserDb> for User {
             username: db.username,
             email: db.email,
             avatar_url: db.avatar_url,
+            admin: db.admin,
             created_at: db.created_at,
         }
     }

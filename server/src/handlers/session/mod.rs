@@ -18,4 +18,5 @@ pub struct UserResponse {
     pub name: String,
     pub avatar: Option<String>,
     pub username: String,
+    pub admin: bool,
 }

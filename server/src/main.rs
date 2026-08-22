@@ -21,6 +21,7 @@ use chiroo_server::services::knowledge_service::KnowledgeService;
 use chiroo_server::services::message_service::MessageService;
 use chiroo_server::services::prompts::PromptRenderer;
 use chiroo_server::services::search_service::SearchService;
+use chiroo_server::services::user_service::UserService;
 use chiroo_server::services::vote_service::VoteService;
 use chiroo_server::state::AppState;
 
@@ -147,6 +148,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,
+        user_service: UserService::new(pool.clone()),
         knowledge_service,
         search_service,
         qdrant_client,
