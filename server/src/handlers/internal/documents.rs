@@ -45,6 +45,37 @@ pub struct ListDocsQuery {
     pub kb_id: Uuid,
     #[serde(default)]
     pub filter: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default = "default_page_limit")]
+    pub limit: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ListVersionsQuery {
+    #[serde(rename = "kb_id")]
+    pub kb_id: Uuid,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default = "default_page_limit")]
+    pub limit: i64,
+}
+
+fn default_page_limit() -> i64 {
+    1000
+}
+
+#[derive(Serialize)]
+pub struct Paged<T> {
+    pub items: Vec<T>,
+    #[serde(rename = "nextCursor")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct VersionListItem {
+    pub id: String,
+    pub version: String,
 }
 
 #[derive(Serialize)]
@@ -123,12 +154,37 @@ pub async fn create_document(
 pub async fn list_documents(
     State(state): State<AppState>,
     Query(query): Query<ListDocsQuery>,
-) -> Result<Json<Vec<DocListItem>>, ErrorResponse> {
-    let docs = state
+) -> Result<Json<Paged<DocListItem>>, ErrorResponse> {
+    let (docs, next_cursor) = state
         .knowledge_service
-        .list_documents(KnowledgeBaseId(query.kb_id), query.filter.as_deref())
+        .list_documents(
+            KnowledgeBaseId(query.kb_id),
+            query.filter.as_deref(),
+            query.cursor.as_deref(),
+            query.limit,
+        )
         .await?;
-    Ok(Json(docs.into_iter().map(Into::into).collect()))
+    let items = docs.into_iter().map(Into::into).collect();
+    Ok(Json(Paged { items, next_cursor }))
+}
+
+pub async fn list_document_versions(
+    State(state): State<AppState>,
+    Query(query): Query<ListVersionsQuery>,
+) -> Result<Json<Paged<VersionListItem>>, ErrorResponse> {
+    let (items, next_cursor) = state
+        .knowledge_service
+        .list_document_versions(
+            KnowledgeBaseId(query.kb_id),
+            query.cursor.as_deref(),
+            query.limit,
+        )
+        .await?;
+    let items = items
+        .into_iter()
+        .map(|(id, version)| VersionListItem { id, version })
+        .collect();
+    Ok(Json(Paged { items, next_cursor }))
 }
 
 pub async fn get_document(

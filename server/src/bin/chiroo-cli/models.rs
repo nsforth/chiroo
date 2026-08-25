@@ -43,6 +43,19 @@ pub(crate) struct Doc {
     pub(crate) updated_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct Paged<T> {
+    pub(crate) items: Vec<T>,
+    #[serde(rename = "nextCursor", default)]
+    pub(crate) next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct VersionListItem {
+    pub(crate) id: String,
+    pub(crate) version: String,
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct ReindexRequest {
     pub(crate) mode: String,

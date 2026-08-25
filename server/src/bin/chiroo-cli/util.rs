@@ -1,4 +1,6 @@
+use std::fs;
 use std::future::Future;
+use std::io::{BufReader, Read};
 use std::path::Path;
 use std::time::Duration;
 
@@ -39,13 +41,29 @@ pub(crate) fn make_bar(mp: &MultiProgress, total: usize, prefix: &str) -> Progre
 }
 
 pub(crate) fn sha256_hex(data: &[u8]) -> String {
+    hex_digest(Sha256::digest(data).into())
+}
+
+pub(crate) fn file_sha256_hex(path: &Path) -> Result<String> {
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut reader = BufReader::with_capacity(128 * 1024, file);
     let mut hasher = Sha256::new();
-    hasher.update(data);
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    let mut buf = vec![0u8; 128 * 1024];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex_digest(hasher.finalize().into()))
+}
+
+fn hex_digest(digest: [u8; 32]) -> String {
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub(crate) fn file_stem(path: &Path) -> String {

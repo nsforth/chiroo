@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use clap::Subcommand;
 use indicatif::MultiProgress;
 
-use crate::api::Api;
+use crate::api::{Api, DEFAULT_PAGE_LIMIT};
 use crate::models::{Doc, Kb, KbRequest, ReindexRequest, ReindexResponse};
 use crate::output::{print_json, print_kv, print_table};
 use crate::util::{make_bar, map_concurrent, parse_metadata, parse_reindex_mode};
@@ -234,7 +234,11 @@ async fn cmd_kb_reindex(
     }
     let mode = parse_reindex_mode(mode)?;
     let docs: Vec<Doc> = api
-        .get_json("/internal/api/documents", &[("kb_id", id.to_string())])
+        .get_json_all_pages(
+            "/internal/api/documents",
+            &[("kb_id", id.to_string())],
+            DEFAULT_PAGE_LIMIT,
+        )
         .await?;
 
     if docs.is_empty() {

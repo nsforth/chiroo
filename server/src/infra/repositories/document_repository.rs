@@ -123,33 +123,86 @@ pub async fn insert(
 }
 
 #[instrument(level = "debug", skip(pool))]
-pub async fn list_by_kb(
+pub async fn list_by_kb_page(
     pool: &deadpool_diesel::postgres::Pool,
     kb_id: KnowledgeBaseId,
     filter: Option<&str>,
-) -> Result<Vec<Document>, InfraError> {
+    cursor: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<Document>, Option<String>), InfraError> {
     let pattern = filter.map(|f| format!("%{f}%"));
+    let cursor_owned = cursor.map(str::to_owned);
     let conn = pool.get().await.map_err(map_infra_error)?;
-    conn.interact(move |conn| {
-        let mut query = documents::table
-            .filter(documents::kb_id.eq(kb_id.0))
-            .into_boxed();
-        if let Some(pattern) = pattern {
-            query = query.filter(
-                documents::title
-                    .ilike(pattern.clone())
-                    .or(documents::url.ilike(pattern)),
-            );
-        }
-        query
-            .select(DocumentDb::as_select())
-            .order_by(documents::created_at.desc())
-            .load::<DocumentDb>(conn)
-    })
-    .await
-    .map_err(map_infra_error)?
-    .map_err(map_infra_error)
-    .map(|v| v.into_iter().map(Into::into).collect())
+    let result: Vec<DocumentDb> = conn
+        .interact(move |conn| {
+            let mut query = documents::table
+                .filter(documents::kb_id.eq(kb_id.0))
+                .into_boxed();
+            if let Some(cursor) = cursor_owned.as_deref() {
+                query = query.filter(documents::id.gt(cursor));
+            }
+            if let Some(pattern) = pattern.as_deref() {
+                query = query.filter(
+                    documents::title
+                        .ilike(pattern)
+                        .or(documents::url.ilike(pattern)),
+                );
+            }
+            query
+                .select(DocumentDb::as_select())
+                .order_by(documents::id.asc())
+                .limit(limit + 1)
+                .load::<DocumentDb>(conn)
+        })
+        .await
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
+    let next_cursor = if result.len() > limit as usize {
+        Some(result[limit as usize - 1].id.clone())
+    } else {
+        None
+    };
+    let docs = result
+        .into_iter()
+        .take(limit as usize)
+        .map(Into::into)
+        .collect();
+    Ok((docs, next_cursor))
+}
+
+#[instrument(level = "debug", skip(pool))]
+pub async fn list_versions_page_by_kb(
+    pool: &deadpool_diesel::postgres::Pool,
+    kb_id: KnowledgeBaseId,
+    cursor: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<(String, String)>, Option<String>), InfraError> {
+    let cursor_owned = cursor.map(str::to_owned);
+    let conn = pool.get().await.map_err(map_infra_error)?;
+    let result: Vec<(String, String)> = conn
+        .interact(move |conn| {
+            let mut query = documents::table
+                .filter(documents::kb_id.eq(kb_id.0))
+                .into_boxed();
+            if let Some(cursor) = cursor_owned.as_deref() {
+                query = query.filter(documents::id.gt(cursor));
+            }
+            query
+                .select((documents::id, documents::version))
+                .order_by(documents::id.asc())
+                .limit(limit + 1)
+                .load::<(String, String)>(conn)
+        })
+        .await
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
+    let next_cursor = if result.len() > limit as usize {
+        Some(result[limit as usize - 1].0.clone())
+    } else {
+        None
+    };
+    let items = result.into_iter().take(limit as usize).collect();
+    Ok((items, next_cursor))
 }
 
 #[instrument(level = "debug", skip(pool))]

@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Subcommand;
 use uuid::Uuid;
 
-use crate::api::{build_doc_form, Api};
+use crate::api::{build_doc_form, Api, DEFAULT_PAGE_LIMIT};
 use crate::models::{Doc, ReindexRequest, ReindexResponse};
 use crate::output::{print_json, print_kv, print_table};
 use crate::util::{file_stem, parse_metadata, parse_reindex_mode, sha256_hex};
@@ -104,7 +104,9 @@ async fn cmd_doc_list(
     if let Some(filter) = filter {
         query.push(("filter", filter.clone()));
     }
-    let docs: Vec<Doc> = api.get_json("/internal/api/documents", &query).await?;
+    let docs: Vec<Doc> = api
+        .get_json_all_pages("/internal/api/documents", &query, DEFAULT_PAGE_LIMIT)
+        .await?;
     if json {
         return print_json(&docs);
     }

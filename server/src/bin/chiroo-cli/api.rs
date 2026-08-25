@@ -5,6 +5,10 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::models::Paged;
+
+pub(crate) const DEFAULT_PAGE_LIMIT: i64 = 1000;
+
 pub(crate) struct Api {
     client: Client,
     base: String,
@@ -34,6 +38,48 @@ impl Api {
         let response = request.send().await.context("request failed")?;
         let response = ensure_success(response).await?;
         response.json().await.context("invalid JSON response")
+    }
+
+    pub(crate) async fn get_json_page<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        cursor: Option<&str>,
+        limit: i64,
+    ) -> Result<Paged<T>> {
+        let mut request = self.client.get(self.url(path));
+        for (key, value) in query {
+            request = request.query(&[(key, value)]);
+        }
+        if let Some(cursor) = cursor {
+            request = request.query(&[("cursor", cursor)]);
+        }
+        request = request.query(&[("limit", limit)]);
+        let response = request.send().await.context("request failed")?;
+        let response = ensure_success(response).await?;
+        response.json().await.context("invalid JSON response")
+    }
+
+    pub(crate) async fn get_json_all_pages<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        limit: i64,
+    ) -> Result<Vec<T>> {
+        let mut items = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page: Paged<T> = self
+                .get_json_page(path, query, cursor.as_deref(), limit)
+                .await?;
+            let next = page.next_cursor.clone();
+            items.extend(page.items);
+            match next {
+                Some(next_cursor) => cursor = Some(next_cursor),
+                None => break,
+            }
+        }
+        Ok(items)
     }
 
     pub(crate) async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {

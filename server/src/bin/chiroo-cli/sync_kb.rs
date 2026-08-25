@@ -1,16 +1,17 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
 use indicatif::MultiProgress;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::api::{build_doc_form, Api};
-use crate::models::Doc;
-use crate::util::{file_stem, make_bar, map_concurrent, sha256_hex};
+use crate::api::{build_doc_form, Api, DEFAULT_PAGE_LIMIT};
+use crate::models::{Doc, Paged, VersionListItem};
+use crate::util::{file_sha256_hex, file_stem, make_bar, map_concurrent};
 
 #[derive(Subcommand)]
 pub(crate) enum SyncKbCommand {
@@ -139,8 +140,10 @@ fn parse_sidecar(md_path: &Path) -> Result<LocalDocMeta> {
 
 fn build_local_doc(file: &Path, id: &str) -> Result<LocalDoc> {
     let meta = parse_sidecar(file)?;
-    let data = fs::read(file).with_context(|| format!("failed to read {}", file.display()))?;
-    let version = meta.version.unwrap_or_else(|| sha256_hex(&data));
+    let version = match meta.version {
+        Some(v) => v,
+        None => file_sha256_hex(file)?,
+    };
     let title = meta.title.unwrap_or_else(|| file_stem(file));
     let url = meta.url.unwrap_or_default();
     let metadata = meta.metadata.unwrap_or_else(|| serde_json::json!({}));
@@ -154,7 +157,7 @@ fn build_local_doc(file: &Path, id: &str) -> Result<LocalDoc> {
     })
 }
 
-fn scan_dir(dir: &Path) -> ScanOutcome {
+fn scan_dir(dir: &Path, mp: &Option<MultiProgress>) -> ScanOutcome {
     let mut files = Vec::new();
     if let Err(e) = collect_md_files_recursive(dir, &mut files) {
         return ScanOutcome {
@@ -162,14 +165,30 @@ fn scan_dir(dir: &Path) -> ScanOutcome {
             errors: vec![(dir.display().to_string(), format!("{e:#}"))],
         };
     }
-    files.sort();
 
-    let mut docs = Vec::with_capacity(files.len());
+    let bar = mp.as_ref().map(|m| make_bar(m, files.len(), "scanning"));
+
+    let results: Vec<(String, Result<LocalDoc>)> = files
+        .par_iter()
+        .map(|file| {
+            let rel = file.strip_prefix(dir).unwrap_or(file);
+            let id = doc_id_from_path(rel);
+            let result = build_local_doc(file, &id);
+            if let Some(bar) = bar.as_ref() {
+                bar.inc(1);
+            }
+            (id, result)
+        })
+        .collect();
+
+    if let Some(bar) = &bar {
+        bar.finish();
+    }
+
+    let mut docs = Vec::with_capacity(results.len());
     let mut errors = Vec::new();
-    for file in files {
-        let rel = file.strip_prefix(dir).unwrap_or(&file);
-        let id = doc_id_from_path(rel);
-        match build_local_doc(&file, &id) {
+    for (id, result) in results {
+        match result {
             Ok(doc) => docs.push(doc),
             Err(e) => errors.push((id, format!("{e:#}"))),
         }
@@ -177,29 +196,68 @@ fn scan_dir(dir: &Path) -> ScanOutcome {
     ScanOutcome { docs, errors }
 }
 
-fn reconcile<'a>(local: &'a [LocalDoc], server: &[Doc], no_delete: bool) -> Plan<'a> {
-    let mut by_id: HashMap<&str, &LocalDoc> = local.iter().map(|d| (d.id.as_str(), d)).collect();
+async fn fetch_versions_map(api: &Api, kb: &str) -> Result<HashMap<String, String>> {
+    let mut map = HashMap::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page: Paged<VersionListItem> = api
+            .get_json_page(
+                "/internal/api/documents/versions",
+                &[("kb_id", kb.to_string())],
+                cursor.as_deref(),
+                DEFAULT_PAGE_LIMIT,
+            )
+            .await?;
+        for item in page.items {
+            map.insert(item.id, item.version);
+        }
+        match page.next_cursor {
+            Some(next_cursor) => cursor = Some(next_cursor),
+            None => break,
+        }
+    }
+    Ok(map)
+}
+
+fn reconcile<'a>(
+    local: &'a [LocalDoc],
+    server: &HashMap<String, String>,
+    no_delete: bool,
+) -> Plan<'a> {
+    let mut seen: HashSet<&str> = HashSet::with_capacity(local.len());
     let mut to_update = Vec::new();
-    let mut to_delete = Vec::new();
     let mut up_to_date = 0usize;
 
-    for doc in server {
-        match by_id.remove(doc.id.as_str()) {
-            Some(local_doc) => {
-                if local_doc.version == doc.version {
+    for doc in local {
+        match server.get(&doc.id) {
+            Some(version) => {
+                seen.insert(doc.id.as_str());
+                if *version == doc.version {
                     up_to_date += 1;
                 } else {
-                    to_update.push(local_doc);
+                    to_update.push(doc);
                 }
             },
-            None if !no_delete => to_delete.push(doc.id.clone()),
             None => {},
         }
     }
 
-    let mut to_create: Vec<&LocalDoc> = by_id.into_values().collect();
+    let mut to_create: Vec<&LocalDoc> = local
+        .iter()
+        .filter(|d| !server.contains_key(&d.id))
+        .collect();
     to_create.sort_by(|a, b| a.id.cmp(&b.id));
     to_update.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut to_delete: Vec<String> = if no_delete {
+        Vec::new()
+    } else {
+        server
+            .keys()
+            .filter(|id| !seen.contains(id.as_str()))
+            .cloned()
+            .collect()
+    };
     to_delete.sort();
 
     Plan {
@@ -259,7 +317,13 @@ async fn cmd_sync_kb_markdown(
     if concurrency == 0 {
         bail!("--concurrency must be >= 1");
     }
-    let scan = scan_dir(dir);
+    let mp = if no_progress {
+        None
+    } else {
+        Some(MultiProgress::new())
+    };
+
+    let scan = scan_dir(dir, &mp);
     let mut failed = scan.errors.len();
     println!(
         "Found {} markdown files in {}",
@@ -270,9 +334,7 @@ async fn cmd_sync_kb_markdown(
         eprintln!("error {id}: {message}");
     }
 
-    let server: Vec<Doc> = api
-        .get_json("/internal/api/documents", &[("kb_id", kb.to_string())])
-        .await?;
+    let server = fetch_versions_map(api, kb).await?;
     let plan = reconcile(&scan.docs, &server, no_delete);
 
     println!(
@@ -297,11 +359,6 @@ async fn cmd_sync_kb_markdown(
     }
 
     let show_actions = no_progress && verbose;
-    let mp = if no_progress {
-        None
-    } else {
-        Some(MultiProgress::new())
-    };
 
     let mut created = 0usize;
     let mut updated = 0usize;
@@ -379,11 +436,22 @@ async fn cmd_sync_kb_markdown(
         let bar = mp
             .as_ref()
             .map(|m| make_bar(m, plan.to_delete.len(), "deleting"));
-        for id in &plan.to_delete {
-            if let Some(bar) = &bar {
-                bar.set_message(id.clone());
+        let outcomes = map_concurrent(plan.to_delete, concurrency, |id| {
+            let bar = bar.clone();
+            async move {
+                let result = api.delete(&format!("/internal/api/documents/{id}")).await;
+                if let Some(bar) = &bar {
+                    bar.inc(1);
+                }
+                (id, result)
             }
-            match api.delete(&format!("/internal/api/documents/{id}")).await {
+        })
+        .await;
+        if let Some(bar) = &bar {
+            bar.finish();
+        }
+        for (id, result) in outcomes {
+            match result {
                 Ok(()) => {
                     deleted += 1;
                     if show_actions {
@@ -395,12 +463,6 @@ async fn cmd_sync_kb_markdown(
                     eprintln!("error {id}: {e:#}");
                 },
             }
-            if let Some(bar) = &bar {
-                bar.inc(1);
-            }
-        }
-        if let Some(bar) = &bar {
-            bar.finish();
         }
     }
 

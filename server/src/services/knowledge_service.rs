@@ -230,10 +230,29 @@ impl KnowledgeService {
         &self,
         kb_id: KnowledgeBaseId,
         filter: Option<&str>,
-    ) -> Result<Vec<Document>, AppError> {
-        let result = document_repository::list_by_kb(&self.pool, kb_id, filter).await;
+        cursor: Option<&str>,
+        limit: i64,
+    ) -> Result<(Vec<Document>, Option<String>), AppError> {
+        let result =
+            document_repository::list_by_kb_page(&self.pool, kb_id, filter, cursor, limit).await;
         match &result {
-            Ok(docs) => info!(doc_count = docs.len(), status = "success"),
+            Ok((docs, _)) => info!(doc_count = docs.len(), status = "success"),
+            Err(e) => info!(error = e.to_string(), status = "failed"),
+        }
+        Ok(result?)
+    }
+
+    #[instrument(skip(self))]
+    pub async fn list_document_versions(
+        &self,
+        kb_id: KnowledgeBaseId,
+        cursor: Option<&str>,
+        limit: i64,
+    ) -> Result<(Vec<(String, String)>, Option<String>), AppError> {
+        let result =
+            document_repository::list_versions_page_by_kb(&self.pool, kb_id, cursor, limit).await;
+        match &result {
+            Ok((items, _)) => info!(version_count = items.len(), status = "success"),
             Err(e) => info!(error = e.to_string(), status = "failed"),
         }
         Ok(result?)
