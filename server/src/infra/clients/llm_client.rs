@@ -24,6 +24,7 @@ use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{
     Message, MessageId, MessagePart, ReasoningBlock, Role, TextBlock, ToolCallBlock, ToolCallState,
 };
+use crate::domain::models::sampling::SamplingParams;
 use crate::domain::models::stream_event::{FinishReason as DomainFinishReason, MessageStreamEvent};
 use crate::domain::models::tool::{LLMTool, ToolExecution};
 
@@ -91,6 +92,7 @@ pub struct RunRoundParams {
     pub tools: Vec<Box<dyn LLMTool>>,
     pub max_llm_calls: usize,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub sampling: SamplingParams,
     pub extra_body: Option<Value>,
     pub tool_choice: Option<ChatCompletionToolChoiceOption>,
     pub preserve_thinking: bool,
@@ -539,6 +541,7 @@ async fn run_round(
             messages = ?role_counts,
             tools = ?tool_names,
             reasoning_effort = ?params.reasoning_effort,
+            sampling = ?params.sampling,
             status = "llm_call_start"
         );
         trace!(
@@ -553,6 +556,7 @@ async fn run_round(
             &messages,
             &tool_defs,
             params.reasoning_effort.clone(),
+            params.sampling,
             params.extra_body.as_ref(),
             params.tool_choice.clone(),
             chat_id,
@@ -735,6 +739,7 @@ async fn run_one_llm_call(
     messages: &[ChatCompletionRequestMessage],
     tools: &[ChatCompletionTools],
     reasoning_effort: Option<ReasoningEffort>,
+    sampling: SamplingParams,
     extra_body: Option<&Value>,
     tool_choice: Option<ChatCompletionToolChoiceOption>,
     chat_id: ChatId,
@@ -745,6 +750,7 @@ async fn run_one_llm_call(
         messages,
         tools,
         reasoning_effort,
+        sampling,
         extra_body,
         tool_choice,
     );
@@ -805,6 +811,7 @@ fn build_request(
     messages: &[ChatCompletionRequestMessage],
     tools: &[ChatCompletionTools],
     reasoning_effort: Option<ReasoningEffort>,
+    sampling: SamplingParams,
     extra_body: Option<&Value>,
     tool_choice: Option<ChatCompletionToolChoiceOption>,
 ) -> ChatCompletionRequestWithExtra {
@@ -819,16 +826,42 @@ fn build_request(
     if let Some(effort) = reasoning_effort {
         builder.reasoning_effort(effort);
     }
+    if let Some(temperature) = sampling.temperature {
+        builder.temperature(temperature);
+    }
+    if let Some(top_p) = sampling.top_p {
+        builder.top_p(top_p);
+    }
+    if let Some(presence_penalty) = sampling.presence_penalty {
+        builder.presence_penalty(presence_penalty);
+    }
+    if let Some(frequency_penalty) = sampling.frequency_penalty {
+        builder.frequency_penalty(frequency_penalty);
+    }
+    if let Some(seed) = sampling.seed {
+        builder.seed(seed);
+    }
     if let Some(choice) = tool_choice {
         builder.tool_choice(choice);
     }
     let request = builder.build().unwrap();
 
-    let extra = if let Some(Value::Object(map)) = extra_body {
-        map.clone()
-    } else {
-        serde_json::Map::new()
-    };
+    let mut extra = serde_json::Map::new();
+    if let Some(top_k) = sampling.top_k {
+        extra.insert("top_k".into(), serde_json::json!(top_k));
+    }
+    if let Some(min_p) = sampling.min_p {
+        extra.insert("min_p".into(), serde_json::json!(min_p));
+    }
+    if let Some(repeat_penalty) = sampling.repeat_penalty {
+        extra.insert("repeat_penalty".into(), serde_json::json!(repeat_penalty));
+    }
+    // The raw extra body is the last-resort override and wins over sampling.
+    if let Some(Value::Object(map)) = extra_body {
+        for (key, value) in map {
+            extra.insert(key.clone(), value.clone());
+        }
+    }
 
     ChatCompletionRequestWithExtra { request, extra }
 }
@@ -1080,7 +1113,7 @@ mod tests {
     use async_openai::config::OpenAIConfig;
     use async_openai::types::chat::{
         ChatCompletionMessageToolCallChunk, ChatCompletionTool, ChatCompletionTools,
-        FunctionCallStream, FunctionObject,
+        CreateChatCompletionRequest, FunctionCallStream, FunctionObject,
     };
     use async_trait::async_trait;
     use serde_json::Value;
@@ -1090,6 +1123,7 @@ mod tests {
     use crate::domain::models::messages::{
         Message, MessagePart, ReasoningBlock, Role, TextBlock, ToolCallBlock, ToolCallState,
     };
+    use crate::domain::models::sampling::SamplingParams;
     use crate::domain::models::stream_event::MessageStreamEvent;
     use crate::domain::models::tool::{LLMTool, ToolExecution};
     use crate::infra::clients::llm_client::{Accumulator, CustomDelta, LlmClient, RunRoundParams};
@@ -1193,6 +1227,7 @@ mod tests {
         tools: vec![Box::new(tool.clone())],
         max_llm_calls: 3,
         reasoning_effort: None,
+        sampling: SamplingParams::default(),
         extra_body: None,
         tool_choice: Some(
             async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
@@ -1778,5 +1813,96 @@ mod tests {
             "{\"queries\":[\"rust\"]}",
             "Start must carry the full buffered arguments"
         );
+    }
+
+    // ─── build_request sampling tests ───
+
+    // f32 values do not survive a JSON f64 round-trip as literals (0.7f32 != 0.7f64),
+    // so params are verified by deserializing the request back into typed fields.
+    #[test]
+    fn build_request_sends_set_sampling_params() {
+        let sampling = SamplingParams {
+            temperature: Some(0.7),
+            top_p: Some(0.8),
+            top_k: Some(20),
+            min_p: Some(0.1),
+            presence_penalty: Some(1.5),
+            frequency_penalty: Some(0.5),
+            repeat_penalty: Some(1.1),
+            seed: Some(42),
+        };
+        let request = super::build_request("MODEL", &[], &[], None, sampling, None, None);
+        let value = serde_json::to_value(&request).unwrap();
+        let parsed: CreateChatCompletionRequest = serde_json::from_value(value.clone()).unwrap();
+
+        assert_eq!(parsed.model, "MODEL");
+        assert_eq!(parsed.temperature, Some(0.7));
+        assert_eq!(parsed.top_p, Some(0.8));
+        assert_eq!(parsed.presence_penalty, Some(1.5));
+        assert_eq!(parsed.frequency_penalty, Some(0.5));
+        assert_eq!(value["seed"], serde_json::json!(42));
+        let top_k: u32 = serde_json::from_value(value["top_k"].clone()).unwrap();
+        assert_eq!(top_k, 20);
+        let min_p: f32 = serde_json::from_value(value["min_p"].clone()).unwrap();
+        assert_eq!(min_p, 0.1);
+        let repeat_penalty: f32 = serde_json::from_value(value["repeat_penalty"].clone()).unwrap();
+        assert_eq!(repeat_penalty, 1.1);
+    }
+
+    #[test]
+    fn build_request_without_sampling_adds_no_params() {
+        let request = super::build_request(
+            "MODEL",
+            &[],
+            &[],
+            None,
+            SamplingParams::default(),
+            None,
+            None,
+        );
+        let value = serde_json::to_value(&request).unwrap();
+
+        for key in [
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "frequency_penalty",
+            "repeat_penalty",
+            "seed",
+        ] {
+            assert!(value.get(key).is_none(), "{key} must be absent");
+        }
+    }
+
+    #[test]
+    fn build_request_extra_body_wins_over_sampling() {
+        let sampling = SamplingParams {
+            temperature: None,
+            top_p: None,
+            top_k: Some(20),
+            min_p: None,
+            presence_penalty: None,
+            frequency_penalty: None,
+            repeat_penalty: Some(1.1),
+            seed: None,
+        };
+        let request = super::build_request(
+            "MODEL",
+            &[],
+            &[],
+            None,
+            sampling,
+            Some(&serde_json::json!({ "top_k": 5 })),
+            None,
+        );
+        let value = serde_json::to_value(&request).unwrap();
+
+        let top_k: u32 = serde_json::from_value(value["top_k"].clone()).unwrap();
+        assert_eq!(top_k, 5);
+        let repeat_penalty: f32 = serde_json::from_value(value["repeat_penalty"].clone()).unwrap();
+        assert_eq!(repeat_penalty, 1.1);
+        assert!(value.get("min_p").is_none());
     }
 }

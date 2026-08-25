@@ -11,6 +11,7 @@ use tracing::{debug, instrument};
 use crate::config::OpenAiConfig;
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{Message, MessageId, MessagePart, Role, TextBlock};
+use crate::domain::models::sampling::{preset_by_name, SamplingParams};
 use crate::domain::models::source::Source;
 use crate::domain::models::stream_event::MessageStreamEvent;
 use crate::infra::clients::llm_client::{LlmClient, RunRoundParams};
@@ -125,6 +126,17 @@ async fn run_scenario(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let scenario = scenario_by_name(model).unwrap_or_else(simple);
 
+    let scenario_sampling = match scenario.sampling_preset {
+        Some(name) => match preset_by_name(name) {
+            Some(preset) => preset,
+            None => {
+                debug!(preset = name, status = "unknown_sampling_preset");
+                SamplingParams::default()
+            },
+        },
+        None => SamplingParams::default(),
+    };
+
     // TODO Fix hardcoded template params, move general to config, other take from input params
     let ctx = TemplateContext {
         assistant_name: "Chiroo".into(),
@@ -158,12 +170,14 @@ async fn run_scenario(
     let mut source_indices: HashMap<String, usize> = HashMap::new();
 
     for (round_index, round) in scenario.rounds.clone().into_iter().enumerate() {
+        let sampling = scenario_sampling.merge(&round.sampling);
         debug!(
             round_index,
             prompt_template = %round.prompt_template,
             tool_names = ?round.tool_names,
             max_llm_calls = round.max_llm_calls,
             reasoning_effort = ?round.reasoning_effort,
+            sampling = ?sampling,
             status = "round_start"
         );
 
@@ -190,6 +204,7 @@ async fn run_scenario(
             tools,
             max_llm_calls: round.max_llm_calls,
             reasoning_effort: round.reasoning_effort,
+            sampling,
             extra_body: round.extra_body.clone(),
             tool_choice: round.tool_choice,
             preserve_thinking: round.enable_thinking && round.preserve_thinking,

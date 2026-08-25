@@ -1,6 +1,7 @@
 use async_openai::types::chat::{ChatCompletionToolChoiceOption, ReasoningEffort};
 use serde_json::Value;
 
+use crate::domain::models::sampling::SamplingParams;
 use crate::domain::models::tool::LLMTool;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::search_service::SearchService;
@@ -12,6 +13,7 @@ pub struct RoundConfig {
     pub tool_names: Vec<String>,
     pub max_llm_calls: usize,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub sampling: SamplingParams,
     pub extra_body: Option<Value>,
     pub tool_choice: Option<ChatCompletionToolChoiceOption>,
     pub enable_thinking: bool,
@@ -21,6 +23,7 @@ pub struct RoundConfig {
 #[derive(Clone)]
 pub struct Scenario {
     pub name: &'static str,
+    pub sampling_preset: Option<&'static str>,
     pub rounds: Vec<RoundConfig>,
 }
 
@@ -130,6 +133,8 @@ mod tests {
     use deadpool_diesel::Runtime;
     use secrecy::SecretString;
 
+    use crate::domain::models::sampling::preset_by_name;
+
     use crate::config::{EmbeddingConfig, RerankConfig};
     use crate::infra::clients::embedding_client::EmbeddingClient;
     use crate::infra::clients::qdrant_client::QdrantClient;
@@ -151,6 +156,7 @@ mod tests {
         assert!(r1.tool_names.contains(&"search_knowledge_base".into()));
         assert!(r1.reasoning_effort.is_none());
         assert_eq!(r1.max_llm_calls, 1);
+        assert!(r1.sampling.is_empty());
         assert!(!r1.enable_thinking);
         assert!(!r1.preserve_thinking);
         assert_eq!(
@@ -249,6 +255,32 @@ mod tests {
                 )
             )
         );
+    }
+
+    #[test]
+    fn scenarios_reference_defined_sampling_presets() {
+        for scenario in [simple(), deep_research()] {
+            let Some(name) = scenario.sampling_preset else {
+                panic!(
+                    "scenario '{}' must reference a sampling preset",
+                    scenario.name
+                );
+            };
+            assert!(
+                preset_by_name(name).is_some(),
+                "scenario '{}' must reference a defined preset, found '{}'",
+                scenario.name,
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn scenario_rounds_inherit_scenario_sampling_by_default() {
+        let simple = simple();
+        assert!(simple.rounds.iter().all(|r| r.sampling.is_empty()));
+        let deep = deep_research();
+        assert!(deep.rounds.iter().all(|r| r.sampling.is_empty()));
     }
 
     #[test]
