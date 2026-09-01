@@ -10,6 +10,7 @@ use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::clients::rerank_client::RerankClient;
+use crate::utils::KnowledgeBaseLogView;
 
 #[derive(Clone)]
 pub struct SearchService {
@@ -37,9 +38,7 @@ impl SearchService {
         }
     }
 
-    #[instrument(skip(self, kbs), fields(
-        kbs = ?kbs.iter().map(|kb| (kb.id.0, kb.name.as_str())).collect::<Vec<_>>()
-    ))]
+    #[instrument(skip(self, kbs), fields(kbs = %kbs.log_view()))]
     pub async fn search_one(
         &self,
         query: &str,
@@ -56,9 +55,7 @@ impl SearchService {
         result
     }
 
-    #[instrument(skip(self, kbs), fields(
-        kbs = ?kbs.iter().map(|kb| (kb.id.0, kb.name.as_str())).collect::<Vec<_>>()
-    ))]
+    #[instrument(skip(self, kbs), fields(kbs = %kbs.log_view()))]
     pub async fn search_many(
         &self,
         queries: Vec<String>,
@@ -73,9 +70,7 @@ impl SearchService {
         result
     }
 
-    #[instrument(skip(self, kbs), fields(
-        kbs = ?kbs.iter().map(|kb| (kb.id.0, kb.name.as_str())).collect::<Vec<_>>()
-    ))]
+    #[instrument(skip(self, kbs), fields(kbs = %kbs.log_view()))]
     pub async fn search_grouped(
         &self,
         queries: Vec<String>,
