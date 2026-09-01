@@ -1,6 +1,5 @@
 use text_splitter::MarkdownSplitter;
 use tracing::{info, instrument};
-use uuid::Uuid;
 
 use crate::domain::models::document::Document;
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};

@@ -10,7 +10,7 @@ use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::chat::{Chat, ChatId};
-use crate::domain::models::user::{User, UserId};
+use crate::domain::models::user::UserId;
 use crate::infra::db::schema::chats::{self, owner};
 use crate::infra::errors::{map_infra_error, InfraError};
 

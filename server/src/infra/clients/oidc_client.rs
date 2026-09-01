@@ -8,7 +8,7 @@ use openidconnect::core::{
 };
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce, OAuth2TokenResponse,
-    RedirectUrl, RefreshToken, Scope, StandardErrorResponse, TokenResponse,
+    RedirectUrl, RefreshToken, Scope, TokenResponse,
 };
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};

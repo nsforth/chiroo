@@ -9,7 +9,7 @@ use tracing::{debug, instrument};
 
 use crate::config::OpenAiConfig;
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::{Message, MessageId, MessagePart, Role, TextBlock};
+use crate::domain::models::messages::{Message, MessageId};
 use crate::domain::models::sampling::preset_by_name;
 use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatus};
 use crate::domain::models::source::Source;
