@@ -1,9 +1,9 @@
-use crate::domain::models::{chat::ChatId, messages::MessageId};
+use crate::domain::models::{chat::ChatId, scenario::ScenarioId};
 
 #[derive(Debug)]
 pub struct Vote {
     pub chat_id: ChatId,
-    pub message_id: MessageId,
+    pub scenario_id: ScenarioId,
     pub vote_type: VoteType,
 }
 

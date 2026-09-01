@@ -1,5 +1,5 @@
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::MessageId;
+use crate::domain::models::scenario::ScenarioId;
 use crate::domain::models::votes::Vote;
 use crate::errors::AppError;
 use crate::infra::repositories::vote_repository::{self, NewVoteDb};
@@ -32,12 +32,12 @@ impl VoteService {
     }
 
     #[instrument(skip(self))]
-    pub async fn like(&self, chat_id: ChatId, message_id: MessageId) -> Result<Vote, AppError> {
+    pub async fn like(&self, chat_id: ChatId, scenario_id: ScenarioId) -> Result<Vote, AppError> {
         let result: Result<Vote, AppError> = vote_repository::upsert_vote(
             &self.pool,
             NewVoteDb {
                 chat_id: chat_id.0,
-                message_id: message_id.0,
+                scenario_id: scenario_id.0,
                 is_upvoted: true,
             },
         )
@@ -52,12 +52,16 @@ impl VoteService {
     }
 
     #[instrument(skip(self))]
-    pub async fn dislike(&self, chat_id: ChatId, message_id: MessageId) -> Result<Vote, AppError> {
+    pub async fn dislike(
+        &self,
+        chat_id: ChatId,
+        scenario_id: ScenarioId,
+    ) -> Result<Vote, AppError> {
         let result: Result<Vote, AppError> = vote_repository::upsert_vote(
             &self.pool,
             NewVoteDb {
                 chat_id: chat_id.0,
-                message_id: message_id.0,
+                scenario_id: scenario_id.0,
                 is_upvoted: false,
             },
         )
@@ -72,8 +76,8 @@ impl VoteService {
     }
 
     #[instrument(skip(self))]
-    pub async fn unvote(&self, chat_id: ChatId, message_id: MessageId) -> Result<bool, AppError> {
-        let result = vote_repository::delete_vote(&self.pool, chat_id.0, message_id.0)
+    pub async fn unvote(&self, chat_id: ChatId, scenario_id: ScenarioId) -> Result<bool, AppError> {
+        let result = vote_repository::delete_vote(&self.pool, chat_id.0, scenario_id.0)
             .await
             .map_err(|_| AppError::InternalServerError);
         match &result {

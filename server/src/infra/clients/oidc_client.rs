@@ -36,7 +36,7 @@ fn encode_state_token(
     let claims = StateTokenPayload {
         redirect: redirect.to_string(),
         nonce: nonce.to_string(),
-        exp: chrono::Utc::now().timestamp() + 300, // TODO: Move to settings
+        exp: chrono::Utc::now().timestamp() + 300,
     };
     let header = Header::new(Algorithm::HS256);
     Ok(jsonwebtoken::encode(
@@ -58,7 +58,6 @@ fn decode_state_token(state: &str, secret: &SecretBox<str>) -> Result<StateToken
     Ok(token_data.claims)
 }
 
-// TODO Update not only keys but json webtoken metadata too
 #[cached::cached(
     ttl = 3600,
     result = true,
@@ -302,7 +301,6 @@ impl OidcClient {
         ))
     }
 
-    // TODO: retries for refresh_token on transient errors
     #[instrument(level = "debug", skip(self, refresh_token))]
     pub async fn refresh_token(
         &self,

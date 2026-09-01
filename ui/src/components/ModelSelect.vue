@@ -2,9 +2,17 @@
 import { computed } from 'vue'
 import { useModels } from '../composables/useModels'
 
-const { model, models } = useModels()
+const props = defineProps<{ modelValue: string }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
-const selected = computed(() => models.value.find((m) => m.value === model.value))
+const { models } = useModels()
+
+const value = computed({
+  get: () => props.modelValue,
+  set: (v) => emit('update:modelValue', v)
+})
+
+const selected = computed(() => models.value.find((m) => m.value === value.value))
 
 const items = computed(() => models.value.map(({ label, value, icon }) => ({ label, value, icon })))
 
@@ -15,7 +23,7 @@ function descriptionOf(value: string): string | undefined {
 
 <template>
   <USelectMenu
-    v-model="model"
+    v-model="value"
     :items="items"
     size="sm"
     :icon="selected?.icon"
@@ -29,7 +37,7 @@ function descriptionOf(value: string): string | undefined {
   >
     <template #default>
       <UTooltip :text="selected?.description">
-        <span class="truncate">{{ selected?.label ?? model }}</span>
+        <span class="truncate">{{ selected?.label ?? modelValue }}</span>
       </UTooltip>
     </template>
 

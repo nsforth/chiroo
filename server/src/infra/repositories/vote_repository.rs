@@ -5,7 +5,7 @@ use tracing::instrument;
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::MessageId;
+use crate::domain::models::scenario::ScenarioId;
 use crate::domain::models::votes::{Vote, VoteType};
 use crate::infra::db::schema::votes;
 use crate::infra::errors::{map_infra_error, InfraError};
@@ -15,7 +15,7 @@ use crate::infra::errors::{map_infra_error, InfraError};
 #[diesel(table_name = votes)]
 pub struct VoteDb {
     pub chat_id: Uuid,
-    pub message_id: Uuid,
+    pub scenario_id: Uuid,
     pub is_upvoted: bool,
 }
 
@@ -23,7 +23,7 @@ pub struct VoteDb {
 #[diesel(table_name = votes)]
 pub struct NewVoteDb {
     pub chat_id: Uuid,
-    pub message_id: Uuid,
+    pub scenario_id: Uuid,
     pub is_upvoted: bool,
 }
 
@@ -56,7 +56,7 @@ pub async fn upsert_vote(
         .interact(move |conn| {
             diesel::insert_into(votes::table)
                 .values(&new_vote)
-                .on_conflict((votes::chat_id, votes::message_id))
+                .on_conflict((votes::chat_id, votes::scenario_id))
                 .do_update()
                 .set(votes::is_upvoted.eq(new_vote.is_upvoted))
                 .returning(VoteDb::as_returning())
@@ -73,7 +73,7 @@ pub async fn upsert_vote(
 pub async fn delete_vote(
     pool: &deadpool_diesel::postgres::Pool,
     chat_id: Uuid,
-    message_id: Uuid,
+    scenario_id: Uuid,
 ) -> Result<bool, InfraError> {
     let conn = pool.get().await.map_err(map_infra_error)?;
     let res = conn
@@ -81,7 +81,7 @@ pub async fn delete_vote(
             diesel::delete(
                 votes::table
                     .filter(votes::chat_id.eq(chat_id))
-                    .filter(votes::message_id.eq(message_id)),
+                    .filter(votes::scenario_id.eq(scenario_id)),
             )
             .execute(conn)
         })
@@ -96,7 +96,7 @@ impl Into<Vote> for &VoteDb {
     fn into(self) -> Vote {
         Vote {
             chat_id: ChatId(self.chat_id),
-            message_id: MessageId(self.message_id),
+            scenario_id: ScenarioId(self.scenario_id),
             vote_type: if self.is_upvoted {
                 VoteType::Like
             } else {

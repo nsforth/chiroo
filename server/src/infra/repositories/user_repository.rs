@@ -40,7 +40,6 @@ struct UpsertUser {
     avatar_url: Option<String>,
 }
 
-// TODO: Change to save and User model from caller
 #[instrument(level = "debug", skip(pool, avatar_url))]
 pub async fn upsert(
     pool: &deadpool_diesel::postgres::Pool,

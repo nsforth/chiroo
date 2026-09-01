@@ -80,7 +80,6 @@ pub enum MessageStreamEvent {
         message: Message,
     },
 
-    // TODO: Make errors more specific, may bew simple HTTP codes
     Error {
         error_text: String,
     },

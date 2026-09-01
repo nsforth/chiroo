@@ -5,28 +5,32 @@ import { Chat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import type { UIMessage } from 'ai'
 import { useI18n } from 'vue-i18n'
-import { useModels } from '../../composables/useModels'
 import { useChats } from '../../composables/useChats'
 import { useCsrf } from '../../composables/useCsrf'
+import { useUserSession } from '../../composables/useUserSession'
 import { useRoute } from 'vue-router'
 import ChatMessageContent from '../../components/chat/message/MessageContent.vue'
 import ChatMessageActions from '../../components/chat/message/MessageActions.vue'
 import ChatVisibility from '../../components/chat/ChatVisibility.vue'
 import ChatTitle from '../../components/chat/ChatTitle.vue'
-import ChatIndicator from '../../components/chat/Indicator.vue'
+import ChatStreamingStatus from '../../components/chat/StreamingStatus.vue'
 import Navbar from '../../components/Navbar.vue'
 import type { Vote } from '../../types/vote'
+import { buildSendMessageBody } from '../../utils/chatTransport'
 
 const route = useRoute<'/chat/[id]'>()
 const toast = useToast()
 const { t } = useI18n()
-const { model } = useModels()
 const { fetchChats, chats } = useChats()
 const { csrf, headerName } = useCsrf()
+const { user } = useUserSession()
 
 const data = await apiFetch(`/api/chats/${route.params.id}`).catch(() => null)
 
+const model = ref<string>(data?.model ?? 'simple')
+
 const isOwner = computed(() => data?.isOwner ?? false)
+const isAdmin = computed(() => user.value?.admin ?? false)
 const visibility = ref<'public' | 'private'>(data?.visibility ?? 'private')
 const title = ref<string | null>(data?.title ?? null)
 
@@ -48,12 +52,19 @@ const input = ref('')
 const chat = new Chat({
   id: data?.id,
   messages: data?.messages,
+  generateId: () => crypto.randomUUID(),
   transport: new DefaultChatTransport({
     api: `/api/chats/${data?.id}`,
     headers: { [headerName]: csrf() },
-    body: {
-      model: model.value
-    }
+    prepareSendMessagesRequest: ({ trigger, messageId, messages, body }) => ({
+      body: buildSendMessageBody({
+        trigger,
+        messageId,
+        messages,
+        model: model.value,
+        scenarioId: body?.scenarioId
+      })
+    })
   }),
   onData: (dataPart) => {
     if (dataPart.type === 'data-chat-title') {
@@ -106,68 +117,55 @@ function cancelEdit() {
   editingMessageId.value = null
 }
 
+function getScenarioId(message?: UIMessage): string | undefined {
+  return (message?.metadata as { scenarioId?: string } | undefined)?.scenarioId
+}
+
+function getFollowingScenarioId(message: UIMessage): string | undefined {
+  const index = chat.messages.findIndex(m => m.id === message.id)
+  return getScenarioId(chat.messages[index + 1])
+}
+
 async function saveEdit(message: UIMessage, text: string) {
-  try {
-    await apiFetch(`/api/chats/messages/${data!.id}`, {
-      method: 'DELETE',
-      headers: { [headerName]: csrf() },
-      body: { messageId: message.id, type: 'edit' }
-    })
-  } catch {
-    toast.add({
-      description: t('errors.failedToUpdateMessage'),
-      icon: 'i-lucide-alert-circle',
-      color: 'error'
-    })
-    return
-  }
-
   editingMessageId.value = null
-  chat.sendMessage({ text, messageId: message.id })
+  const scenarioId = getScenarioId(message) ?? getFollowingScenarioId(message)
+  if (!scenarioId) return
+  chat.sendMessage({ text, messageId: message.id }, { body: { scenarioId } })
 }
 
-async function regenerateMessage(message: UIMessage) {
-  try {
-    await apiFetch(`/api/chats/messages/${data!.id}`, {
-      method: 'DELETE',
-      headers: { [headerName]: csrf() },
-      body: { messageId: message.id, type: 'regenerate' }
-    })
-  } catch {
-    toast.add({
-      description: t('errors.failedToRegenerateMessage'),
-      icon: 'i-lucide-alert-circle',
-      color: 'error'
-    })
-    return
-  }
-
-  chat.regenerate({ messageId: message.id })
+function regenerateMessage(message: UIMessage) {
+  const scenarioId = getScenarioId(message)
+  if (!scenarioId) return
+  chat.regenerate({ messageId: message.id, body: { scenarioId } })
 }
 
-function getVote(messageId: string) {
-  const vote = votes.value.find(v => v.messageId === messageId)
+function getVote(message: UIMessage) {
+  const scenarioId = getScenarioId(message)
+  if (!scenarioId) return null
+  const vote = votes.value.find(v => v.scenarioId === scenarioId)
   if (!vote) return null
   return !!vote.isUpvoted
 }
 
 async function vote(message: UIMessage, isUpvoted: boolean) {
+  const scenarioId = getScenarioId(message)
+  if (!scenarioId) return
   const snapshot = votes.value.map(v => ({ ...v }))
-  const toggling = getVote(message.id) === isUpvoted
+  const toggling = getVote(message) === isUpvoted
   const next = toggling ? null : isUpvoted
 
   votes.value = next === null
-    ? votes.value.filter(v => v.messageId !== message.id)
+    ? votes.value.filter(v => v.scenarioId !== scenarioId)
     : [
-        ...votes.value.filter(v => v.messageId !== message.id),
-        { chatId: data!.id, messageId: message.id, isUpvoted: next }
+        ...votes.value.filter(v => v.scenarioId !== scenarioId),
+        { chatId: data!.id, scenarioId, isUpvoted: next }
       ]
 
   try {
     await apiFetch(`/api/chats/votes/${data!.id}`, {
       method: 'POST',
       headers: { [headerName]: csrf() },
-      body: next === null ? { messageId: message.id } : { messageId: message.id, isUpvoted: next }
+      body: next === null ? { scenarioId } : { scenarioId, isUpvoted: next }
     })
   } catch {
     votes.value = snapshot
@@ -211,6 +209,14 @@ onMounted(() => {
           @update:visibility="visibility = $event"
         />
       </Navbar>
+
+      <div class="pt-(--ui-header-height) px-4 sm:px-6">
+        <ChatStreamingStatus
+          :status="chat.status"
+          :messages="chat.messages"
+          class="mb-3"
+        />
+      </div>
     </template>
 
     <template #body>
@@ -220,22 +226,14 @@ onMounted(() => {
           :messages="chat.messages"
           :status="chat.status"
           :spacing-offset="isOwner ? 160 : 0"
-          class="pt-(--ui-header-height) pb-4 sm:pb-6"
+          class="pb-4 sm:pb-6"
         >
-          <template #indicator>
-            <div class="flex items-center gap-1.5">
-              <ChatIndicator />
-
-              <UChatShimmer
-                :text="t('chat.thinking')"
-                class="text-sm"
-              />
-            </div>
-          </template>
+          <template #indicator />
 
           <template #content="{ message }">
             <ChatMessageContent
               :message="message"
+              :show-details="isAdmin"
               :editing="isOwner && editingMessageId === message.id"
               @save="saveEdit"
               @cancel-edit="cancelEdit"
@@ -250,7 +248,7 @@ onMounted(() => {
               :message="message"
               :streaming="chat.status === 'streaming' && message.id === chat.messages[chat.messages.length - 1]?.id"
               :editing="editingMessageId === message.id"
-              :vote="getVote(message.id)"
+              :vote="getVote(message)"
               @edit="startEdit"
               @regenerate="regenerateMessage"
               @vote="vote"

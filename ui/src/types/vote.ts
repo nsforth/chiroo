@@ -1,5 +1,5 @@
 export interface Vote {
   chatId: string
-  messageId: string
+  scenarioId: string
   isUpvoted: boolean
 }

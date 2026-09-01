@@ -1,14 +1,16 @@
 use async_openai::types::chat::{ChatCompletionToolChoiceOption, ReasoningEffort};
 use serde_json::Value;
 
+use crate::domain::models::messages::{Message, MessageId};
 use crate::domain::models::sampling::SamplingParams;
 use crate::domain::models::tool::LLMTool;
+use crate::infra::clients::llm_client::RunRoundParams;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::search_service::SearchService;
 use crate::services::tools::knowledge_base::{ExtractDocumentTool, SearchKnowledgeBaseTool};
 
 #[derive(Clone)]
-pub struct RoundConfig {
+pub struct RoundDefinition {
     pub prompt_template: String,
     pub tool_names: Vec<String>,
     pub max_llm_calls: usize,
@@ -20,11 +22,37 @@ pub struct RoundConfig {
     pub preserve_thinking: bool,
 }
 
+impl RoundDefinition {
+    /// Build the LLM round params for this round: own behavior fields + run context.
+    pub fn to_run_params(
+        &self,
+        system_prompt: String,
+        history: Vec<Message>,
+        tools: Vec<Box<dyn LLMTool>>,
+        scenario_sampling: SamplingParams,
+        round_index: usize,
+        assistant_message_id: MessageId,
+    ) -> RunRoundParams {
+        RunRoundParams {
+            system_prompt,
+            history,
+            tools,
+            max_llm_calls: self.max_llm_calls,
+            reasoning_effort: self.reasoning_effort.clone(),
+            sampling: scenario_sampling.merge(&self.sampling),
+            extra_body: self.extra_body.clone(),
+            tool_choice: self.tool_choice.clone(),
+            preserve_thinking: self.enable_thinking && self.preserve_thinking,
+            message_id_override: (round_index == 0).then_some(assistant_message_id),
+        }
+    }
+}
+
 #[derive(Clone)]
-pub struct Scenario {
+pub struct ScenarioDefinition {
     pub name: &'static str,
     pub sampling_preset: Option<&'static str>,
-    pub rounds: Vec<RoundConfig>,
+    pub rounds: Vec<RoundDefinition>,
 }
 
 mod deep_research;
@@ -87,7 +115,7 @@ pub fn list_scenarios() -> &'static [ScenarioInfo] {
     SCENARIOS
 }
 
-pub fn scenario_by_name(name: &str) -> Option<Scenario> {
+pub fn scenario_by_name(name: &str) -> Option<ScenarioDefinition> {
     match name {
         "simple" => Some(simple()),
         "deep_research" => Some(deep_research()),

@@ -9,20 +9,33 @@ diesel::table! {
 }
 
 diesel::table! {
-    messages (id) {
+    scenarios (id) {
         id -> Uuid,
         chat_id -> Uuid,
+        #[max_length = 255]
+        name -> Varchar,
         #[max_length = 20]
-        role -> Varchar,
-        parts -> Json,
+        status -> Varchar,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    rounds (id) {
+        id -> Uuid,
+        scenario_id -> Uuid,
+        idx -> Int4,
+        message -> Json,
+        sources -> Json,
         created_at -> Timestamptz,
     }
 }
 
 diesel::table! {
-    votes (chat_id, message_id) {
+    votes (chat_id, scenario_id) {
         chat_id -> Uuid,
-        message_id -> Uuid,
+        scenario_id -> Uuid,
         is_upvoted -> Bool,
     }
 }
@@ -87,16 +100,18 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(messages -> chats (chat_id));
+diesel::joinable!(scenarios -> chats (chat_id));
+diesel::joinable!(rounds -> scenarios (scenario_id));
 diesel::joinable!(votes -> chats (chat_id));
-diesel::joinable!(votes -> messages (message_id));
+diesel::joinable!(votes -> scenarios (scenario_id));
 diesel::joinable!(sessions -> users (user_id));
 diesel::joinable!(documents -> knowledge_bases (kb_id));
 diesel::joinable!(document_data -> documents (document_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     chats,
-    messages,
+    scenarios,
+    rounds,
     votes,
     users,
     sessions,

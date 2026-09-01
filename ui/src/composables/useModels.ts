@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { useStorage } from '@vueuse/core'
+import { createSharedComposable } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { apiFetch } from '../api'
 import { iconByName, type ModelOption } from '../../shared/utils/models'
@@ -11,9 +11,8 @@ interface ApiModel {
   description: string
 }
 
-export function useModels() {
+export const useModels = createSharedComposable(() => {
   const { locale } = useI18n()
-  const model = useStorage<string>('model', 'simple')
   const models = ref<ModelOption[]>([])
 
   async function load() {
@@ -36,7 +35,6 @@ export function useModels() {
   watch(locale, () => void load())
 
   return {
-    models,
-    model
+    models
   }
-}
+})

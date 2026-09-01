@@ -8,7 +8,7 @@
 
 ## API conventions
 
-- JSON camelCase: `userId`, `createdAt`, `firstMessage`, `messageId`, `toolCallId`
+- JSON camelCase: `userId`, `createdAt`, `firstMessage`, `messageId`, `toolCallId`, `scenarioId`
 - All dates are RFC 3339 strings
 
 ## Backend architecture (DDD)
@@ -17,7 +17,7 @@
 handlers/  → HTTP layer, converts domain ↔ requests/responses/DTOs
 services/  → business logic, orchestrates repositories
 infra/     → Diesel schema, repositories (SQL queries)
-domain/    → pure data types (Chat, ChatId, UserId, Vote, MessageId)
+domain/    → pure data types (Chat, ChatId, UserId, Vote, Scenario, Round, MessageId)
 utils/     → shared utilities (extract_cookie, custom Axum extractors)
 ```
 `
@@ -27,6 +27,28 @@ utils/     → shared utilities (extract_cookie, custom Axum extractors)
 
 - Always use `NOT NULL` unless the column is genuinely optional.
 - Use `JSON` not `JSONB`.
+
+## Scenarios & rounds (domain + storage)
+
+A chat turn is a `Scenario`; the user message is the first round. Domain types in `domain/models/scenario.rs`:
+
+- `Scenario { id: ScenarioId, chat_id, name, status, rounds: Vec<Round>, created_at, updated_at }`
+  - `status: Pending | Running | Completed | Failed`
+  - `rounds[0]` is always the user message (`Message` with role `User`); `rounds[1..]` are assistant rounds.
+- `Round { message: Message, sources: Vec<Source> }`
+
+Storage is normalized `scenarios` + `rounds` tables (NOT a JSON blob). The domain `Scenario` is read/written whole; `scenario_repository` encapsulates the two-table mapping:
+
+- `scenarios`: `id, chat_id, name, status, created_at, updated_at`
+- `rounds`: `id, scenario_id, idx, role, message JSON, sources JSON, created_at`
+
+Persistence strategy:
+- `insert_scenario` — new turn (scenario row + `rounds[0]`).
+- `insert_round` — one round at a time during generation (incremental, O(N)).
+- `update_scenario` — full rewrite (delete + re-insert rounds) only at finalization / continue-start.
+- `votes` are keyed by `scenario_id`.
+
+The assistant `UIMessage.id` is the **first assistant round's** `message.id` (`rounds[1]`); `scenario_id` is carried separately in `metadata.scenarioId` (for voting) and never used as a message id.
 
 ## SSE / AI SDK stream format
 
@@ -53,7 +75,7 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 
 | Chunk | Key fields |
 |-------|-----------|
-| `start` | `messageId?` |
+| `start` | `messageId?`, `messageMetadata?` (carries `scenarioId`) |
 | `finish` | `finishReason?` (`"stop"`, `"length"`, `"content-filter"`, `"tool-calls"`, `"error"`, `"other"`) |
 | `start-step` | (none) |
 | `finish-step` | (none) |
@@ -123,11 +145,13 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - Home page (`index.vue`): `createChat()` → `POST /api/chats { firstMessage: prompt }`
   → `router.push('/chat/{id}')`
 - Chat page (`[id].vue`):
-  1. `GET /api/chats/{id}` → loads chat + messages
+  1. `GET /api/chats/{id}` → loads chat + messages (one user `UIMessage` + one assistant `UIMessage` per scenario)
   2. `new Chat({ id, messages, transport: DefaultChatTransport({ api: '/api/chats/{id}', body: { model } }) })`
-  3. `onMounted`: if `messages.length === 1`, calls `chat.regenerate()`
-- `chat.regenerate()`: truncates to last user message, POSTs `{ trigger: "regenerate-message" }`
+  3. `onMounted`: if `messages.length === 1`, calls `chat.regenerate()` (triggers continuation of the pending scenario)
 - `chat.sendMessage({ text })`: appends user text, POSTs `{ trigger: "submit-message" }`
+- `chat.sendMessage({ text, messageId })`: edit — backend deletes the scenario + reruns
+- `chat.regenerate({ messageId })`: backend deletes the target scenario (+ later ones) and reruns `stream_new` with the stored user message (model taken from `scenario.name`, not from the frontend selector)
+- Voting is keyed by `message.metadata.scenarioId`, not by message id.
 
 ## Language
 
@@ -262,7 +286,7 @@ where
 - Session TTL: computed as `access_token_expires_in × session_ttl_multiplier` (configurable, default 10).
 - Ownership checks: `chat_service::check_ownership(chat_id, user_id)` → lightweight
   `SELECT EXISTS(...)` via `chat_repository::is_owner`. Used in `send_message`, `get_votes`,
-  `vote`, `delete_messages_after` handlers.
+  `vote` handlers.
 
 ## AI service (`services/ai_service.rs`)
 
@@ -270,7 +294,7 @@ where
 
 `async-openai = { version = "0.40", features = ["chat-completion", "byot"] }`
 
-`AiService` owns `Client<OpenAIConfig>` and a model name. It spawns a tokio task per request: LLM loop with tool execution, event accumulation, SSE forwarding. Handler only maps `StreamEvent → SseChunk → SSE`.
+`AiService` owns `Client<OpenAIConfig>` and a model name. It orchestrates a whole `Scenario` (multiple rounds) per request; `LlmClient` executes a single round. Each request spawns a tokio task that runs the round loop, accumulates events, persists rounds incrementally, and forwards SSE events. Handler only maps `StreamEvent → SseChunk → SSE`.
 
 ### `byot` (Bring Your Own Types)
 
@@ -308,12 +332,29 @@ let mut stream: CustomStream = client.chat().create_stream_byot(request).await?;
 
 Uses a labeled `'step: for _step in 0..max_steps` loop. The `continue 'step;` label is required because `continue` inside nested `for choice` / `while stream` would only continue the innermost loop. Without the label, control falls through to `return Ok(())` after the inner stream exhausts, silently terminating the LLM loop after one tool call.
 
+### Scenario orchestration
+
+Two public entry points (both return `(ScenarioId, MessageId, Stream<MessageStreamEvent>)`):
+
+- `stream_new(chat_id, model, user_message)` — new turn: build a `Scenario` (status `Running`, `rounds=[user]`), persist, run all assistant rounds.
+- `stream_continue(chat_id, model, scenario)` — resume an incomplete scenario from `next_round = scenario.rounds.len() - 1`.
+
+`run_scenario` (private):
+1. Resolves `ScenarioDefinition` by model name (`scenario_by_name`).
+2. Builds full dialog history via `scenario_service.get_history(chat_id)` (flattened: each scenario → `rounds[0]` then `rounds[1..]`). For a new turn this is loaded **before** `insert_scenario` (the current question lives in the round prompt templates, not in history); for continuation it's loaded **after** (already-run rounds must be visible).
+3. Runs each round via `llm_client.execute_round`, collects the completed `Round { message, sources }`, saves it incrementally with `insert_round`.
+4. Sets `Completed` (or `Failed`) and does a final full `update_scenario`.
+
+The `start` chunk's `messageId` is the **first assistant round's** `message.id` (pre-generated, forced onto round 0 via `message_id_override`).
+
+Regeneration: `send_message` with `trigger: "regenerate-message"` + `messageId` → `find_scenario_by_message` (matches any round's message id) → delete that scenario + later ones → `stream_new` with the stored user message (`scenario.rounds[0]`) and model `scenario.name`.
+
 ### Control flow
 
 ```
-AiService.stream(chat_id, user_text) → mpsc channel → tokio::spawn:
-  └─ build OpenAI request with tools
-  └─ 'step: loop (max_steps)
+AiService.stream_new / stream_continue → mpsc channel → tokio::spawn run_scenario:
+  └─ per round: build OpenAI request with tools
+  └─ llm_client.execute_round → 'step: loop (max_steps)
        └─ send LlmCallStart
        └─ create_stream_byot → iterate chunks
             ├─ reasoning_content → ReasoningDelta
@@ -322,5 +363,6 @@ AiService.stream(chat_id, user_text) → mpsc channel → tokio::spawn:
             └─ finish_reason:
                  ├─ ToolCalls → execute tools → continue 'step
                  └─ Stop → send LlmCallFinish → return
+  └─ append Round { message, sources } → insert_round (incremental)
 ```
 

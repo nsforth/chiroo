@@ -6,8 +6,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
-use crate::domain::models::chat::Chat;
-use crate::handlers::chats::ui_messages::{convert_parts_to_ui, MessageRole, UIMessage};
+use crate::domain::models::chat::{Chat, ChatId};
+use crate::domain::models::scenario::Scenario;
+use crate::domain::models::user::UserId;
+use crate::errors::AppError;
+use crate::handlers::chats::ui_messages::{scenario_to_ui_messages, UIMessage};
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
 use crate::AppState;
@@ -16,6 +19,7 @@ use crate::AppState;
 pub struct CreateChatRequest {
     #[serde(rename = "firstMessage")]
     pub first_message: Option<String>,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,9 +74,35 @@ pub struct ChatDetailResponse {
     pub visibility: String,
     #[serde(rename = "createdAt")]
     pub created_at: String,
+    pub model: String,
     pub messages: Vec<UIMessage>,
     #[serde(rename = "isOwner")]
     pub is_owner: bool,
+}
+
+impl ChatDetailResponse {
+    fn new(chat: &Chat, viewer_id: UserId, scenarios: Vec<Scenario>) -> Result<Self, AppError> {
+        let model = scenarios
+            .last()
+            .map(|s| s.name.clone())
+            .ok_or(AppError::InternalServerError)?;
+
+        let mut messages = Vec::new();
+        for scenario in &scenarios {
+            messages.extend(scenario_to_ui_messages(scenario)?);
+        }
+
+        Ok(Self {
+            id: chat.id.0.to_string(),
+            user_id: chat.owner.to_string(),
+            title: chat.title.clone(),
+            visibility: if chat.public { "public" } else { "private" }.to_string(),
+            created_at: chat.created_at.and_utc().to_rfc3339(),
+            model,
+            messages,
+            is_owner: chat.owner == viewer_id,
+        })
+    }
 }
 
 pub async fn get_chats(
@@ -90,7 +120,7 @@ pub async fn create_chat(
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
     let chat = state
         .chat_service
-        .create_chat(new_chat.first_message, auth_user.user_id)
+        .create_chat(new_chat.first_message, new_chat.model, auth_user.user_id)
         .await?;
     Ok(Json(From::from(&chat)))
 }
@@ -100,62 +130,23 @@ pub async fn get_chat(
     auth_user: AuthUser,
     PathExtractor(id): PathExtractor<Uuid>,
 ) -> Result<Json<ChatDetailResponse>, ErrorResponse> {
-    let chat_id = crate::domain::models::chat::ChatId(id);
+    let chat_id = ChatId(id);
 
-    let chat = match state
+    let chat = state
         .chat_service
         .get_chat(chat_id, auth_user.user_id)
-        .await?
-    {
-        Some(chat) => chat,
-        None => {
-            return Err((StatusCode::NOT_FOUND, "Chat not found")
-                .into_response()
-                .into())
-        },
-    };
+        .await?;
 
-    let db_messages = state.message_service.get_messages_for_chat(id).await?;
+    let scenarios = state
+        .scenario_service
+        .get_scenarios_for_chat(chat_id)
+        .await?;
 
-    // TODO: Make convenient converter
-    let messages: Vec<UIMessage> = db_messages
-        .into_iter()
-        .map(|msg| {
-            let role = match msg.role.as_str() {
-                "user" => MessageRole::User,
-                "assistant" => MessageRole::Assistant,
-                _ => MessageRole::System,
-            };
-
-            let parts = convert_parts_to_ui(&msg.parts);
-
-            UIMessage {
-                id: msg.id.to_string(),
-                role,
-                metadata: None,
-                parts,
-            }
-        })
-        .collect();
-
-    let is_owner = chat.owner == auth_user.user_id;
-
-    // TODO: Move to converter
-    let visibility = if chat.public {
-        "public".to_string()
-    } else {
-        "private".to_string()
-    };
-
-    Ok(Json(ChatDetailResponse {
-        id: chat.id.0.to_string(),
-        user_id: chat.owner.to_string(),
-        title: chat.title,
-        visibility,
-        created_at: chat.created_at.and_utc().to_rfc3339(),
-        messages,
-        is_owner,
-    }))
+    Ok(Json(ChatDetailResponse::new(
+        &chat,
+        auth_user.user_id,
+        scenarios,
+    )?))
 }
 
 pub async fn delete_chat(
@@ -198,9 +189,10 @@ pub async fn update_visibility(
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
     let user_id = auth_user.user_id;
     let chat_id = crate::domain::models::chat::ChatId(id);
+    let is_public = matches!(body.visibility, ChatVisibility::Public);
     match state
         .chat_service
-        .update_visibility(&chat_id, &user_id, body.is_public)
+        .update_visibility(&chat_id, &user_id, is_public)
         .await?
     {
         chat => Ok(Json(From::from(&chat))),
@@ -213,7 +205,13 @@ pub struct UpdateTitleRequest {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatVisibility {
+    Public,
+    Private,
+}
+
+#[derive(serde::Deserialize)]
 pub struct UpdateVisibilityRequest {
-    #[serde(rename = "visibility")]
-    pub is_public: bool,
+    pub visibility: ChatVisibility,
 }

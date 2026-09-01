@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 const MAX_TITLE_CHARS: usize = 15;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MessageId(pub Uuid);
 
 impl MessageId {
@@ -16,7 +16,7 @@ impl MessageId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: MessageId,
     pub chat_id: ChatId,
@@ -45,6 +45,28 @@ impl Message {
         } else {
             text.to_string()
         }
+    }
+
+    pub fn user(chat_id: ChatId, text: String) -> Self {
+        let mut msg = Self::new(chat_id, Role::User);
+        msg.parts.push(MessagePart::Text(TextBlock { text }));
+        msg
+    }
+
+    pub fn user_with_id(chat_id: ChatId, id: MessageId, text: String) -> Self {
+        let mut msg = Self::user(chat_id, text);
+        msg.id = id;
+        msg
+    }
+
+    pub fn text(&self) -> String {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                MessagePart::Text(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 }
 

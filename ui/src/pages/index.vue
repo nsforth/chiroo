@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useStorage } from '@vueuse/core'
 import { apiFetch } from '../api'
 import { useChats } from '../composables/useChats'
 import { useCsrf } from '../composables/useCsrf'
@@ -10,6 +11,7 @@ import Navbar from '../components/Navbar.vue'
 
 const { fetchChats } = useChats()
 const { csrf, headerName } = useCsrf()
+const model = useStorage<string>('model', 'simple')
 const { user } = useUserSession()
 const toast = useToast()
 const { t } = useI18n()
@@ -35,7 +37,7 @@ async function createChat(prompt: string) {
     const chat = await apiFetch('/api/chats', {
       method: 'POST',
       headers: { [headerName]: csrf() },
-      body: { firstMessage: prompt }
+      body: { firstMessage: prompt, model: model.value }
     })
 
     await fetchChats()
@@ -85,7 +87,7 @@ const quickChats = ref<{ label: string; icon: string }[]>([])
         >
           <template #footer>
             <div class="ms-auto flex items-center gap-3">
-              <ModelSelect />
+              <ModelSelect v-model="model" />
 
               <UChatPromptSubmit
                 color="neutral"

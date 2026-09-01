@@ -3,11 +3,14 @@ CREATE TABLE users (
     sso_id TEXT NOT NULL UNIQUE,
     sso_provider TEXT NOT NULL,
     name TEXT,
-    username TEXT,
+    username TEXT NOT NULL,
     email TEXT,
     avatar_url TEXT,
+    admin BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX users_username_key ON users (username);
 
 CREATE TABLE chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -27,21 +30,33 @@ CREATE TABLE sessions (
     expires_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE messages (
+CREATE TABLE scenarios (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-    parts JSON NOT NULL DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    name VARCHAR NOT NULL DEFAULT '',
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX messages_chat_id_idx ON messages(chat_id);
+CREATE INDEX scenarios_chat_id_idx ON scenarios(chat_id);
+
+CREATE TABLE rounds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scenario_id UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+    idx INT NOT NULL,
+    message JSON NOT NULL,
+    sources JSON NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX rounds_scenario_id_idx ON rounds(scenario_id);
 
 CREATE TABLE votes (
     chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    scenario_id UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
     is_upvoted BOOLEAN NOT NULL,
-    PRIMARY KEY (chat_id, message_id)
+    PRIMARY KEY (chat_id, scenario_id)
 );
 
 CREATE TABLE knowledge_bases (
@@ -73,3 +88,4 @@ CREATE TABLE document_data (
 );
 
 CREATE INDEX documents_kb_id_idx ON documents(kb_id);
+CREATE INDEX documents_kb_id_id_idx ON documents (kb_id, id) INCLUDE (version);

@@ -509,7 +509,6 @@ async fn run_round(
     let tool_defs: Vec<ChatCompletionTools> = params.tools.iter().map(|t| t.definition()).collect();
     let preserve_thinking = params.preserve_thinking;
 
-    // TODO: System prompt must not be empty, we may check it on start and don't check it here
     let mut messages: Vec<ChatCompletionRequestMessage> = if params.system_prompt.is_empty() {
         Vec::new()
     } else {

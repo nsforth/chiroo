@@ -18,8 +18,8 @@ use chiroo_server::services::auth_service::AuthService;
 use chiroo_server::services::chat_service::ChatService;
 use chiroo_server::services::chunking_service::ChunkingService;
 use chiroo_server::services::knowledge_service::KnowledgeService;
-use chiroo_server::services::message_service::MessageService;
 use chiroo_server::services::prompts::PromptRenderer;
+use chiroo_server::services::scenario_service::ScenarioService;
 use chiroo_server::services::search_service::SearchService;
 use chiroo_server::services::user_service::UserService;
 use chiroo_server::services::vote_service::VoteService;
@@ -96,7 +96,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         .clone()
         .start_background_jobs(app_config.oidc_config().cleanup_interval_secs());
 
-    let message_service = MessageService::new(pool.clone());
+    let scenario_service = ScenarioService::new(pool.clone());
 
     let prompt_renderer = PromptRenderer::new("prompts").expect("Failed to load prompt templates");
 
@@ -136,15 +136,15 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
     let ai_service = AiService::new(
         &app_config.openai,
         prompt_renderer,
-        message_service.clone(),
+        scenario_service.clone(),
         search_service.clone(),
         knowledge_service.clone(),
         app_config.search.limit,
     );
 
     AppState {
-        chat_service: ChatService::new(pool.clone(), message_service.clone()),
-        message_service,
+        chat_service: ChatService::new(pool.clone(), scenario_service.clone()),
+        scenario_service,
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,

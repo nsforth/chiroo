@@ -4,7 +4,7 @@
 
 ### Logout / session invalidation
 
-No logout endpoint exists. `clearSession()` in `useUserSession.ts` only nulls a local reactive ref (`// TODO: implement logout with Keycloak end session`).
+No logout endpoint exists. `clearSession()` in `useUserSession.ts` only nulls a local reactive ref.
 
 Needs:
 - Backend `POST /api/auth/logout` — delete session from DB, clear cookies
@@ -16,79 +16,74 @@ Needs:
 
 ### Make state token TTL configurable
 
-`oidc_client.rs:38` — state token `exp` hardcoded to 300 seconds. Move to `OidcConfig`.
+`encode_state_token` — state token `exp` hardcoded to 300 seconds. Move to `OidcConfig`.
 
 ### Retry logic for refresh_token
 
-`oidc_client.rs:290` — refresh fails immediately on transient OIDC errors. Add retry with exponential backoff.
+`OidcClient::refresh_token` — refresh fails immediately on transient OIDC errors. Add retry with exponential backoff.
 
 ### Structured auth error logging
 
-`auth_service.rs:61-62` — no structured logs for auth errors (`Invalid`, `Expired`, DB errors). Only ad-hoc `tracing::info` / `tracing::debug` calls.
+`AuthService::verify_or_refresh` — no structured logs for auth errors (`Invalid`, `Expired`, DB errors). Only ad-hoc `tracing::info` / `tracing::debug` calls.
 
 ### Investigate `trigger` field in SendMessageRequest
 
-`stream.rs:99` — `trigger` field comes from Vercel AI SDK. Figure out what it is and how to handle it.
+`MessageTrigger` — `trigger` field comes from Vercel AI SDK. Figure out what it is and how to handle it.
 
-### Investigate `convert_parts_to_ui`
+### Seamless resume after a dropped stream
 
-`chats.rs:221` — `// TODO: Investigate what is this AI generated shit`. The function is written in an ad-hoc manner with fallbacks, needs a proper architectural rewrite.
-
-### Domain model: introduce Scenario and Round entities
-
-The assistant response is persisted as a flat list of per-round `Message` rows, which makes the live frontend (1 message per response via AI SDK) diverge from reload (N round messages). Introduce Scenario/Round as first-class domain concepts:
-
-- Domain types `Scenario` (id = UIMessage id, chat_id, user_message_id, model) and `Round` (position, parts)
-- `messages` narrowed to user/system; assistant content lives in scenario rounds
-- `votes` re-pointed to scenario id
-- `run_scenario` saves a `Scenario` + `Round`s; `start.messageId` = scenario_id
-- `get_chat` / `get_messages` build one UIMessage per scenario (id = scenario_id, parts = rounds joined with StepStart)
-- Regenerate/delete operate on scenario_id (cascade delete rounds)
-
-Storage: keep it as a JSON blob in one table (no normalized `scenarios`/`rounds` tables yet) until the domain model stabilizes. No data migration needed — no production yet.
+The backend can continue an incomplete scenario (`stream_continue` resumes from `next_round`),
+but the frontend has no way to resume a partially-completed scenario after a disconnect:
+`chat.regenerate()` slices off the partial assistant message, so re-streaming only the remaining
+rounds would drop the already-rendered rounds. Needs a design: re-stream the whole scenario from
+scratch on resume, or a custom continuation that appends to the existing message
+(`resumeStream`/reconnect), plus detecting an incomplete scenario (`status != Completed`) on load.
 
 ---
 
+## Bugs
+
 ## Tech Debt
+
+### LLM round: validate non-empty system prompt
+
+`llm_client.rs` `run_round` — silently skips the system message when `system_prompt` is empty. Validate a non-empty system prompt once at scenario/round construction (fail fast) instead of the per-round runtime empty-check.
 
 ### Repositories: domain models on input/output
 
 All repository functions should accept and return domain models instead of `*Db` raw Diesel structs. `*Db` structs should only be used internally within the repository module. Currently most repositories expose `*Db` types publicly and require manual `.into()` / conversion at the call site.
 
-Example: `user_repository::upsert` takes individual fields instead of a `User` domain model (`// TODO: Change to save and User model from caller`).
+Example: `user_repository::upsert` takes individual fields instead of a `User` domain model.
 
 Affected:
 - `chat_repository.rs` — `NewChatDb`, `ChatDb` exposed
 - `session_repository.rs` — `SessionDb` exposed
-- `message_repository.rs` — `MessageDb`, `NewMessageDb` exposed
 - `vote_repository.rs` — `VoteDb`, `NewVoteDb` exposed
 - `user_repository.rs` — `UserDb` exposed, `upsert` takes individual fields
 
 ### Replace `serde_json::Value` with `UIMessage`
 
-`stream.rs:96` — `messages: Vec<serde_json::Value>` instead of typed `Vec<UIMessage>`.
+`stream.rs` — `SendMessageRequest.messages: Vec<serde_json::Value>` instead of typed `Vec<UIMessage>`.
 
 ### Stream handler: struct + state machine
 
-`stream.rs:156` — `domain_to_sse_chunks` uses a mutable `started: &mut bool` flag. Replace with a proper state machine.
+`domain_to_sse_chunks` — uses a mutable `started: &mut bool` flag. Replace with a proper state machine.
 
 ### Extract UIMessage converter from handler
 
-`chats.rs:120, 143` — `MessageDb → UIMessage` conversion done inline in `get_chat`. Move to a dedicated converter / `From` impl.
+`votes.rs` — `VoteDb → VoteResponse` conversion done inline in `get_votes`. Move to a dedicated converter / `From` impl.
 
-- `votes.rs:46` — same for `VoteDb → VoteResponse`
+### ChatService: full review
 
-### ChatService / MessageService: full review
-
-`chat_service.rs:15`, `message_service.rs:14` — `// TODO: Full review, has some shit`. Review logic and error handling.
+`ChatService` — review logic and error handling.
 
 ### OIDC metadata cache: refresh entire metadata
 
-`oidc_client.rs:60` — when JWKS is refreshed, the whole discovery metadata (issuer, endpoints, JWK cache) must be refreshed too, otherwise keys and metadata become desynchronized.
+`fetch_jwk_set` — when JWKS is refreshed, the whole discovery metadata (issuer, endpoints, JWK cache) must be refreshed too, otherwise keys and metadata become desynchronized.
 
 ### Stream errors: make them specific
 
-`stream_event.rs:66` — `LlmCallFinish::Error` carries no reason. Replace with a structured variant containing an error text or code.
+`MessageStreamEvent::Error` — carries no reason. Replace with a structured variant containing an error text or code.
 
 ### Markdown render: defensive fallback on parse failure
 

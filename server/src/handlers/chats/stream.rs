@@ -7,8 +7,11 @@ use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::ChatId;
+use crate::domain::models::messages::{Message, MessageId};
+use crate::domain::models::scenario::ScenarioId;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::errors::AppError;
+use crate::services::ai_service::StreamRequest;
 use crate::utils::{JsonExtractor, PathExtractor};
 use crate::AppState;
 
@@ -19,6 +22,8 @@ pub enum SseChunk {
     Start {
         #[serde(skip_serializing_if = "Option::is_none", rename = "messageId")]
         message_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "messageMetadata")]
+        message_metadata: Option<serde_json::Value>,
     },
     #[serde(rename = "start-step")]
     StartStep,
@@ -108,15 +113,26 @@ pub enum SseChunk {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MessageTrigger {
+    SubmitMessage,
+    RegenerateMessage,
+    Continue,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
-    pub id: Uuid,
-    pub messages: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub trigger: Option<String>,
+    pub trigger: MessageTrigger,
     #[serde(default, rename = "messageId")]
     pub message_id: Option<Uuid>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default, rename = "userMessageId")]
+    pub user_message_id: Option<Uuid>,
+    #[serde(default, rename = "scenarioId")]
+    pub scenario_id: Option<Uuid>,
 }
 
 // ── Handler ──
@@ -134,23 +150,58 @@ pub async fn send_message(
         .check_ownership(chat_id, auth_user.user_id)
         .await?;
 
-    let user_text = extract_last_user_text(&body.messages);
-    let model = body.model.unwrap_or_else(|| "simple".into());
+    let SendMessageRequest {
+        trigger,
+        message_id,
+        model,
+        text,
+        user_message_id,
+        scenario_id,
+    } = body;
 
-    // A regenerate re-runs an already-persisted user message; an edit targets an
-    // existing one. Only brand-new user messages should be persisted.
-    let save_user_message =
-        !matches!(body.trigger.as_deref(), Some("regenerate-message")) && body.message_id.is_none();
+    let request = match trigger {
+        MessageTrigger::SubmitMessage => match message_id {
+            Some(id) => {
+                let scenario_id = scenario_id
+                    .ok_or_else(|| AppError::BadRequest("edit requires scenarioId".to_string()))?;
+                StreamRequest::Edit {
+                    user_message: Message::user_with_id(chat_id, MessageId(id), text),
+                    scenario_id: ScenarioId(scenario_id),
+                }
+            },
+            None => StreamRequest::Submit {
+                user_message: Message::user_with_id(
+                    chat_id,
+                    user_message_id
+                        .map(MessageId)
+                        .unwrap_or_else(MessageId::new),
+                    text,
+                ),
+                model: model
+                    .ok_or_else(|| AppError::BadRequest("model is required".to_string()))?,
+            },
+        },
+        MessageTrigger::RegenerateMessage => {
+            let scenario_id = scenario_id.ok_or_else(|| {
+                AppError::BadRequest("regenerate requires scenarioId".to_string())
+            })?;
+            StreamRequest::Regenerate {
+                scenario_id: ScenarioId(scenario_id),
+            }
+        },
+        MessageTrigger::Continue => StreamRequest::Continue,
+    };
 
-    let (assistant_id, domain_stream) =
-        state
-            .ai_service
-            .stream(chat_id, &model, &user_text, save_user_message);
-    let assistant_id = assistant_id.0.to_string();
+    let (scenario_id, assistant_message_id, domain_stream) =
+        state.ai_service.stream(chat_id, request).await?;
+
+    let assistant_message_id = assistant_message_id.0.to_string();
+    let scenario_id = scenario_id.0.to_string();
     let mut started = false;
 
     let sse_stream = domain_stream.flat_map(move |event| {
-        let chunks = domain_to_sse_chunks(&event, &mut started, &assistant_id);
+        let chunks =
+            domain_to_sse_chunks(&event, &mut started, &assistant_message_id, &scenario_id);
         stream::iter(chunks.into_iter().map(|chunk| {
             let json = serde_json::to_string(&chunk).unwrap_or_default();
             Ok(Event::default().data(json))
@@ -160,31 +211,11 @@ pub async fn send_message(
     Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
 }
 
-// TODO: Replace with UIMessage converter
-fn extract_last_user_text(messages: &[serde_json::Value]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-        .and_then(|m| {
-            m.get("parts").and_then(|p| p.as_array()).and_then(|parts| {
-                parts
-                    .iter()
-                    .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
-                    .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("")
-                    .into()
-            })
-        })
-        .unwrap_or_default()
-}
-
-// TODO: replace with struct + state machine and full rewrite
 fn domain_to_sse_chunks(
     event: &MessageStreamEvent,
     started: &mut bool,
     assistant_id: &str,
+    scenario_id: &str,
 ) -> Vec<SseChunk> {
     match event {
         MessageStreamEvent::LlmCallStart => {
@@ -193,6 +224,7 @@ fn domain_to_sse_chunks(
                 vec![
                     SseChunk::Start {
                         message_id: Some(assistant_id.to_string()),
+                        message_metadata: Some(serde_json::json!({ "scenarioId": scenario_id })),
                     },
                     SseChunk::StartStep,
                 ]

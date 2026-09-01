@@ -7,7 +7,7 @@ use crate::services::auth_service::AuthService;
 use crate::services::chat_service::ChatService;
 use crate::services::chunking_service::ChunkingService;
 use crate::services::knowledge_service::KnowledgeService;
-use crate::services::message_service::MessageService;
+use crate::services::scenario_service::ScenarioService;
 use crate::services::search_service::SearchService;
 use crate::services::user_service::UserService;
 use crate::services::vote_service::VoteService;
@@ -16,7 +16,7 @@ use crate::services::vote_service::VoteService;
 pub struct AppState {
     pub config: &'static Config,
     pub chat_service: ChatService,
-    pub message_service: MessageService,
+    pub scenario_service: ScenarioService,
     pub vote_service: VoteService,
     pub ai_service: AiService,
     pub auth_service: AuthService,

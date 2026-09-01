@@ -1,25 +1,25 @@
 use crate::domain::models::chat::{Chat, ChatId};
-use crate::domain::models::messages::{Message, MessagePart, Role, TextBlock};
+use crate::domain::models::messages::Message;
+use crate::domain::models::scenario::{Scenario, ScenarioStatus};
 use crate::domain::models::user::UserId;
 use crate::errors::AppError;
 use crate::infra::repositories::chat_repository;
 use crate::operation_result::OperationResult;
-use crate::services::message_service::MessageService;
+use crate::services::scenario_service::ScenarioService;
 use deadpool_diesel::postgres::Pool;
 use tracing::{info, instrument};
 
 #[derive(Clone)]
 pub struct ChatService {
     pool: Pool,
-    message_service: MessageService,
+    scenario_service: ScenarioService,
 }
 
-// TODO: Full review, has some shit
 impl ChatService {
-    pub fn new(pool: Pool, message_service: MessageService) -> Self {
+    pub fn new(pool: Pool, scenario_service: ScenarioService) -> Self {
         Self {
             pool,
-            message_service,
+            scenario_service,
         }
     }
 
@@ -40,18 +40,15 @@ impl ChatService {
 
     /// Get a single chat by ID.
     #[instrument(skip(self))]
-    pub async fn get_chat(
-        &self,
-        chat_id: ChatId,
-        user_id: UserId,
-    ) -> Result<Option<Chat>, AppError> {
-        let result = chat_repository::get_by_id(&self.pool, chat_id, user_id).await;
-        let result = match result {
-            Ok(chat) => Ok(chat.map(Into::into)),
-            Err(_) => Err(AppError::InternalServerError),
-        };
+    pub async fn get_chat(&self, chat_id: ChatId, user_id: UserId) -> Result<Chat, AppError> {
+        let result: Result<Chat, AppError> =
+            match chat_repository::get_by_id(&self.pool, chat_id, user_id).await {
+                Ok(Some(chat)) => Ok(chat.into()),
+                Ok(None) => Err(AppError::NotFound("Chat not found".into())),
+                Err(_) => Err(AppError::InternalServerError),
+            };
         match &result {
-            Ok(r) => info!(found = r.is_some(), status = result.status()),
+            Ok(_) => info!(status = result.status()),
             Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
@@ -63,13 +60,11 @@ impl ChatService {
     pub async fn create_chat(
         &self,
         first_message: Option<String>,
+        model: String,
         user_id: UserId,
     ) -> Result<Chat, AppError> {
         let title = first_message.as_deref().map(Message::make_title);
-        let new_chat = chat_repository::NewChatDb {
-            owner: user_id.0,
-            title: title.clone(),
-        };
+        let new_chat = chat_repository::NewChatDb::new(user_id.0, title.clone());
         let result: Result<Chat, AppError> = chat_repository::insert(&self.pool, new_chat)
             .await
             .map(Into::into)
@@ -77,9 +72,10 @@ impl ChatService {
         let result = match result {
             Ok(chat) => {
                 if let Some(text) = first_message {
-                    let mut message = Message::new(ChatId(chat.id.0), Role::User);
-                    message.parts.push(MessagePart::Text(TextBlock { text }));
-                    let _ = self.message_service.insert_message(&message).await;
+                    let user_message = Message::user(chat.id, text);
+                    let scenario =
+                        Scenario::new(chat.id, model, ScenarioStatus::Pending, user_message);
+                    let _ = self.scenario_service.insert_scenario(&scenario).await;
                 }
                 Ok(chat)
             },

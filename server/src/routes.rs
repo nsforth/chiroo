@@ -1,7 +1,7 @@
 use crate::handlers::auth::{login, oidc_callback};
 use crate::handlers::chats::{
-    create_chat, delete_chat, delete_messages_after, get_chat, get_chats, get_votes, send_message,
-    update_title, update_visibility, vote,
+    create_chat, delete_chat, get_chat, get_chats, get_votes, send_message, update_title,
+    update_visibility, vote,
 };
 use crate::handlers::models::list_models;
 use crate::handlers::session::get_session;
@@ -57,7 +57,6 @@ fn chat_router() -> Router<AppState> {
         .route("/visibility/{id}", patch(update_visibility))
         .route("/votes/{id}", get(get_votes))
         .route("/votes/{id}", post(vote))
-        .route("/messages/{id}", delete(delete_messages_after))
 }
 
 async fn root() -> &'static str {

@@ -4,5 +4,6 @@ export interface UserSession {
     name: string
     avatar: string
     username: string
+    admin: boolean
   }
 }

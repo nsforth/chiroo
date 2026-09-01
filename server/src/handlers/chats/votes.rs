@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::MessageId;
+use crate::domain::models::scenario::ScenarioId;
 use crate::domain::models::votes::VoteType;
 use crate::utils::JsonExtractor;
 use crate::utils::PathExtractor;
@@ -14,8 +14,8 @@ use crate::AppState;
 
 #[derive(serde::Deserialize)]
 pub struct VoteRequest {
-    #[serde(rename = "messageId")]
-    pub message_id: Uuid,
+    #[serde(rename = "scenarioId")]
+    pub scenario_id: Uuid,
     #[serde(rename = "isUpvoted", default)]
     pub is_upvoted: Option<bool>,
 }
@@ -24,8 +24,8 @@ pub struct VoteRequest {
 pub struct VoteResponse {
     #[serde(rename = "chatId")]
     pub chat_id: String,
-    #[serde(rename = "messageId")]
-    pub message_id: String,
+    #[serde(rename = "scenarioId")]
+    pub scenario_id: String,
     #[serde(rename = "isUpvoted")]
     pub is_upvoted: bool,
 }
@@ -46,9 +46,8 @@ pub async fn get_votes(
     let votes_responses: Vec<VoteResponse> = votes
         .into_iter()
         .map(|v| VoteResponse {
-            // TODO: Make constructor or From::from
             chat_id: v.chat_id.0.to_string(),
-            message_id: v.message_id.0.to_string(),
+            scenario_id: v.scenario_id.0.to_string(),
             is_upvoted: match v.vote_type {
                 VoteType::Like => true,
                 VoteType::Dislike => false,
@@ -71,16 +70,16 @@ pub async fn vote(
         .await
         .map_err(IntoResponse::into_response)?;
 
-    let message_id = MessageId(body.message_id.clone());
+    let scenario_id = ScenarioId(body.scenario_id);
 
     if let Some(is_upvoted) = body.is_upvoted {
         if is_upvoted {
-            state.vote_service.like(chat_id, message_id).await?;
+            state.vote_service.like(chat_id, scenario_id).await?;
         } else {
-            state.vote_service.dislike(chat_id, message_id).await?;
+            state.vote_service.dislike(chat_id, scenario_id).await?;
         }
     } else {
-        state.vote_service.unvote(chat_id, message_id).await?;
+        state.vote_service.unvote(chat_id, scenario_id).await?;
     }
 
     Ok(StatusCode::OK)

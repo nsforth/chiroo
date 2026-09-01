@@ -23,6 +23,7 @@ const { t } = useI18n()
 const props = defineProps<{
   message: UIMessage
   editing: boolean
+  showDetails: boolean
 }>()
 
 const sources = computed(() => getMessageSources(props.message))
@@ -47,7 +48,7 @@ const emit = defineEmits<{
     :key="`${message.id}-${part.type}-${index}`"
   >
     <UChatReasoning
-      v-if="isReasoningUIPart(part)"
+      v-if="showDetails && isReasoningUIPart(part)"
       :text="part.text"
       :streaming="isPartStreaming(part)"
       chevron="leading"
@@ -58,7 +59,7 @@ const emit = defineEmits<{
       />
     </UChatReasoning>
 
-    <template v-else-if="isToolUIPart(part)">
+    <template v-else-if="showDetails && isToolUIPart(part)">
       <ChatToolChart
         v-if="getToolName(part) === 'chart'"
         :invocation="{ ...(part as ChartUIToolInvocation) }"

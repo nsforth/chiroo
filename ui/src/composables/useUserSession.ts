@@ -8,7 +8,6 @@ export const useUserSession = createSharedComposable(() => {
   const loading = ref(false)
 
   const clearSession = async () => {
-    // TODO: implement logout with Keycloak end session
     session.value = null
   }
 

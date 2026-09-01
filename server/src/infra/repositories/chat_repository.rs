@@ -32,6 +32,15 @@ pub struct NewChatDb {
     pub owner: Uuid,
 }
 
+impl NewChatDb {
+    pub fn new(owner_id: Uuid, title: Option<String>) -> Self {
+        NewChatDb {
+            owner: owner_id,
+            title,
+        }
+    }
+}
+
 #[instrument(level = "debug", skip(pool))]
 pub async fn insert(
     pool: &deadpool_diesel::postgres::Pool,

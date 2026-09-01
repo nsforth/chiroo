@@ -2,14 +2,14 @@ use async_openai::types::chat::{ChatCompletionToolChoiceOption, ToolChoiceOption
 
 use crate::domain::models::sampling::{SamplingParams, SamplingPreset};
 
-use super::{RoundConfig, Scenario};
+use super::{RoundDefinition, ScenarioDefinition};
 
-pub fn simple() -> Scenario {
-    Scenario {
+pub fn simple() -> ScenarioDefinition {
+    ScenarioDefinition {
         name: "simple",
         sampling_preset: Some(SamplingPreset::INSTRUCT),
         rounds: vec![
-            RoundConfig {
+            RoundDefinition {
                 prompt_template: "simple/search.md".into(),
                 tool_names: vec!["search_knowledge_base".into()],
                 max_llm_calls: 1,
@@ -22,7 +22,7 @@ pub fn simple() -> Scenario {
                 enable_thinking: false,
                 preserve_thinking: false,
             },
-            RoundConfig {
+            RoundDefinition {
                 prompt_template: "simple/extract.md".into(),
                 tool_names: vec!["extract_document".into()],
                 max_llm_calls: 1,
@@ -35,7 +35,7 @@ pub fn simple() -> Scenario {
                 enable_thinking: false,
                 preserve_thinking: false,
             },
-            RoundConfig {
+            RoundDefinition {
                 prompt_template: "simple/answer.md".into(),
                 tool_names: vec![],
                 max_llm_calls: 1,

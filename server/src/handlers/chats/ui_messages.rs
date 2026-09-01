@@ -3,6 +3,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::domain::models::messages::{MessagePart, ToolCallState};
+use crate::domain::models::scenario::{Round, Scenario};
+use crate::errors::AppError;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UIMessage {
@@ -29,7 +31,6 @@ pub enum MessageRole {
 pub enum UIMessagePart {
     Text(TextUIPart),
     Reasoning(ReasoningUIPart),
-    StepStart,
     SourceUrl(SourceUrlUIPart),
     SourceDocument(SourceDocumentUIPart),
     File(FileUIPart),
@@ -43,7 +44,6 @@ impl UIMessagePart {
         match self {
             UIMessagePart::Text(_) => "text",
             UIMessagePart::Reasoning(_) => "reasoning",
-            UIMessagePart::StepStart => "step-start",
             UIMessagePart::SourceUrl(_) => "source-url",
             UIMessagePart::SourceDocument(_) => "source-document",
             UIMessagePart::File(_) => "file",
@@ -58,7 +58,6 @@ impl Serialize for UIMessagePart {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             UIMessagePart::Other(value) => value.serialize(serializer),
-            UIMessagePart::StepStart => tagged_value("step-start", &()).serialize(serializer),
             UIMessagePart::Text(p) => tagged_value("text", p).serialize(serializer),
             UIMessagePart::Reasoning(p) => tagged_value("reasoning", p).serialize(serializer),
             UIMessagePart::SourceUrl(p) => tagged_value("source-url", p).serialize(serializer),
@@ -185,36 +184,6 @@ pub struct DataUIPart {
 
 // ─── Domain → UI conversion ───
 
-/// Convert a stored message `parts` JSON payload to UI parts.
-///
-/// Messages are persisted in the domain format (`MessagePart`), so parts are
-/// mapped part-by-part. Unknown values are preserved as-is instead of being dropped.
-pub fn convert_parts_to_ui(parts: &serde_json::Value) -> Vec<UIMessagePart> {
-    match parts {
-        Value::Array(items) => items.iter().map(value_to_ui_part).collect(),
-        single => vec![single_to_ui_part(single)],
-    }
-}
-
-fn value_to_ui_part(value: &Value) -> UIMessagePart {
-    serde_json::from_value::<MessagePart>(value.clone())
-        .map(|part| domain_part_to_ui(&part))
-        .unwrap_or_else(|_| UIMessagePart::Other(value.clone()))
-}
-
-fn single_to_ui_part(value: &Value) -> UIMessagePart {
-    let part = value_to_ui_part(value);
-    if matches!(part, UIMessagePart::Other(_)) {
-        // Fallback: wrap the entire JSON value as a text part so nothing is lost.
-        UIMessagePart::Text(TextUIPart {
-            text: value.to_string(),
-            state: Some(TextState::Done),
-        })
-    } else {
-        part
-    }
-}
-
 fn domain_part_to_ui(part: &MessagePart) -> UIMessagePart {
     match part {
         MessagePart::Text(t) => UIMessagePart::Text(TextUIPart {
@@ -254,28 +223,89 @@ fn domain_part_to_ui(part: &MessagePart) -> UIMessagePart {
     }
 }
 
+pub fn convert_message_parts_to_ui(parts: &[MessagePart]) -> Vec<UIMessagePart> {
+    parts.iter().map(domain_part_to_ui).collect()
+}
+
+pub fn scenario_to_ui_messages(scenario: &Scenario) -> Result<Vec<UIMessage>, AppError> {
+    // rounds[0] is the user's message; rounds[1..] are assistant rounds.
+    let Some((user_round, assistant_rounds)) = scenario.rounds.split_first() else {
+        return Err(AppError::InternalServerError);
+    };
+
+    let mut messages = Vec::new();
+
+    messages.push(UIMessage {
+        id: user_round.message.id.0.to_string(),
+        role: MessageRole::User,
+        metadata: Some(serde_json::json!({
+            "scenarioId": scenario.id.0.to_string(),
+        })),
+        parts: convert_message_parts_to_ui(&user_round.message.parts),
+    });
+
+    let Some(first_assistant) = assistant_rounds.first() else {
+        return Ok(messages);
+    };
+
+    let mut parts: Vec<UIMessagePart> = Vec::new();
+    for round in assistant_rounds {
+        parts.extend(convert_message_parts_to_ui(&round.message.parts));
+    }
+    parts.extend(source_parts(&scenario.rounds));
+
+    messages.push(UIMessage {
+        // The assistant UIMessage.id is the FIRST assistant round's message id.
+        id: first_assistant.message.id.0.to_string(),
+        role: MessageRole::Assistant,
+        metadata: Some(serde_json::json!({
+            "scenarioId": scenario.id.0.to_string(),
+            "name": scenario.name,
+        })),
+        parts,
+    });
+
+    Ok(messages)
+}
+
+fn source_parts(rounds: &[Round]) -> Vec<UIMessagePart> {
+    let mut seen = std::collections::HashSet::new();
+    let mut parts = Vec::new();
+    for round in rounds {
+        for source in &round.sources {
+            if seen.insert(source.source_id.clone()) {
+                parts.push(UIMessagePart::SourceUrl(SourceUrlUIPart {
+                    source_id: source.source_id.clone(),
+                    url: source.url.clone(),
+                    title: source.title.clone(),
+                    provider_metadata: source
+                        .score
+                        .map(|score| serde_json::json!({ "chiroo": { "score": score } })),
+                }));
+            }
+        }
+    }
+    parts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::messages::{ReasoningBlock, TextBlock, ToolCallBlock};
 
     #[test]
     fn tool_call_part_maps_to_dynamic_tool_ui_part() {
-        let parts = serde_json::json!([
-            {
-                "type": "ToolCall",
-                "tool_call_id": "call-1",
-                "tool_name": "search_knowledge_base",
-                "input": { "queries": ["rust ownership"] },
-                "output": { "chunks": [{ "document_id": "doc-1" }] },
-                "error": null,
-                "state": "Done"
-            }
-        ]);
+        let part = MessagePart::ToolCall(ToolCallBlock {
+            tool_call_id: "call-1".into(),
+            tool_name: "search_knowledge_base".into(),
+            input: serde_json::json!({ "queries": ["rust ownership"] }),
+            output: Some(serde_json::json!({ "chunks": [{ "document_id": "doc-1" }] })),
+            error: None,
+            state: ToolCallState::Done,
+        });
 
-        let ui_parts = convert_parts_to_ui(&parts);
-        assert_eq!(ui_parts.len(), 1);
-
-        let json = serde_json::to_value(&ui_parts[0]).unwrap();
+        let ui = domain_part_to_ui(&part);
+        let json = serde_json::to_value(&ui).unwrap();
         assert_eq!(json["type"], "tool-search_knowledge_base");
         assert_eq!(json["toolCallId"], "call-1");
         assert_eq!(json["toolName"], "search_knowledge_base");
@@ -287,20 +317,17 @@ mod tests {
 
     #[test]
     fn tool_call_error_maps_to_output_error() {
-        let parts = serde_json::json!([
-            {
-                "type": "ToolCall",
-                "tool_call_id": "call-2",
-                "tool_name": "extract_document",
-                "input": { "document_id": "doc-1" },
-                "output": null,
-                "error": "document not found",
-                "state": "Error"
-            }
-        ]);
+        let part = MessagePart::ToolCall(ToolCallBlock {
+            tool_call_id: "call-2".into(),
+            tool_name: "extract_document".into(),
+            input: serde_json::json!({ "document_id": "doc-1" }),
+            output: None,
+            error: Some("document not found".into()),
+            state: ToolCallState::Error,
+        });
 
-        let ui_parts = convert_parts_to_ui(&parts);
-        let json = serde_json::to_value(&ui_parts[0]).unwrap();
+        let ui = domain_part_to_ui(&part);
+        let json = serde_json::to_value(&ui).unwrap();
         assert_eq!(json["type"], "tool-extract_document");
         assert_eq!(json["state"], "output-error");
         assert_eq!(json["errorText"], "document not found");
@@ -308,12 +335,16 @@ mod tests {
 
     #[test]
     fn text_and_reasoning_parts_keep_their_state() {
-        let parts = serde_json::json!([
-            { "type": "text", "text": "hello" },
-            { "type": "reasoning", "text": "thinking" }
-        ]);
+        let parts = [
+            MessagePart::Text(TextBlock {
+                text: "hello".into(),
+            }),
+            MessagePart::Reasoning(ReasoningBlock {
+                text: "thinking".into(),
+            }),
+        ];
 
-        let ui_parts = convert_parts_to_ui(&parts);
+        let ui_parts = convert_message_parts_to_ui(&parts);
         assert_eq!(ui_parts.len(), 2);
 
         let json = serde_json::to_value(&ui_parts).unwrap();
@@ -325,37 +356,91 @@ mod tests {
     }
 
     #[test]
-    fn unknown_part_is_preserved() {
-        let parts = serde_json::json!([{ "type": "something-future", "value": 42 }]);
-        let ui_parts = convert_parts_to_ui(&parts);
-        assert!(matches!(ui_parts[0], UIMessagePart::Other(_)));
-        let json = serde_json::to_value(&ui_parts[0]).unwrap();
-        assert_eq!(json["value"], 42);
-    }
-
-    #[test]
-    fn non_array_falls_back_to_text_part() {
-        let parts = serde_json::json!({ "foo": "bar" });
-        let ui_parts = convert_parts_to_ui(&parts);
-        assert!(matches!(ui_parts[0], UIMessagePart::Text(_)));
-    }
-
-    #[test]
     fn pending_tool_call_maps_to_input_streaming() {
-        let parts = serde_json::json!([
-            {
-                "type": "ToolCall",
-                "tool_call_id": "call-3",
-                "tool_name": "search_knowledge_base",
-                "input": { "queries": [] },
-                "output": null,
-                "error": null,
-                "state": "Invoked"
-            }
-        ]);
+        let part = MessagePart::ToolCall(ToolCallBlock {
+            tool_call_id: "call-3".into(),
+            tool_name: "search_knowledge_base".into(),
+            input: serde_json::json!({ "queries": [] }),
+            output: None,
+            error: None,
+            state: ToolCallState::Invoked,
+        });
 
-        let ui_parts = convert_parts_to_ui(&parts);
-        let json = serde_json::to_value(&ui_parts[0]).unwrap();
+        let ui = domain_part_to_ui(&part);
+        let json = serde_json::to_value(&ui).unwrap();
         assert_eq!(json["state"], "input-streaming");
+    }
+
+    #[test]
+    fn scenario_maps_to_user_and_assistant_ui_messages() {
+        use crate::domain::models::chat::ChatId;
+        use crate::domain::models::messages::{Message, Role, TextBlock};
+        use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatus};
+        use uuid::Uuid;
+
+        let chat_id = ChatId(Uuid::new_v4());
+        let scenario_id = ScenarioId(Uuid::new_v4());
+
+        let mut user = Message::new(chat_id, Role::User);
+        user.parts.push(MessagePart::Text(TextBlock {
+            text: "question".into(),
+        }));
+
+        let mut first = Message::new(chat_id, Role::Assistant);
+        first.parts.push(MessagePart::Text(TextBlock {
+            text: "first".into(),
+        }));
+
+        let mut second = Message::new(chat_id, Role::Assistant);
+        second.parts.push(MessagePart::Text(TextBlock {
+            text: "second".into(),
+        }));
+
+        let scenario = Scenario {
+            id: scenario_id,
+            chat_id,
+            name: "simple".into(),
+            status: ScenarioStatus::Completed,
+            rounds: vec![
+                Round {
+                    message: user.clone(),
+                    sources: vec![],
+                },
+                Round {
+                    message: first.clone(),
+                    sources: vec![],
+                },
+                Round {
+                    message: second.clone(),
+                    sources: vec![],
+                },
+            ],
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        };
+
+        let messages = scenario_to_ui_messages(&scenario).unwrap();
+        assert_eq!(messages.len(), 2);
+
+        assert_eq!(messages[0].id, user.id.0.to_string());
+        assert_eq!(messages[0].role, MessageRole::User);
+        let user_metadata = messages[0].metadata.as_ref().expect("metadata");
+        assert_eq!(
+            user_metadata["scenarioId"].as_str().unwrap(),
+            scenario_id.0.to_string()
+        );
+
+        assert_eq!(messages[1].id, first.id.0.to_string());
+        assert_eq!(messages[1].role, MessageRole::Assistant);
+
+        let metadata = messages[1].metadata.as_ref().expect("metadata");
+        assert_eq!(
+            metadata["scenarioId"].as_str().unwrap(),
+            scenario_id.0.to_string()
+        );
+        assert_eq!(metadata["name"].as_str().unwrap(), "simple");
+
+        // Assistant parts are the concatenation of both assistant rounds.
+        assert_eq!(messages[1].parts.len(), 2);
     }
 }
