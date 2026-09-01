@@ -17,6 +17,7 @@ import ChatStreamingStatus from '../../components/chat/StreamingStatus.vue'
 import Navbar from '../../components/Navbar.vue'
 import type { Vote } from '../../types/vote'
 import { buildSendMessageBody } from '../../utils/chatTransport'
+import { isStreamingStatusVisible } from '../../utils/streamingStatus'
 
 const route = useRoute<'/chat/[id]'>()
 const toast = useToast()
@@ -104,6 +105,8 @@ function handleSubmit(e: Event) {
     input.value = ''
   }
 }
+
+const statusVisible = computed(() => isStreamingStatusVisible(chat.status))
 
 const editingMessageId = ref<string | null>(null)
 
@@ -209,14 +212,6 @@ onMounted(() => {
           @update:visibility="visibility = $event"
         />
       </Navbar>
-
-      <div class="pt-(--ui-header-height) px-4 sm:px-6">
-        <ChatStreamingStatus
-          :status="chat.status"
-          :messages="chat.messages"
-          class="mb-3"
-        />
-      </div>
     </template>
 
     <template #body>
@@ -225,7 +220,7 @@ onMounted(() => {
           should-auto-scroll
           :messages="chat.messages"
           :status="chat.status"
-          :spacing-offset="isOwner ? 160 : 0"
+          :spacing-offset="isOwner ? (statusVisible ? 188 : 160) : 0"
           class="pb-4 sm:pb-6"
         >
           <template #indicator />
@@ -233,6 +228,7 @@ onMounted(() => {
           <template #content="{ message }">
             <ChatMessageContent
               :message="message"
+              :streaming="chat.status === 'streaming' && message.id === chat.messages[chat.messages.length - 1]?.id"
               :show-details="isAdmin"
               :editing="isOwner && editingMessageId === message.id"
               @save="saveEdit"
@@ -256,30 +252,40 @@ onMounted(() => {
           </template>
         </UChatMessages>
 
-        <UChatPrompt
+        <div
           v-if="isOwner"
-          v-model="input"
-          :placeholder="t('placeholders.chatInputPrompt')"
-          :error="chat.error"
-          variant="subtle"
-          class="sticky bottom-0 [view-transition-name:chat-prompt] rounded-b-none z-10"
-          :ui="{ base: 'px-1.5' }"
-          @submit="handleSubmit"
+          class="sticky bottom-0 z-10"
         >
-          <template #footer>
-            <div class="ms-auto flex items-center gap-3">
-              <ModelSelect v-model="model" />
+          <ChatStreamingStatus
+            :status="chat.status"
+            :messages="chat.messages"
+            class="px-1.5 pb-2"
+          />
 
-              <UChatPromptSubmit
-                :status="chat.status"
-                color="neutral"
-                size="sm"
-                @stop="chat.stop()"
-                @reload="chat.regenerate()"
-              />
-            </div>
-          </template>
-        </UChatPrompt>
+          <UChatPrompt
+            v-model="input"
+            :placeholder="t('placeholders.chatInputPrompt')"
+            :error="chat.error"
+            variant="subtle"
+            class="rounded-b-none [view-transition-name:chat-prompt]"
+            :ui="{ base: 'px-1.5' }"
+            @submit="handleSubmit"
+          >
+            <template #footer>
+              <div class="ms-auto flex items-center gap-3">
+                <ModelSelect v-model="model" />
+
+                <UChatPromptSubmit
+                  :status="chat.status"
+                  color="neutral"
+                  size="sm"
+                  @stop="chat.stop()"
+                  @reload="chat.regenerate()"
+                />
+              </div>
+            </template>
+          </UChatPrompt>
+        </div>
       </UContainer>
     </template>
   </UDashboardPanel>

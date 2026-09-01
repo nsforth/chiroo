@@ -23,6 +23,7 @@ const { t } = useI18n()
 const props = defineProps<{
   message: UIMessage
   editing: boolean
+  streaming: boolean
   showDetails: boolean
 }>()
 
@@ -126,7 +127,7 @@ const emit = defineEmits<{
     </template>
   </template>
 
-  <template v-if="message.role === 'assistant' && sources.length">
+  <template v-if="message.role === 'assistant' && sources.length && !streaming">
     <ChatMessageSources :sources="sources" />
   </template>
 </template>
