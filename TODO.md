@@ -85,6 +85,18 @@ Affected:
 
 `MessageStreamEvent::Error` — carries no reason. Replace with a structured variant containing an error text or code.
 
+### Search round: kb_id hallucination has no self-correct path
+
+`search_knowledge_base` rejects bad `kb_ids` with a tool error ("Invalid knowledge base id: ..." /
+"Unknown knowledge base id: ..."), but `simple/search` and `deep_research/search` rounds have
+`max_llm_calls: 1`, so a hallucinated id ends the round with a tool error: extract runs without
+document_ids and the final answer degrades to "not found" even when the data exists.
+Only `deep_research/explore` (max_llm_calls: 10) can self-correct today.
+
+Planned fix (apply if real failures are observed):
+- include the list of valid KB ids in the tool error message
+- raise search-round `max_llm_calls` to 2
+
 ### Markdown render: defensive fallback on parse failure
 
 Comark parses LLM/assistant and tool (search/extract) markdown without a `.catch` in its async `setup`, so a parser crash blanks the whole part (no console error). Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and the tool content components (`SearchKnowledgeBase.vue`, `ExtractDocument.vue`). Deferred after the comark 0.3→0.6 upgrade, which fixed the known nested-bracket link crash.

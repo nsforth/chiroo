@@ -1,6 +1,32 @@
 use std::sync::Arc;
 
+use serde::Serialize;
 use tera::{Context, Tera};
+
+use crate::domain::models::knowledge_base::KnowledgeBase;
+
+/// Knowledge base entry rendered into the system prompt.
+#[derive(Clone, Debug, Serialize)]
+pub struct KbContext {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub language: Option<String>,
+}
+
+impl From<&KnowledgeBase> for KbContext {
+    fn from(kb: &KnowledgeBase) -> Self {
+        let description = kb
+            .render_description()
+            .unwrap_or_else(|_| kb.description.clone());
+        Self {
+            id: kb.id.0.to_string(),
+            name: kb.name.clone(),
+            description,
+            language: kb.language.clone(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct TemplateContext {
@@ -8,6 +34,7 @@ pub struct TemplateContext {
     pub user_name: String,
     pub current_date: String,
     pub question: String,
+    pub knowledge_bases: Vec<KbContext>,
 }
 
 #[derive(Clone)]
@@ -28,6 +55,7 @@ impl PromptRenderer {
         ctx.insert("user_name", &context.user_name);
         ctx.insert("current_date", &context.current_date);
         ctx.insert("question", &context.question);
+        ctx.insert("knowledge_bases", &context.knowledge_bases);
         self.tera.render(template, &ctx)
     }
 
@@ -40,12 +68,22 @@ impl PromptRenderer {
 mod tests {
     use super::*;
 
+    fn test_kb() -> KbContext {
+        KbContext {
+            id: "11111111-2222-3333-4444-555555555555".into(),
+            name: "Company Docs".into(),
+            description: "Internal company documentation and policies".into(),
+            language: Some("english".into()),
+        }
+    }
+
     fn test_context() -> TemplateContext {
         TemplateContext {
             assistant_name: "Chiroo".into(),
             user_name: "Alice".into(),
             current_date: "2026-07-27".into(),
             question: "What is Rust?".into(),
+            knowledge_bases: vec![test_kb()],
         }
     }
 
@@ -73,6 +111,48 @@ mod tests {
             .render_global_system(&ctx)
             .expect("Failed to render");
         assert!(!result.contains("Alice"));
+    }
+
+    #[test]
+    fn renders_global_system_with_knowledge_bases() {
+        let result = renderer()
+            .render_global_system(&test_context())
+            .expect("Failed to render");
+        assert!(result.contains("Company Docs"));
+        assert!(result.contains("11111111-2222-3333-4444-555555555555"));
+        assert!(result.contains("Internal company documentation and policies"));
+        assert!(result.contains("english"));
+    }
+
+    #[test]
+    fn renders_global_system_with_multiple_knowledge_bases() {
+        let mut ctx = test_context();
+        ctx.knowledge_bases.push(KbContext {
+            id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into(),
+            name: "Support Articles".into(),
+            description: "Customer support knowledge base".into(),
+            language: None,
+        });
+        let result = renderer()
+            .render_global_system(&ctx)
+            .expect("Failed to render");
+        assert!(result.contains("Company Docs"));
+        assert!(result.contains("Support Articles"));
+        // Only one KB declares a language.
+        assert_eq!(result.matches("Primary language:").count(), 1);
+    }
+
+    #[test]
+    fn renders_global_system_with_no_knowledge_bases() {
+        let ctx = TemplateContext {
+            knowledge_bases: vec![],
+            ..test_context()
+        };
+        let result = renderer()
+            .render_global_system(&ctx)
+            .expect("Failed to render");
+        assert!(result.contains("No knowledge bases are configured"));
+        assert!(!result.contains("Company Docs"));
     }
 
     #[test]

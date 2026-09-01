@@ -17,7 +17,7 @@ use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::errors::AppError;
 use crate::infra::clients::llm_client::LlmClient;
 use crate::services::knowledge_service::KnowledgeService;
-use crate::services::prompts::{PromptRenderer, TemplateContext};
+use crate::services::prompts::{KbContext, PromptRenderer, TemplateContext};
 use crate::services::scenario_service::ScenarioService;
 use crate::services::scenarios::{create_tools, scenario_by_name, simple};
 use crate::services::search_service::SearchService;
@@ -302,12 +302,21 @@ async fn run_scenario(
         .and_then(preset_by_name)
         .unwrap_or_default();
 
+    let knowledge_bases = knowledge_service
+        .list_kbs()
+        .await
+        .map_err(|e| format!("Failed to list knowledge bases: {e}"))?
+        .iter()
+        .map(KbContext::from)
+        .collect::<Vec<_>>();
+
     let question = scenario.rounds[0].message.text();
     let ctx = TemplateContext {
         assistant_name: "Chiroo".into(),
         user_name: String::new(),
         current_date: Utc::now().format("%Y-%m-%d").to_string(),
         question,
+        knowledge_bases,
     };
 
     let global_prompt = prompt_renderer

@@ -1,9 +1,13 @@
+use std::collections::{HashMap, HashSet};
+
 use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObject};
 use async_trait::async_trait;
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::SearchedChunk;
+use crate::domain::models::knowledge_base::KnowledgeBase;
 use crate::domain::models::source::Source;
 use crate::domain::models::tool::{LLMTool, ToolExecution};
 use crate::services::knowledge_service::KnowledgeService;
@@ -38,12 +42,14 @@ impl LLMTool for SearchKnowledgeBaseTool {
             function: FunctionObject {
                 name: "search_knowledge_base".into(),
                 description: Some(
-                    "Search the knowledge base for relevant document chunks. \
-                     Takes an array of natural language queries and returns matching chunks with \
-                     their character-based location within each document (chunk_offset, \
-                     chunk_length, document_total_length). Use this first to discover documents \
-                     and chunks; then call extract_document to read the full text (or a specific \
-                     range) of the most promising documents."
+                    "Search the knowledge bases for relevant document chunks. \
+                     Takes an array of natural language queries and optionally a list of \
+                     knowledge base ids to restrict the search to (kb_ids); without it, all \
+                     knowledge bases are searched. Returns matching chunks, each tagged with \
+                     its knowledge base (kb_name, kb_id), with their character-based location \
+                     within each document (chunk_offset, chunk_length, document_total_length). \
+                     Use this first to discover documents and chunks; then call extract_document \
+                     to read the full text (or a specific range) of the most promising documents."
                         .into(),
                 ),
                 parameters: Some(serde_json::json!({
@@ -53,6 +59,11 @@ impl LLMTool for SearchKnowledgeBaseTool {
                             "type": "array",
                             "items": { "type": "string" },
                             "description": "Array of natural language search queries"
+                        },
+                        "kb_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional: knowledge base ids to search. Omit to search all knowledge bases. Every id must be a valid knowledge base id."
                         }
                     },
                     "required": ["queries"]
@@ -63,7 +74,7 @@ impl LLMTool for SearchKnowledgeBaseTool {
     }
 
     async fn execute(&mut self, arguments: &str) -> Result<ToolExecution, String> {
-        let queries = parse_queries(arguments)?;
+        let args = parse_search_args(arguments)?;
 
         let kbs = self
             .knowledge_service
@@ -71,21 +82,30 @@ impl LLMTool for SearchKnowledgeBaseTool {
             .await
             .map_err(|e| e.to_string())?;
 
+        let kbs = filter_kbs(kbs, args.kb_ids)?;
+        let kb_names: HashMap<Uuid, String> =
+            kbs.iter().map(|kb| (kb.id.0, kb.name.clone())).collect();
+
         let chunks = self
             .search_service
-            .search_many(queries, &kbs, self.limit)
+            .search_many(args.queries, &kbs, self.limit)
             .await
             .map_err(|e| e.to_string())?;
 
         let sources: Vec<Source> = chunks.iter().map(Source::from).collect();
         Ok(ToolExecution {
-            output: serde_json::json!({ "chunks": search_chunks_to_json(&chunks) }),
+            output: serde_json::json!({ "chunks": search_chunks_to_json(&chunks, &kb_names) }),
             sources,
         })
     }
 }
 
-fn parse_queries(arguments: &str) -> Result<Vec<String>, String> {
+struct SearchArgs {
+    queries: Vec<String>,
+    kb_ids: Option<HashSet<Uuid>>,
+}
+
+fn parse_search_args(arguments: &str) -> Result<SearchArgs, String> {
     let input: Value = serde_json::from_str(arguments).map_err(|e| format!("Invalid args: {e}"))?;
 
     let queries: Vec<String> = input["queries"]
@@ -99,21 +119,59 @@ fn parse_queries(arguments: &str) -> Result<Vec<String>, String> {
         return Err("At least one query is required".into());
     }
 
-    Ok(queries)
+    let kb_ids = match input["kb_ids"].as_array() {
+        None => None,
+        Some(arr) if arr.is_empty() => None,
+        Some(arr) => Some(
+            arr.iter()
+                .map(|v| {
+                    v.as_str()
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        .ok_or_else(|| format!("Invalid knowledge base id: {}", v))
+                })
+                .collect::<Result<HashSet<_>, _>>()?,
+        ),
+    };
+
+    Ok(SearchArgs { queries, kb_ids })
 }
 
-fn search_chunks_to_json(chunks: &[SearchedChunk]) -> Value {
+fn filter_kbs(
+    kbs: Vec<KnowledgeBase>,
+    kb_ids: Option<HashSet<Uuid>>,
+) -> Result<Vec<KnowledgeBase>, String> {
+    let Some(ids) = kb_ids else {
+        return Ok(kbs);
+    };
+    let unknown: Vec<Uuid> = ids
+        .difference(&kbs.iter().map(|kb| kb.id.0).collect())
+        .copied()
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!("Unknown knowledge base id: {}", unknown[0]));
+    }
+    Ok(kbs
+        .into_iter()
+        .filter(|kb| ids.contains(&kb.id.0))
+        .collect())
+}
+
+fn search_chunks_to_json(chunks: &[SearchedChunk], kb_names: &HashMap<Uuid, String>) -> Value {
     let items: Vec<Value> = chunks
         .iter()
         .map(|chunk| {
+            let kb_name = kb_names.get(&chunk.kb_id.0).cloned().unwrap_or_default();
             serde_json::json!({
                 "document_id": chunk.document_id.0,
+                "kb_id": chunk.kb_id.0,
+                "kb_name": kb_name,
                 "title": chunk.title,
                 "url": chunk.url,
                 "content": chunk.content,
                 "chunk_offset": chunk.chunk_offset,
                 "chunk_length": chunk.chunk_length,
                 "document_total_length": chunk.document_total_length,
+                "metadata": chunk.metadata,
                 "score": chunk.score,
             })
         })
@@ -300,10 +358,15 @@ mod tests {
     #[test]
     fn search_chunks_to_json_maps_domain_fields() {
         let chunk = make_chunk("doc-1", 10, 5, "hello", 0.9);
-        let json = search_chunks_to_json(&[chunk]);
+        let kb_id = chunk.kb_id.0;
+        let kb_names: HashMap<Uuid, String> =
+            [(kb_id, "Company Docs".to_string())].into_iter().collect();
+        let json = search_chunks_to_json(&[chunk], &kb_names);
 
         let first = &json[0];
         assert_eq!(first["document_id"], "doc-1");
+        assert_eq!(first["kb_id"], kb_id.to_string());
+        assert_eq!(first["kb_name"], "Company Docs");
         assert_eq!(first["title"], "Title");
         assert_eq!(first["url"], "https://example.com");
         assert_eq!(first["content"], "hello");
@@ -311,6 +374,17 @@ mod tests {
         assert_eq!(first["chunk_length"], 5);
         assert_eq!(first["document_total_length"], 100);
         assert_eq!(first["score"].as_f64().unwrap() as f32, 0.9f32);
+    }
+
+    #[test]
+    fn search_chunks_to_json_omits_kb_name_when_unknown() {
+        let chunk = make_chunk("doc-1", 10, 5, "hello", 0.9);
+        let kb_id = chunk.kb_id.0;
+        let json = search_chunks_to_json(&[chunk], &HashMap::new());
+
+        let first = &json[0];
+        assert_eq!(first["kb_id"], kb_id.to_string());
+        assert_eq!(first["kb_name"], "");
     }
 
     #[test]
@@ -324,20 +398,77 @@ mod tests {
         assert_eq!(source.score, Some(0.9));
     }
 
-    #[test]
-    fn parse_queries_rejects_missing() {
-        assert!(parse_queries("{}").is_err());
+    fn make_kb(id: Uuid, name: &str) -> KnowledgeBase {
+        KnowledgeBase {
+            id: KnowledgeBaseId(id),
+            name: name.to_string(),
+            description: String::new(),
+            public: false,
+            metadata: serde_json::json!({}),
+            language: None,
+            created_at: chrono::NaiveDateTime::MIN,
+            updated_at: chrono::NaiveDateTime::MIN,
+        }
     }
 
     #[test]
-    fn parse_queries_rejects_empty() {
-        assert!(parse_queries(r#"{"queries": []}"#).is_err());
+    fn parse_search_args_rejects_missing() {
+        assert!(parse_search_args("{}").is_err());
     }
 
     #[test]
-    fn parse_queries_accepts_strings() {
-        let queries = parse_queries(r#"{"queries": ["a", "b"]}"#).unwrap();
-        assert_eq!(queries, vec!["a".to_string(), "b".to_string()]);
+    fn parse_search_args_rejects_empty() {
+        assert!(parse_search_args(r#"{"queries": []}"#).is_err());
+    }
+
+    #[test]
+    fn parse_search_args_accepts_strings_without_kb_ids() {
+        let args = parse_search_args(r#"{"queries": ["a", "b"]}"#).unwrap();
+        assert_eq!(args.queries, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(args.kb_ids, None);
+    }
+
+    #[test]
+    fn parse_search_args_parses_kb_ids() {
+        let id = Uuid::new_v4();
+        let args =
+            parse_search_args(&format!(r#"{{"queries": ["a"], "kb_ids": ["{}"]}}"#, id)).unwrap();
+        assert_eq!(args.kb_ids, Some(HashSet::from([id])));
+    }
+
+    #[test]
+    fn parse_search_args_treats_empty_kb_ids_as_none() {
+        let args = parse_search_args(r#"{"queries": ["a"], "kb_ids": []}"#).unwrap();
+        assert_eq!(args.kb_ids, None);
+    }
+
+    #[test]
+    fn parse_search_args_rejects_invalid_kb_id() {
+        assert!(parse_search_args(r#"{"queries": ["a"], "kb_ids": ["not-a-uuid"]}"#).is_err());
+    }
+
+    #[test]
+    fn filter_kbs_without_ids_returns_all() {
+        let kbs = vec![make_kb(Uuid::new_v4(), "a"), make_kb(Uuid::new_v4(), "b")];
+        let filtered = filter_kbs(kbs, None).unwrap();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn filter_kbs_selects_known_ids() {
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let kbs = vec![make_kb(id1, "a"), make_kb(id2, "b")];
+        let filtered = filter_kbs(kbs, Some(HashSet::from([id2]))).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id.0, id2);
+    }
+
+    #[test]
+    fn filter_kbs_rejects_unknown_id() {
+        let kbs = vec![make_kb(Uuid::new_v4(), "a")];
+        let result = filter_kbs(kbs, Some(HashSet::from([Uuid::new_v4()])));
+        assert!(result.is_err());
     }
 
     #[test]
