@@ -39,6 +39,77 @@ rounds would drop the already-rendered rounds. Needs a design: re-stream the who
 scratch on resume, or a custom continuation that appends to the existing message
 (`resumeStream`/reconnect), plus detecting an incomplete scenario (`status != Completed`) on load.
 
+### Mark the final-answer round with a backend flag (`isFinalAnswer`)
+
+**Diagnosis (sources cutoff after streaming):**
+
+The sources list (`ChatMessageSources`) is gated by a `streaming` prop =
+`chat.status === 'streaming' && message.id === chat.messages.at(-1)?.id`
+(`[id].vue` → `MessageContent.vue`), so it only appears once the whole SSE
+stream ends (`status` flips to `'ready'` in `chat.ts`). At that moment:
+
+- The list is inserted (+~50–60px) at the bottom of the last message, but
+  `ChatMessages` auto-scroll only runs while `status === 'streaming'`
+  (`ChatMessages.vue:75–87, 180–183`) → the new sources land below the visible
+  fold and are never scrolled into view (chat "doesn't finish scrolling",
+  sources partially cut off at the bottom).
+- The status bar disappears (sticky bottom block shrinks, `spacing-offset`
+  `188 → 160`) while `--last-message-height` (computed once at submit-time by
+  `ChatMessages`) is not recomputed → stale sizing for short last messages.
+
+Root cause: "the stream is over" is the wrong signal. What's needed is "the
+final answer part has started".
+
+**Solution: mark the final-answer round from the backend.**
+
+The backend already knows the answer round: the last round of the scenario
+(`round_index == rounds.len() - 1`, the no-tools `answer` round in
+`simple`/`deep_research`). Show sources exactly when that round starts — still
+within `status === 'streaming'`, so auto-scroll keeps the growing content
+(incl. sources) in view; the manual scroll-on-`ready` workaround is not needed.
+
+Flag semantics: message-level metadata flag. It will usually land on the single
+last part of the final answer, but relying on "the flag is present on at least
+one part" is fine (frontend should not assume which part carries it).
+
+Backend:
+- `run_scenario` (`ai_service.rs`): at the start of the final round emit a new
+  `MessageStreamEvent` (e.g. `FinalAnswerStart`).
+- `domain_to_sse_chunks` (`stream.rs`): map it to the SSE `message-metadata`
+  chunk —
+  `{"type":"message-metadata","messageMetadata":{"scenarioId":"…","isFinalAnswer":true}}`.
+  The SDK merges it into `message.metadata` mid-stream (`process-ui-message-stream.ts:795`,
+  `mergeObjects`), preserving `scenarioId`; no `z.strictObject` breakage.
+- Persisted messages (`ui_messages.rs` `scenario_to_ui_messages`): set
+  `isFinalAnswer: true` in the assistant message metadata when the scenario is
+  `Completed` (last round is the answer round) so the flag survives reloads.
+
+Frontend:
+- `MessageContent.vue`: show `ChatMessageSources` when
+  `sources.length && message.metadata.isFinalAnswer`; drop the `streaming` prop
+  gate (and the earlier part-state `isStreaming` heuristic).
+- The flag generalizes the non-admin rendering (which today hides intermediate
+  tool/reasoning parts via `showDetails`/part types) into an explicit backend
+  signal; can later drive collapsing intermediate steps for all users.
+
+**Alternative: push sources in one shot on the final round instead of continuously.**
+
+Instead of streaming `source-url` chunks as they are found (which causes the
+list to grow and re-render mid-stream), collect sources during the search/extract
+rounds and emit them all at once at the start of the final answer round.
+
+Rationale:
+- The model can be asked, via a dedicated tool (e.g. `report_sources`), to list
+  the sources it actually used in the answer — not every source found. More
+  useful output, and the bug resolves itself: the list appears only when the
+  final answer round starts (still within `status === 'streaming'`, so
+  auto-scroll keeps it in view), without needing the `isFinalAnswer` flag.
+- Implementation sketch: add a `report_sources` tool to the answer round of
+  `simple`/`deep_research`; the backend buffers `round_sources` and on
+  `report_sources` (or at `LlmCallFinish` of the last round) emits the
+  `source-url` chunks in one batch. Persisted sources still come from
+  `scenario.rounds[..].sources` as today.
+
 ---
 
 ## Bugs
