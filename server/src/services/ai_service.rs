@@ -8,6 +8,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, instrument};
 
 use crate::config::OpenAiConfig;
+use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{Message, MessageId};
 use crate::domain::models::sampling::preset_by_name;
@@ -21,6 +22,7 @@ use crate::services::prompts::{KbContext, PromptRenderer, TemplateContext};
 use crate::services::scenario_service::ScenarioService;
 use crate::services::scenarios::{create_tools, scenario_by_name, simple};
 use crate::services::search_service::SearchService;
+use crate::services::user_service::UserService;
 
 pub enum StreamRequest {
     Submit {
@@ -44,6 +46,7 @@ pub struct AiService {
     scenario_service: ScenarioService,
     search_service: SearchService,
     knowledge_service: KnowledgeService,
+    user_service: UserService,
     search_limit: usize,
 }
 
@@ -54,6 +57,7 @@ impl AiService {
         scenario_service: ScenarioService,
         search_service: SearchService,
         knowledge_service: KnowledgeService,
+        user_service: UserService,
         search_limit: usize,
     ) -> Self {
         let openai_config = OpenAIConfig::new()
@@ -68,14 +72,16 @@ impl AiService {
             scenario_service,
             search_service,
             knowledge_service,
+            user_service,
             search_limit,
         }
     }
 
-    #[instrument(skip(self, request))]
+    #[instrument(skip(self, request, auth_user))]
     pub async fn stream(
         &self,
         chat_id: ChatId,
+        auth_user: AuthUser,
         request: StreamRequest,
     ) -> Result<
         (
@@ -85,11 +91,14 @@ impl AiService {
         ),
         AppError,
     > {
+        let user = self.user_service.get_user(auth_user.user_id).await?;
+        let user_name = user.name.clone().unwrap_or_else(|| user.username.clone());
+
         match request {
             StreamRequest::Submit {
                 user_message,
                 model,
-            } => Ok(self.stream_new(chat_id, &model, user_message)),
+            } => Ok(self.stream_new(chat_id, &model, user_message, user_name)),
             StreamRequest::Edit {
                 user_message,
                 scenario_id,
@@ -99,7 +108,8 @@ impl AiService {
                     .get_scenario(chat_id, scenario_id)
                     .await?
                     .ok_or_else(|| AppError::NotFound("Scenario not found".to_string()))?;
-                self.rerun_scenario(chat_id, scenario, user_message).await
+                self.rerun_scenario(chat_id, scenario, user_message, user_name)
+                    .await
             },
             StreamRequest::Regenerate { scenario_id } => {
                 let scenario = self
@@ -111,7 +121,8 @@ impl AiService {
                     .user_message()
                     .cloned()
                     .ok_or_else(|| AppError::NotFound("User message not found".to_string()))?;
-                self.rerun_scenario(chat_id, scenario, user_message).await
+                self.rerun_scenario(chat_id, scenario, user_message, user_name)
+                    .await
             },
             StreamRequest::Continue => {
                 let scenarios = self
@@ -125,7 +136,7 @@ impl AiService {
                     .ok_or_else(|| {
                         AppError::BadRequest("No incomplete scenario to continue".to_string())
                     })?;
-                Ok(self.stream_continue(chat_id, scenario))
+                Ok(self.stream_continue(chat_id, scenario, user_name))
             },
         }
     }
@@ -135,6 +146,7 @@ impl AiService {
         chat_id: ChatId,
         scenario: Scenario,
         user_message: Message,
+        user_name: String,
     ) -> Result<
         (
             ScenarioId,
@@ -148,15 +160,16 @@ impl AiService {
         self.scenario_service
             .delete_scenarios_after(chat_id, scenario.created_at)
             .await?;
-        Ok(self.stream_new(chat_id, &model, user_message))
+        Ok(self.stream_new(chat_id, &model, user_message, user_name))
     }
 
-    #[instrument(skip(self, user_message))]
+    #[instrument(skip(self, user_message, user_name))]
     pub fn stream_new(
         &self,
         chat_id: ChatId,
         model: &str,
         user_message: Message,
+        user_name: String,
     ) -> (
         ScenarioId,
         MessageId,
@@ -195,6 +208,7 @@ impl AiService {
                 &model,
                 scenario,
                 assistant_message_id,
+                user_name,
                 true,
                 tx,
             )
@@ -225,6 +239,7 @@ impl AiService {
         &self,
         chat_id: ChatId,
         scenario: Scenario,
+        user_name: String,
     ) -> (
         ScenarioId,
         MessageId,
@@ -260,6 +275,7 @@ impl AiService {
                 &model,
                 scenario,
                 assistant_message_id,
+                user_name,
                 false,
                 tx,
             )
@@ -292,6 +308,7 @@ async fn run_scenario(
     model: &str,
     mut scenario: Scenario,
     assistant_message_id: MessageId,
+    user_name: String,
     is_new: bool,
     tx: mpsc::Sender<MessageStreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -313,7 +330,7 @@ async fn run_scenario(
     let question = scenario.rounds[0].message.text();
     let ctx = TemplateContext {
         assistant_name: "Chiroo".into(),
-        user_name: String::new(),
+        user_name,
         current_date: Utc::now().format("%Y-%m-%d").to_string(),
         question,
         knowledge_bases,
@@ -322,6 +339,8 @@ async fn run_scenario(
     let global_prompt = prompt_renderer
         .render_global_system(&ctx)
         .map_err(|e| format!("Failed to render global system prompt: {e}"))?;
+
+    debug!(global_prompt, "rendered global prompt");
 
     // Finalize scenario identity.
     scenario.name = definition.name.to_string();

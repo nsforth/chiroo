@@ -193,7 +193,7 @@ pub async fn send_message(
     };
 
     let (scenario_id, assistant_message_id, domain_stream) =
-        state.ai_service.stream(chat_id, request).await?;
+        state.ai_service.stream(chat_id, auth_user, request).await?;
 
     let assistant_message_id = assistant_message_id.0.to_string();
     let scenario_id = scenario_id.0.to_string();

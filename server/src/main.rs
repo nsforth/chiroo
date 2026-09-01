@@ -133,12 +133,15 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         app_config.search.candidate_limit,
     );
 
+    let user_service = UserService::new(pool.clone());
+
     let ai_service = AiService::new(
         &app_config.openai,
         prompt_renderer,
         scenario_service.clone(),
         search_service.clone(),
         knowledge_service.clone(),
+        user_service.clone(),
         app_config.search.limit,
     );
 
@@ -148,7 +151,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         vote_service: VoteService::new(pool.clone()),
         ai_service,
         auth_service,
-        user_service: UserService::new(pool.clone()),
+        user_service,
         knowledge_service,
         search_service,
         qdrant_client,
