@@ -104,7 +104,11 @@ impl LlmClient {
         Self { client, model }
     }
 
-    #[instrument(level = "debug", skip(self, params))]
+    #[instrument(
+        level = "debug",
+        skip(self, params),
+        fields(history = params.history.len(), tools = params.tools.len())
+    )]
     pub fn execute_round(
         &self,
         chat_id: ChatId,

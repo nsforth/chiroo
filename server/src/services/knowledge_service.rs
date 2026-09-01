@@ -180,7 +180,7 @@ impl KnowledgeService {
         Ok(())
     }
 
-    #[instrument(skip(self, metadata, data))]
+    #[instrument(skip(self, metadata, data), fields(data_len = data.len()))]
     pub async fn create_document(
         &self,
         id: String,
@@ -303,7 +303,7 @@ impl KnowledgeService {
         }))
     }
 
-    #[instrument(skip(self, metadata, data))]
+    #[instrument(skip(self, metadata, data), fields(data_len = data.len()))]
     pub async fn update_document(
         &self,
         id: &DocumentId,

@@ -61,7 +61,7 @@ impl RerankClient {
         Ok(Self { client, url, model })
     }
 
-    #[instrument(level = "debug", skip(self, documents))]
+    #[instrument(level = "debug", skip(self, documents), fields(documents = documents.len()))]
     pub async fn rerank(
         &self,
         query: &str,
@@ -117,7 +117,7 @@ impl RerankClient {
         Ok(results)
     }
 
-    #[instrument(level = "debug", skip(self, documents))]
+    #[instrument(level = "debug", skip(self, documents), fields(documents = documents.len()))]
     pub async fn rerank_map<K>(
         &self,
         query: &str,

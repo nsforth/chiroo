@@ -10,7 +10,7 @@ use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::clients::rerank_client::RerankClient;
-use crate::utils::KnowledgeBaseLogView;
+use crate::utils::LogView;
 
 #[derive(Clone)]
 pub struct SearchService {

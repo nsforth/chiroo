@@ -49,7 +49,7 @@ impl EmbeddingClient {
             .ok_or_else(|| AppError::EmbeddingError("unexpected embeddings response".into()))
     }
 
-    #[instrument(level = "debug", skip(self, inputs))]
+    #[instrument(level = "debug", skip(self, inputs), fields(inputs = inputs.len()))]
     pub async fn embed_map<K>(
         &self,
         inputs: HashMap<K, String>,

@@ -108,7 +108,7 @@ impl QdrantClient {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self, chunks))]
+    #[instrument(level = "debug", skip(self, chunks), fields(chunks = chunks.len()))]
     pub async fn upsert_chunks(
         &self,
         kb_id: &KnowledgeBaseId,

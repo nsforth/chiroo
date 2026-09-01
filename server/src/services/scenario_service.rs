@@ -4,6 +4,7 @@ use crate::domain::models::scenario::{Round, Scenario, ScenarioId};
 use crate::errors::AppError;
 use crate::infra::repositories::scenario_repository;
 use crate::operation_result::OperationResult;
+use crate::utils::LogView;
 use chrono::NaiveDateTime;
 use deadpool_diesel::postgres::Pool;
 use tracing::{info, instrument};
@@ -80,7 +81,7 @@ impl ScenarioService {
         result
     }
 
-    #[instrument(skip(self, round))]
+    #[instrument(skip(self, round), fields(round = %round.log_view()))]
     pub async fn insert_round(
         &self,
         scenario_id: ScenarioId,

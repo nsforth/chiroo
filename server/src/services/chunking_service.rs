@@ -15,7 +15,7 @@ impl ChunkingService {
         Self { max_chunk_size }
     }
 
-    #[instrument(skip(self, text))]
+    #[instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn chunk_markdown(
         &self,
         kb_id: KnowledgeBaseId,
