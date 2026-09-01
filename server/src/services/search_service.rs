@@ -37,7 +37,9 @@ impl SearchService {
         }
     }
 
-    #[instrument(skip(self, query, kbs))]
+    #[instrument(skip(self, kbs), fields(
+        kbs = ?kbs.iter().map(|kb| (kb.id.0, kb.name.as_str())).collect::<Vec<_>>()
+    ))]
     pub async fn search_one(
         &self,
         query: &str,
@@ -54,7 +56,9 @@ impl SearchService {
         result
     }
 
-    #[instrument(skip(self, queries, kbs))]
+    #[instrument(skip(self, kbs), fields(
+        kbs = ?kbs.iter().map(|kb| (kb.id.0, kb.name.as_str())).collect::<Vec<_>>()
+    ))]
     pub async fn search_many(
         &self,
         queries: Vec<String>,
@@ -69,7 +73,9 @@ impl SearchService {
         result
     }
 
-    #[instrument(skip(self, queries, kbs))]
+    #[instrument(skip(self, kbs), fields(
+        kbs = ?kbs.iter().map(|kb| (kb.id.0, kb.name.as_str())).collect::<Vec<_>>()
+    ))]
     pub async fn search_grouped(
         &self,
         queries: Vec<String>,
