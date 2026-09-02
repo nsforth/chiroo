@@ -1,5 +1,6 @@
 {
   "errors": {
+    "failedToLoadBranding": "Failed to load application configuration",
     "failedToLoadChats": "Failed to load chats",
     "failedToCreateChat": "Failed to create chat",
     "failedToUpdateMessage": "Failed to update message",
@@ -105,10 +106,7 @@
     "chatTitlePlaceholder": "Chat title"
   },
   "userMenu": {
-    "theme": "Theme",
     "language": "Language",
-    "primary": "Primary",
-    "neutral": "Neutral",
     "appearance": "Appearance",
     "light": "Light",
     "dark": "Dark",

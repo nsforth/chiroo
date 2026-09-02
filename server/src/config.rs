@@ -1,10 +1,31 @@
-use std::{env, sync::Arc, time::Duration};
+use std::{env, path::PathBuf, sync::Arc, time::Duration};
 
 use dotenvy::dotenv;
 use secrecy::{SecretBox, SecretString};
 use tokio::sync::OnceCell;
 
 use crate::utils::crypto::KEY_LEN;
+
+fn is_hex_color(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix('#') else {
+        return false;
+    };
+    (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn validate_hex_color(value: &str, var: &str) {
+    assert!(
+        is_hex_color(value),
+        "{var} must be a hex color like #RRGGBB, got {value:?}"
+    );
+}
+
+fn validate_font_config(family: &Option<String>, path: &Option<PathBuf>, var_prefix: &str) {
+    assert!(
+        family.is_some() == path.is_some(),
+        "{var_prefix}_FAMILY and {var_prefix}_PATH must be set together"
+    );
+}
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -197,6 +218,30 @@ pub struct SearchConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct BrandingPalette {
+    pub primary: String,
+    pub neutral: String,
+    pub primary_dark: String,
+    pub neutral_dark: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrandingConfig {
+    pub name: String,
+    pub tagline: Option<String>,
+    pub assistant_name: String,
+    pub palette: Option<BrandingPalette>,
+    pub logo_path: PathBuf,
+    pub favicon_path: PathBuf,
+    pub assistant_icon_path: PathBuf,
+    pub scenario_icons_dir: Option<PathBuf>,
+    pub sans_font_family: Option<String>,
+    pub sans_font_path: Option<PathBuf>,
+    pub mono_font_family: Option<String>,
+    pub mono_font_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub internal_api: InternalApiConfig,
@@ -208,6 +253,7 @@ pub struct Config {
     pub rerank: RerankConfig,
     pub chunking: ChunkingConfig,
     pub search: SearchConfig,
+    pub branding: BrandingConfig,
 }
 
 impl Config {
@@ -376,6 +422,89 @@ async fn init_config() -> Config {
             .expect("SEARCH_CANDIDATE_LIMIT must be a positive integer"),
     };
 
+    let brand_name = env::var("BRAND_NAME").unwrap_or_else(|_| String::from("Chiroo"));
+    let brand_tagline = env::var("BRAND_TAGLINE").ok().filter(|t| !t.is_empty());
+
+    let brand_primary = env::var("BRAND_PRIMARY_COLOR")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let brand_neutral = env::var("BRAND_NEUTRAL_COLOR")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let brand_palette = match (brand_primary, brand_neutral) {
+        (None, None) => None,
+        (Some(primary), Some(neutral)) => {
+            validate_hex_color(&primary, "BRAND_PRIMARY_COLOR");
+            validate_hex_color(&neutral, "BRAND_NEUTRAL_COLOR");
+            let primary_dark = env::var("BRAND_PRIMARY_DARK_COLOR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| primary.clone());
+            validate_hex_color(&primary_dark, "BRAND_PRIMARY_DARK_COLOR");
+            let neutral_dark = env::var("BRAND_NEUTRAL_DARK_COLOR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| neutral.clone());
+            validate_hex_color(&neutral_dark, "BRAND_NEUTRAL_DARK_COLOR");
+            Some(BrandingPalette {
+                primary,
+                neutral,
+                primary_dark,
+                neutral_dark,
+            })
+        },
+        _ => {
+            panic!(
+                "BRAND_PRIMARY_COLOR and BRAND_NEUTRAL_COLOR must be set together \
+                 (both or neither)"
+            );
+        },
+    };
+
+    let sans_font_family = env::var("BRAND_SANS_FONT_FAMILY")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let sans_font_path = env::var("BRAND_SANS_FONT_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    validate_font_config(&sans_font_family, &sans_font_path, "BRAND_SANS_FONT");
+
+    let mono_font_family = env::var("BRAND_MONO_FONT_FAMILY")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let mono_font_path = env::var("BRAND_MONO_FONT_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    validate_font_config(&mono_font_family, &mono_font_path, "BRAND_MONO_FONT");
+
+    let scenario_icons_dir = env::var("BRAND_SCENARIO_ICONS_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+
+    let branding_config = BrandingConfig {
+        name: brand_name.clone(),
+        tagline: brand_tagline,
+        assistant_name: env::var("BRAND_ASSISTANT_NAME").unwrap_or(brand_name),
+        palette: brand_palette,
+        logo_path: env::var("BRAND_LOGO_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("assets/branding/logo.png")),
+        favicon_path: env::var("BRAND_FAVICON_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("assets/branding/favicon.png")),
+        assistant_icon_path: env::var("BRAND_ASSISTANT_ICON_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("assets/branding/assistant.png")),
+        scenario_icons_dir,
+        sans_font_family,
+        sans_font_path,
+        mono_font_family,
+        mono_font_path,
+    };
+
     Config {
         server: server_config,
         internal_api: internal_api_config,
@@ -387,6 +516,7 @@ async fn init_config() -> Config {
         qdrant: qdrant_config,
         chunking: chunking_config,
         search: search_config,
+        branding: branding_config,
     }
 }
 

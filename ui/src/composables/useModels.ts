@@ -9,6 +9,7 @@ interface ApiModel {
   icon: string
   label: string
   description: string
+  iconUrl: string | null
 }
 
 export const useModels = createSharedComposable(() => {
@@ -24,6 +25,7 @@ export const useModels = createSharedComposable(() => {
         label: m.label,
         value: m.id,
         icon: iconByName(m.icon),
+        iconUrl: m.iconUrl ?? undefined,
         description: m.description
       }))
     } catch {

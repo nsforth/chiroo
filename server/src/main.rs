@@ -143,6 +143,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         knowledge_service.clone(),
         user_service.clone(),
         app_config.search.limit,
+        app_config.branding.assistant_name.clone(),
     );
 
     AppState {

@@ -1,5 +1,6 @@
 {
   "errors": {
+    "failedToLoadBranding": "Не удалось загрузить конфигурацию приложения",
     "failedToLoadChats": "Не удалось загрузить чаты",
     "failedToCreateChat": "Не удалось создать чат",
     "failedToUpdateMessage": "Не удалось обновить сообщение",
@@ -105,10 +106,7 @@
     "chatTitlePlaceholder": "Название чата"
   },
   "userMenu": {
-    "theme": "Тема",
     "language": "Язык",
-    "primary": "Основной",
-    "neutral": "Нейтральный",
     "appearance": "Оформление",
     "light": "Светлая",
     "dark": "Тёмная",

@@ -574,6 +574,7 @@ dependencies = [
  "futures",
  "indicatif",
  "jsonwebtoken",
+ "mime_guess",
  "openidconnect",
  "qdrant-client",
  "rayon",

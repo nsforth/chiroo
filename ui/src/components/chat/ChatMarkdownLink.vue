@@ -2,14 +2,20 @@
 import { computed, inject } from 'vue'
 import type { Ref } from 'vue'
 import { getDomain, getFaviconUrl } from '../../utils/url'
+import { useBranding } from '../../composables/useBranding'
 
 const props = defineProps<{
   href?: string
 }>()
 
+const { branding } = useBranding()
+
 const isExternal = computed(() => /^https?:\/\//i.test(props.href || ''))
 const domain = computed(() => getDomain(props.href || ''))
 const favicon = computed(() => getFaviconUrl(props.href || ''))
+const internalClass = computed(() => branding.value?.colors
+  ? 'font-medium text-primary underline decoration-primary/50 underline-offset-2 hover:decoration-primary'
+  : '')
 
 const sourceIndex = inject<Ref<Map<string, number>> | undefined>('sourceIndex', undefined)
 const num = computed(() => sourceIndex?.value?.get(props.href || '') ?? null)
@@ -44,6 +50,7 @@ const num = computed(() => sourceIndex?.value?.get(props.href || '') ?? null)
   <a
     v-else
     :href="href"
+    :class="internalClass"
   >
     <slot />
   </a>

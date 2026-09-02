@@ -8,6 +8,9 @@ import { useChats } from '../composables/useChats'
 import { useCsrf } from '../composables/useCsrf'
 import { useUserSession } from '../composables/useUserSession'
 import Navbar from '../components/Navbar.vue'
+import { useBranding } from '../composables/useBranding'
+
+const { branding } = useBranding()
 
 const { fetchChats } = useChats()
 const { csrf, headerName } = useCsrf()
@@ -72,9 +75,17 @@ const quickChats = ref<{ label: string; icon: string }[]>([])
 
     <template #body>
       <UContainer class="flex-1 flex flex-col justify-center gap-4 sm:gap-6 py-8">
-        <h1 class="text-3xl sm:text-4xl text-highlighted font-bold">
-          {{ greeting }}
-        </h1>
+        <div class="flex items-center gap-4">
+          <img
+            v-if="branding?.assistantUrl"
+            :src="branding.assistantUrl"
+            :alt="branding.name"
+            class="size-15 shrink-0 rounded-2xl object-contain"
+          >
+          <h1 class="text-3xl sm:text-4xl text-highlighted font-bold">
+            {{ greeting }}
+          </h1>
+        </div>
 
         <UChatPrompt
           v-model="input"

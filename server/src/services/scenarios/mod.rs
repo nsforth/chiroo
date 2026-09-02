@@ -80,6 +80,7 @@ impl LocalizedText {
 pub struct ScenarioInfo {
     pub id: &'static str,
     pub icon: &'static str,
+    pub icon_file: Option<&'static str>,
     pub label: LocalizedText,
     pub description: LocalizedText,
 }
@@ -88,6 +89,7 @@ const SCENARIOS: &[ScenarioInfo] = &[
     ScenarioInfo {
         id: "simple",
         icon: "sparkles",
+        icon_file: None,
         label: LocalizedText {
             en: "Fast",
             ru: "Быстро",
@@ -100,6 +102,7 @@ const SCENARIOS: &[ScenarioInfo] = &[
     ScenarioInfo {
         id: "deep_research",
         icon: "compass",
+        icon_file: None,
         label: LocalizedText {
             en: "Deep",
             ru: "Глубоко",
