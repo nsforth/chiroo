@@ -109,27 +109,14 @@ The Vite dev server proxies `/api/*` requests to the backend automatically.
 | `SESSION_CLEANUP_INTERVAL_SECS` | | `600` | Expired session cleanup interval |
 | `SESSION_TTL_MULTIPLIER` | | `10` | Session TTL = access_token TTL × multiplier |
 | `OIDC_ACCESS_TOKEN_EXPIRES_SECS` | | `300` | Fallback access_token TTL if not in OIDC response |
-| `BRAND_NAME` | | `Chiroo` | Product name shown in the UI and browser title |
-| `BRAND_TAGLINE` | | — | Optional tagline shown under the product name and used in meta description |
-| `BRAND_ASSISTANT_NAME` | | `BRAND_NAME` | Assistant name used in the LLM system prompt |
-| `BRAND_PRIMARY_COLOR` | | — | Light-theme accent hex (`#RRGGBB`); must be paired with `BRAND_NEUTRAL_COLOR` |
-| `BRAND_NEUTRAL_COLOR` | | — | Light-theme neutral hex — the whole light UI chroma is built from it |
-| `BRAND_PRIMARY_DARK_COLOR` | | `BRAND_PRIMARY_COLOR` | Dark-theme accent hex |
-| `BRAND_NEUTRAL_DARK_COLOR` | | `BRAND_NEUTRAL_COLOR` | Dark-theme neutral hex (backgrounds/surfaces). If no color is configured, the default Nuxt UI `blue`/`zinc` theme is used |
-| `BRAND_LOGO_PATH` | | `assets/branding/logo.png` | Filesystem path to the product logo served by the backend |
-| `BRAND_FAVICON_PATH` | | `assets/branding/favicon.png` | Filesystem path to the favicon served by the backend |
-| `BRAND_ASSISTANT_ICON_PATH` | | `assets/branding/assistant.png` | Filesystem path to the assistant/mascot icon shown next to the greeting |
-| `BRAND_SCENARIO_ICONS_DIR` | | — | Directory with per-scenario icon files (opt-in; combined with `icon_file` on each scenario) |
-| `BRAND_SANS_FONT_FAMILY` | | — | CSS family name of the brand sans typeface (pair with `BRAND_SANS_FONT_PATH`) |
-| `BRAND_SANS_FONT_PATH` | | — | Filesystem path to a variable font file (`.ttf`/`.otf`/`.woff2`) served for the sans family |
-| `BRAND_MONO_FONT_FAMILY` | | — | CSS family name of the brand monospace typeface (pair with `BRAND_MONO_FONT_PATH`) |
-| `BRAND_MONO_FONT_PATH` | | — | Filesystem path to a variable font file (`.ttf`/`.otf`/`.woff2`) served for the monospace family |
+
+Product branding is configured through `BRAND_*` variables — see [BRANDING.md](BRANDING.md).
 
 ### Frontend (`ui/`)
 
 The frontend requires no environment variables. All API communication goes through the Vite proxy to the backend. The `.env.example` file is a legacy artifact and not needed for development.
 
-Product branding (name, tagline, logo, favicon, colors) is fetched from the backend (`GET /api/branding`) before the app is mounted; the frontend keeps no branding assets or defaults of its own.
+Product branding (name, label, tagline, colors, logos, fonts) is fetched from the backend (`GET /api/branding`) before the app is mounted; the frontend keeps no branding assets or defaults of its own.
 
 ## License
 

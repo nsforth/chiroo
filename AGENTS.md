@@ -153,12 +153,29 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - `chat.regenerate({ messageId })`: backend deletes the target scenario (+ later ones) and reruns `stream_new` with the stored user message (model taken from `scenario.name`, not from the frontend selector)
 - Voting is keyed by `message.metadata.scenarioId`, not by message id.
 
+### Frontend data schemas & validation
+
+Use **Zod** (`zod` v4, already a dependency) for all data schemas, API response
+validation, and tool input schemas — do not hand-roll type guards.
+
+- Define the schema next to its domain type and derive the type from it with
+  `z.infer`, so the type and the validator can never drift apart
+  (e.g. `ui/src/types/branding.ts` exports both `brandingSchema` and `type Branding`).
+- Parse untrusted data (API responses, SSE chunks) with `schema.parse(...)` or
+  `schema.safeParse(...)`. Tool inputs use `inputSchema: z.object({...})`
+  (see `ui/src/tools/*.ts`).
+- Backend optional fields serialize to JSON `null` — mark them `.nullish()`
+  (or `.nullable()`) rather than `.optional()`.
+
 ## Language
 
 - All documentation, code comments, commit messages, and communication must be in English.
 - `TODO.md` at the project root is the single source of truth for future work items.
   If the user asks to add a task for later, add it to `TODO.md`.
   When a task is completed, check `TODO.md` and remove the corresponding entry if present.
+- `BRANDING.md` documents product branding configuration. Whenever branding
+  behavior, `BRAND_*` env vars, or their defaults change, update `BRANDING.md`
+  (and keep the README pointer in sync).
 
 ## Service layer logging
 

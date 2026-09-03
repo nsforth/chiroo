@@ -1,0 +1,12 @@
+{
+  "scenarios": {
+    "simple": {
+      "label": "Fast",
+      "description": "Search answer with first found as a result"
+    },
+    "deep_research": {
+      "label": "Deep",
+      "description": "Iterative search for a thorough answer."
+    }
+  }
+}

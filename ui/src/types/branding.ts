@@ -1,24 +1,33 @@
-export interface FontDescriptor {
-  family: string
-  url: string
-  format: string | null
-}
+import { z } from 'zod'
 
-export interface BrandingPalette {
-  primary: string
-  neutral: string
-  primaryDark: string
-  neutralDark: string
-}
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/)
 
-export interface Branding {
-  name: string
-  tagline?: string
-  assistantName: string
-  colors: BrandingPalette | null
-  logoUrl: string
-  faviconUrl: string
-  assistantUrl: string
-  fontSans: FontDescriptor | null
-  fontMono: FontDescriptor | null
-}
+export const fontDescriptorSchema = z.object({
+  family: z.string(),
+  url: z.string(),
+  format: z.string().nullable(),
+})
+
+export const paletteSchema = z.object({
+  primary: hexColor,
+  neutral: hexColor,
+  primaryDark: hexColor,
+  neutralDark: hexColor,
+})
+
+export const brandingSchema = z.object({
+  name: z.string(),
+  label: z.string().nullable(),
+  tagline: z.string().nullable(),
+  assistantName: z.string(),
+  colors: paletteSchema.nullable(),
+  logoUrl: z.string(),
+  faviconUrl: z.string(),
+  assistantUrl: z.string(),
+  fontSans: fontDescriptorSchema.nullable(),
+  fontMono: fontDescriptorSchema.nullable(),
+})
+
+export type FontDescriptor = z.infer<typeof fontDescriptorSchema>
+export type BrandingPalette = z.infer<typeof paletteSchema>
+export type Branding = z.infer<typeof brandingSchema>

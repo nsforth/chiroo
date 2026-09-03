@@ -12,6 +12,7 @@ import App from './App.vue'
 import BootError from './components/BootError.vue'
 import { i18n } from './plugins/i18n'
 import { loadBranding } from './composables/useBranding'
+import { loadLocalizations } from './composables/useLocalizations'
 import type { Branding, BrandingPalette, FontDescriptor } from './types/branding'
 
 function setMeta(attribute: 'name' | 'property', key: string, content: string) {
@@ -198,7 +199,7 @@ function mountBootError() {
 
 async function boot() {
   try {
-    const branding = await loadBranding()
+    const [branding] = await Promise.all([loadBranding(), loadLocalizations()])
     applyBootBranding(branding)
   } catch {
     mountBootError()

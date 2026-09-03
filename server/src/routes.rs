@@ -4,6 +4,7 @@ use crate::handlers::chats::{
     create_chat, delete_chat, get_chat, get_chats, get_votes, send_message, update_title,
     update_visibility, vote,
 };
+use crate::handlers::localization::get_localizations;
 use crate::handlers::models::{get_scenario_icon, list_models};
 use crate::handlers::session::get_session;
 use crate::middleware::auth::auth_middleware;
@@ -47,6 +48,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/", get(root))
         .nest("/api/auth", auth_router)
         .nest("/api/branding", branding_router)
+        .route("/api/localizations", get(get_localizations))
         .merge(protected)
         .fallback(handler_404)
         .layer(TraceLayer::new_for_http())

@@ -1,8 +1,15 @@
-use std::{env, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use dotenvy::dotenv;
+use mime_guess::from_path;
 use secrecy::{SecretBox, SecretString};
 use tokio::sync::OnceCell;
+use tracing::warn;
 
 use crate::utils::crypto::KEY_LEN;
 
@@ -14,17 +21,62 @@ fn is_hex_color(value: &str) -> bool {
 }
 
 fn validate_hex_color(value: &str, var: &str) {
-    assert!(
-        is_hex_color(value),
-        "{var} must be a hex color like #RRGGBB, got {value:?}"
-    );
+    if !is_hex_color(value) {
+        panic!("{var} must be a hex color like #RRGGBB, got {value:?}");
+    }
 }
 
 fn validate_font_config(family: &Option<String>, path: &Option<PathBuf>, var_prefix: &str) {
-    assert!(
-        family.is_some() == path.is_some(),
-        "{var_prefix}_FAMILY and {var_prefix}_PATH must be set together"
-    );
+    if family.is_some() != path.is_some() {
+        panic!("{var_prefix}_FAMILY and {var_prefix}_PATH must be set together");
+    }
+}
+
+fn font_format(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()? {
+        "woff2" => Some("woff2"),
+        "woff" => Some("woff"),
+        "ttf" => Some("truetype"),
+        "otf" => Some("opentype"),
+        _ => None,
+    }
+}
+
+pub(crate) fn load_static_asset(path: &Path) -> Option<StaticAsset> {
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(e) => {
+            warn!(path = ?path, error = e.to_string(), status = "failed");
+            return None;
+        },
+    };
+    let version = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())?;
+    let content_type = from_path(path).first_or_octet_stream().to_string();
+    Some(StaticAsset {
+        data,
+        content_type,
+        version,
+    })
+}
+
+fn read_branding_font(family_var: &str, path_var: &str, prefix: &str) -> Option<BrandingFont> {
+    let family = env::var(family_var).ok().filter(|s| !s.is_empty());
+    let path = env::var(path_var)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    validate_font_config(&family, &path, prefix);
+    let (family, path) = (family?, path?);
+    let format = font_format(&path);
+    load_static_asset(&path).map(|asset| BrandingFont {
+        family,
+        format,
+        asset,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -225,20 +277,43 @@ pub struct BrandingPalette {
     pub neutral_dark: String,
 }
 
+#[derive(Clone)]
+pub struct StaticAsset {
+    pub data: Vec<u8>,
+    pub content_type: String,
+    pub version: u64,
+}
+
+impl std::fmt::Debug for StaticAsset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StaticAsset")
+            .field("content_type", &self.content_type)
+            .field("version", &self.version)
+            .field("data_len", &self.data.len())
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BrandingFont {
+    pub family: String,
+    pub format: Option<&'static str>,
+    pub asset: StaticAsset,
+}
+
 #[derive(Debug, Clone)]
 pub struct BrandingConfig {
     pub name: String,
+    pub label: Option<String>,
     pub tagline: Option<String>,
     pub assistant_name: String,
     pub palette: Option<BrandingPalette>,
-    pub logo_path: PathBuf,
-    pub favicon_path: PathBuf,
-    pub assistant_icon_path: PathBuf,
+    pub logo: Option<StaticAsset>,
+    pub favicon: Option<StaticAsset>,
+    pub assistant_icon: Option<StaticAsset>,
     pub scenario_icons_dir: Option<PathBuf>,
-    pub sans_font_family: Option<String>,
-    pub sans_font_path: Option<PathBuf>,
-    pub mono_font_family: Option<String>,
-    pub mono_font_path: Option<PathBuf>,
+    pub sans_font: Option<BrandingFont>,
+    pub mono_font: Option<BrandingFont>,
 }
 
 #[derive(Debug, Clone)]
@@ -422,7 +497,7 @@ async fn init_config() -> Config {
             .expect("SEARCH_CANDIDATE_LIMIT must be a positive integer"),
     };
 
-    let brand_name = env::var("BRAND_NAME").unwrap_or_else(|_| String::from("Chiroo"));
+    let brand_name = env::var("BRAND_NAME").unwrap_or_else(|_| String::from("ChiRoo"));
     let brand_tagline = env::var("BRAND_TAGLINE").ok().filter(|t| !t.is_empty());
 
     let brand_primary = env::var("BRAND_PRIMARY_COLOR")
@@ -461,48 +536,52 @@ async fn init_config() -> Config {
         },
     };
 
-    let sans_font_family = env::var("BRAND_SANS_FONT_FAMILY")
-        .ok()
-        .filter(|s| !s.is_empty());
-    let sans_font_path = env::var("BRAND_SANS_FONT_PATH")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-    validate_font_config(&sans_font_family, &sans_font_path, "BRAND_SANS_FONT");
-
-    let mono_font_family = env::var("BRAND_MONO_FONT_FAMILY")
-        .ok()
-        .filter(|s| !s.is_empty());
-    let mono_font_path = env::var("BRAND_MONO_FONT_PATH")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-    validate_font_config(&mono_font_family, &mono_font_path, "BRAND_MONO_FONT");
+    let sans_font = read_branding_font(
+        "BRAND_SANS_FONT_FAMILY",
+        "BRAND_SANS_FONT_PATH",
+        "BRAND_SANS_FONT",
+    );
+    let mono_font = read_branding_font(
+        "BRAND_MONO_FONT_FAMILY",
+        "BRAND_MONO_FONT_PATH",
+        "BRAND_MONO_FONT",
+    );
 
     let scenario_icons_dir = env::var("BRAND_SCENARIO_ICONS_DIR")
         .ok()
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
 
+    let assistant_name = env::var("BRAND_ASSISTANT_NAME").unwrap_or_else(|_| brand_name.clone());
+    let label = env::var("BRAND_LABEL").ok();
+    let logo_path = env::var("BRAND_LOGO_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("assets/branding/logo.png"));
+    let favicon_path = env::var("BRAND_FAVICON_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("assets/branding/favicon.png"));
+    let assistant_icon_path = env::var("BRAND_ASSISTANT_ICON_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("assets/branding/assistant.png"));
+
     let branding_config = BrandingConfig {
-        name: brand_name.clone(),
+        name: brand_name,
+        label,
         tagline: brand_tagline,
-        assistant_name: env::var("BRAND_ASSISTANT_NAME").unwrap_or(brand_name),
+        assistant_name,
         palette: brand_palette,
-        logo_path: env::var("BRAND_LOGO_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("assets/branding/logo.png")),
-        favicon_path: env::var("BRAND_FAVICON_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("assets/branding/favicon.png")),
-        assistant_icon_path: env::var("BRAND_ASSISTANT_ICON_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("assets/branding/assistant.png")),
+        logo: load_static_asset(&logo_path),
+        favicon: load_static_asset(&favicon_path),
+        assistant_icon: load_static_asset(&assistant_icon_path),
         scenario_icons_dir,
-        sans_font_family,
-        sans_font_path,
-        mono_font_family,
-        mono_font_path,
+        sans_font,
+        mono_font,
     };
 
     Config {

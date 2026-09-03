@@ -99,6 +99,12 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
     let scenario_service = ScenarioService::new(pool.clone());
 
     let prompt_renderer = PromptRenderer::new("prompts").expect("Failed to load prompt templates");
+    let localizations = chiroo_server::services::localization::load("assets/localizations")
+        .expect("Failed to load localization files");
+
+    let scenario_icons = chiroo_server::services::scenarios::load_scenario_icons(
+        app_config.branding.scenario_icons_dir.as_deref(),
+    );
 
     let qdrant_client = QdrantClient::new(
         app_config.qdrant.url(),
@@ -160,6 +166,8 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         rerank_client,
         chunking_service,
         config: app_config,
+        localizations,
+        scenario_icons,
     }
 }
 

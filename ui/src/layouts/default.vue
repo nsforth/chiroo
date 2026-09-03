@@ -109,7 +109,10 @@ defineShortcuts({
             class="h-7 w-auto shrink-0"
           >
           <span class="flex flex-col min-w-0 leading-tight">
-            <span class="text-xl font-bold text-highlighted truncate">{{ branding?.name }}</span>
+            <span
+              v-if="branding?.label != null"
+              class="text-xl font-bold text-highlighted truncate"
+            >{{ branding?.label }}</span>
             <span
               v-if="branding?.tagline"
               class="text-xs text-muted truncate"

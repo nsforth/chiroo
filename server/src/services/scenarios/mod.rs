@@ -1,6 +1,9 @@
 use async_openai::types::chat::{ChatCompletionToolChoiceOption, ReasoningEffort};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::path::Path;
 
+use crate::config::{load_static_asset, StaticAsset};
 use crate::domain::models::messages::{Message, MessageId};
 use crate::domain::models::sampling::SamplingParams;
 use crate::domain::models::tool::LLMTool;
@@ -62,27 +65,10 @@ pub use deep_research::deep_research;
 pub use simple::simple;
 
 #[derive(Clone, Copy)]
-pub struct LocalizedText {
-    pub en: &'static str,
-    pub ru: &'static str,
-}
-
-impl LocalizedText {
-    pub fn get(&self, lang: &str) -> &'static str {
-        match lang {
-            "ru" => self.ru,
-            _ => self.en,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
 pub struct ScenarioInfo {
     pub id: &'static str,
     pub icon: &'static str,
     pub icon_file: Option<&'static str>,
-    pub label: LocalizedText,
-    pub description: LocalizedText,
 }
 
 const SCENARIOS: &[ScenarioInfo] = &[
@@ -90,32 +76,30 @@ const SCENARIOS: &[ScenarioInfo] = &[
         id: "simple",
         icon: "sparkles",
         icon_file: None,
-        label: LocalizedText {
-            en: "Fast",
-            ru: "Быстро",
-        },
-        description: LocalizedText {
-            en: "Search answer with first found as a result",
-            ru: "Ищет ответ на вопрос и выдает первое найденное",
-        },
     },
     ScenarioInfo {
         id: "deep_research",
         icon: "compass",
         icon_file: None,
-        label: LocalizedText {
-            en: "Deep",
-            ru: "Глубоко",
-        },
-        description: LocalizedText {
-            en: "Iterative search for a thorough answer.",
-            ru: "Итеративный поиск для подробного ответа.",
-        },
     },
 ];
 
 pub fn list_scenarios() -> &'static [ScenarioInfo] {
     SCENARIOS
+}
+
+pub fn load_scenario_icons(dir: Option<&Path>) -> HashMap<String, StaticAsset> {
+    let Some(dir) = dir else {
+        return HashMap::new();
+    };
+
+    SCENARIOS
+        .iter()
+        .filter_map(|s| Some((s.id, s.icon_file?)))
+        .filter_map(|(id, file)| {
+            load_static_asset(&dir.join(file)).map(|asset| (id.to_string(), asset))
+        })
+        .collect()
 }
 
 pub fn scenario_by_name(name: &str) -> Option<ScenarioDefinition> {
@@ -331,20 +315,15 @@ mod tests {
     }
 
     #[test]
-    fn list_scenarios_localizes_labels() {
+    fn list_scenarios_returns_metadata() {
         let scenarios = list_scenarios();
         assert_eq!(scenarios.len(), 2);
         let simple = scenarios
             .iter()
             .find(|s| s.id == "simple")
             .expect("simple scenario must be listed");
-        assert_eq!(simple.label.get("en"), "Fast");
-        assert_eq!(simple.label.get("ru"), "Быстро");
-        assert_eq!(
-            simple.label.get("fr"),
-            "Fast",
-            "unknown lang falls back to en"
-        );
+        assert_eq!(simple.id, "simple");
+        assert_eq!(simple.icon, "sparkles");
     }
 
     #[test]
