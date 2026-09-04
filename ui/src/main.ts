@@ -126,8 +126,12 @@ ${ramps}
   --ui-border: var(--color-ink-100);
   --ui-border-muted: var(--color-ink-100);
   --ui-border-accented: var(--color-ink-200);
-  --ui-text: var(--color-ink-900);
+  --ui-text-dimmed: var(--color-ink-400);
+  --ui-text-muted: var(--color-ink-500);
+  --ui-text-toned: var(--color-ink-600);
+  --ui-text: var(--color-ink-700);
   --ui-text-highlighted: var(--color-ink-900);
+  --ui-text-inverted: #fff;
 }`
 
   const darkSurface = `.dark {
@@ -138,6 +142,12 @@ ${ramps}
   --ui-border: var(--color-surface-800);
   --ui-border-muted: var(--color-surface-700);
   --ui-border-accented: var(--color-surface-700);
+  --ui-text-dimmed: var(--color-surface-500);
+  --ui-text-muted: var(--color-surface-400);
+  --ui-text-toned: var(--color-surface-300);
+  --ui-text: var(--color-surface-100);
+  --ui-text-highlighted: var(--color-surface-50);
+  --ui-text-inverted: var(--color-surface-900);
 }`
 
   const backgrounds = [
