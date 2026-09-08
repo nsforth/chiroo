@@ -3,6 +3,7 @@ import { createHead } from '@unhead/vue/client'
 import { loadBranding } from './composables/useBranding'
 import { loadLocalizations } from './composables/useLocalizations'
 import type { Branding, BrandingPalette } from './types/branding'
+import { ramp } from './utils/color'
 
 export const bootFailed = ref(false)
 
@@ -52,37 +53,15 @@ function injectFonts(branding: Branding) {
   document.head.appendChild(style)
 }
 
-const RAMP_SHADES = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'] as const
-const LIGHT_WEIGHT: Record<string, number> = {
-  '50': 0.05, '100': 0.09, '200': 0.16, '300': 0.26, '400': 0.38, '500': 0.50,
-  '600': 0.62, '700': 0.76, '800': 0.90
-}
-const DARK_WEIGHT: Record<string, number> = {
-  '600': 0.92, '700': 0.85, '800': 0.75, '900': 0.62, '950': 0.50
-}
-
-function mixLight(seed: string, weight: number) {
-  return `color-mix(in oklab, ${seed} ${Math.round(weight * 100)}%, #fff)`
-}
-
-function mixDark(seed: string, weight: number) {
-  return `color-mix(in oklab, ${seed} ${Math.round(weight * 100)}%, #000)`
-}
-
 function rampLines(
   name: string,
   seed: string,
   seedShade: string,
   overrides: Record<string, string> = {}
 ) {
-  return RAMP_SHADES.map((shade) => {
-    if (overrides[shade]) return `  --color-${name}-${shade}: ${overrides[shade]};`
-    if (shade === seedShade) return `  --color-${name}-${shade}: ${seed};`
-    const value = Number(shade) < Number(seedShade)
-      ? mixLight(seed, LIGHT_WEIGHT[shade])
-      : mixDark(seed, DARK_WEIGHT[shade])
-    return `  --color-${name}-${shade}: ${value};`
-  }).join('\n')
+  return ramp(seed, seedShade, overrides)
+    .map(({ shade, hex }) => `  --color-${name}-${shade}: ${hex};`)
+    .join('\n')
 }
 
 function themeColorsCss(palette: BrandingPalette) {
