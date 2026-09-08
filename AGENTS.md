@@ -371,7 +371,16 @@ Two public entry points (both return `(ScenarioId, MessageId, Stream<MessageStre
 
 `run_scenario` (private):
 1. Resolves `ScenarioDefinition` by model name (`scenario_by_name`).
-2. Builds full dialog history via `scenario_service.get_history(chat_id)` (flattened: each scenario → `rounds[0]` then `rounds[1..]`). For a new turn this is loaded **before** `insert_scenario` (the current question lives in the round prompt templates, not in history); for continuation it's loaded **after** (already-run rounds must be visible).
+2. Loads all scenarios via `scenario_service.get_scenarios_for_chat(chat_id)` and builds
+   the LLM history with the private pure function `build_history(scenarios, current_scenario_id)`:
+   - the current scenario (continue only, passed as `Some(id)`) is included **in full** —
+     its hidden rounds carry the tool outputs that later rounds of the same scenario depend on;
+   - past scenarios contribute only their **visible** rounds (`hidden == false`), trimmed to
+     text parts (reasoning / sources / tool calls dropped), capped to the most recent
+     `PAST_HISTORY_LIMIT` (= 5, constant in `ai_service.rs`).
+   For a new turn the scenarios are loaded **before** `insert_scenario` (the current
+   question lives in the round prompt templates, not in history); for continuation
+   they are loaded **after** `update_scenario` (already-run rounds must be visible).
 3. Runs each round via `llm_client.execute_round`, collects the completed `Round { message, sources }`, saves it incrementally with `insert_round`.
 4. Sets `Completed` (or `Failed`) and does a final full `update_scenario`.
 

@@ -10,7 +10,7 @@ use tracing::{debug, instrument};
 use crate::config::OpenAiConfig;
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::{Message, MessageId};
+use crate::domain::models::messages::{Message, MessageId, MessagePart};
 use crate::domain::models::sampling::preset_by_name;
 use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatus};
 use crate::domain::models::source::Source;
@@ -23,6 +23,9 @@ use crate::services::scenario_service::ScenarioService;
 use crate::services::scenarios::{create_tools, scenario_by_name, simple};
 use crate::services::search_service::SearchService;
 use crate::services::user_service::UserService;
+
+/// How many most recent past scenarios (turns) are included in the LLM history.
+const PAST_HISTORY_LIMIT: usize = 5;
 
 pub enum StreamRequest {
     Submit {
@@ -354,30 +357,30 @@ async fn run_scenario(
     scenario.name = definition.name.to_string();
     scenario.status = ScenarioStatus::Running;
 
-    // Full dialog history. For a NEW scenario, get_history re-reads the DB and
-    // would include the just-inserted scenario, so load history BEFORE inserting
-    // to avoid double-counting the current user message. For a continue, load it
-    // AFTER update so the updated scenario (with its already-stored rounds) is
-    // reflected in the history.
+    // Dialog history. For a NEW scenario, load history BEFORE inserting so the
+    // just-inserted scenario is not double-counted (its question lives in the
+    // round prompts). For a continue, load it AFTER update so the current
+    // scenario's already-stored rounds are reflected in the history.
     let mut history: Vec<Message> = if is_new {
-        let history = scenario_service
-            .get_history(chat_id)
+        let scenarios = scenario_service
+            .get_scenarios_for_chat(chat_id)
             .await
             .map_err(|e| format!("Failed to load chat history: {e}"))?;
         scenario = scenario_service
             .insert_scenario(&scenario)
             .await
             .map_err(|e| format!("Failed to save scenario: {e}"))?;
-        history
+        build_history(scenarios, None)
     } else {
         scenario = scenario_service
             .update_scenario(&scenario)
             .await
             .map_err(|e| format!("Failed to update scenario: {e}"))?;
-        scenario_service
-            .get_history(chat_id)
+        let scenarios = scenario_service
+            .get_scenarios_for_chat(chat_id)
             .await
-            .map_err(|e| format!("Failed to load chat history: {e}"))?
+            .map_err(|e| format!("Failed to load chat history: {e}"))?;
+        build_history(scenarios, Some(scenario.id))
     };
 
     let next_round = scenario.rounds.len().saturating_sub(1); // assistant rounds already stored
@@ -474,4 +477,188 @@ async fn run_scenario(
     }
 
     Ok(())
+}
+
+/// Build the LLM history from chat scenarios. The current scenario (if given)
+/// is included in full — its hidden rounds carry the tool outputs that later
+/// rounds of the same scenario depend on. Past scenarios contribute only their
+/// visible rounds, trimmed to text parts, capped to the most recent
+/// `PAST_HISTORY_LIMIT`.
+fn build_history(
+    scenarios: Vec<Scenario>,
+    current_scenario_id: Option<ScenarioId>,
+) -> Vec<Message> {
+    let current = current_scenario_id.and_then(|id| scenarios.iter().find(|s| s.id == id));
+
+    let mut history = Vec::new();
+    let past: Vec<&Scenario> = scenarios
+        .iter()
+        .filter(|s| Some(s.id) != current_scenario_id)
+        .rev()
+        .take(PAST_HISTORY_LIMIT)
+        .collect();
+    for scenario in past.into_iter().rev() {
+        for round in &scenario.rounds {
+            if round.hidden {
+                continue;
+            }
+            history.push(text_only_message(&round.message));
+        }
+    }
+
+    if let Some(scenario) = current {
+        for round in &scenario.rounds {
+            history.push(round.message.clone());
+        }
+    }
+
+    history
+}
+
+/// A copy of the message keeping only its text parts (reasoning, sources and
+/// tool calls dropped).
+fn text_only_message(message: &Message) -> Message {
+    let parts = message
+        .parts
+        .iter()
+        .filter(|part| matches!(part, MessagePart::Text(_)))
+        .cloned()
+        .collect();
+    Message {
+        parts,
+        ..message.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::models::chat::ChatId;
+    use crate::domain::models::messages::{Role, TextBlock, ToolCallBlock, ToolCallState};
+    use serde_json::json;
+
+    fn chat_id() -> ChatId {
+        ChatId(uuid::Uuid::new_v4())
+    }
+
+    fn user_msg(text: &str) -> Message {
+        Message::user(chat_id(), text.to_string())
+    }
+
+    fn assistant_msg(text: &str) -> Message {
+        let mut msg = Message::new(chat_id(), Role::Assistant);
+        msg.parts.push(MessagePart::Text(TextBlock {
+            text: text.to_string(),
+        }));
+        msg
+    }
+
+    fn hidden_tool_round() -> Round {
+        let mut msg = Message::new(chat_id(), Role::Assistant);
+        msg.parts.push(MessagePart::ToolCall(ToolCallBlock {
+            tool_call_id: "call_1".to_string(),
+            tool_name: "search_knowledge_base".to_string(),
+            input: json!({ "query": "q" }),
+            output: Some(json!("found documents")),
+            error: None,
+            state: ToolCallState::Done,
+        }));
+        Round {
+            message: msg,
+            sources: Vec::new(),
+            hidden: true,
+        }
+    }
+
+    /// Scenario: user question, hidden tool round, visible answer.
+    fn scenario(question: &str, answer: &str) -> Scenario {
+        let mut scenario = Scenario::new(
+            chat_id(),
+            "simple".to_string(),
+            ScenarioStatus::Completed,
+            user_msg(question),
+        );
+        scenario.rounds.push(hidden_tool_round());
+        scenario.rounds.push(Round {
+            message: assistant_msg(answer),
+            sources: Vec::new(),
+            hidden: false,
+        });
+        scenario
+    }
+
+    fn texts(messages: &[Message]) -> Vec<String> {
+        messages.iter().map(|m| m.text()).collect()
+    }
+
+    #[test]
+    fn past_scenarios_keep_only_visible_rounds() {
+        let scenarios = vec![scenario("q1", "a1"), scenario("q2", "a2")];
+        let history = build_history(scenarios, None);
+        let expected: Vec<String> = ["q1", "a1", "q2", "a2"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(texts(&history), expected);
+    }
+
+    #[test]
+    fn non_text_parts_are_dropped_from_past_scenarios() {
+        let scenarios = vec![scenario("q1", "a1")];
+        let history = build_history(scenarios, None);
+        assert!(history
+            .iter()
+            .all(|m| m.parts.iter().all(|p| matches!(p, MessagePart::Text(_)))));
+    }
+
+    #[test]
+    fn current_scenario_is_kept_in_full() {
+        let current = scenario("q2", "a2");
+        let current_id = current.id;
+        let scenarios = vec![scenario("q1", "a1"), current];
+        let history = build_history(scenarios, Some(current_id));
+
+        let expected: Vec<String> = ["q1", "a1", "q2", "", "a2"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(texts(&history), expected);
+        let hidden_msg = &history[3];
+        assert!(hidden_msg
+            .parts
+            .iter()
+            .any(|p| matches!(p, MessagePart::ToolCall(_))));
+    }
+
+    #[test]
+    fn past_scenarios_are_capped_to_the_most_recent_limit() {
+        let scenarios: Vec<Scenario> = (0..7)
+            .map(|i| scenario(&format!("q{i}"), &format!("a{i}")))
+            .collect();
+        let history = build_history(scenarios, None);
+        let expected: Vec<String> = (2..7)
+            .flat_map(|i| [format!("q{i}"), format!("a{i}")])
+            .collect();
+        assert_eq!(texts(&history), expected);
+    }
+
+    #[test]
+    fn scenario_with_only_user_round_contributes_just_the_question() {
+        let bare = Scenario::new(
+            chat_id(),
+            "simple".to_string(),
+            ScenarioStatus::Running,
+            user_msg("q1"),
+        );
+        assert_eq!(bare.rounds.len(), 1);
+
+        let history = build_history(vec![bare], None);
+        let expected: Vec<String> = vec!["q1".to_string()];
+        assert_eq!(texts(&history), expected);
+    }
+
+    #[test]
+    fn empty_history() {
+        assert!(build_history(Vec::new(), None).is_empty());
+    }
 }

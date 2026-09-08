@@ -1,5 +1,4 @@
 use crate::domain::models::chat::ChatId;
-use crate::domain::models::messages::Message;
 use crate::domain::models::scenario::{Round, Scenario, ScenarioId};
 use crate::errors::AppError;
 use crate::infra::repositories::scenario_repository;
@@ -128,23 +127,6 @@ impl ScenarioService {
             .map_err(Into::into);
         match &result {
             Ok(count) => info!(deleted = count, status = result.status()),
-            Err(e) => info!(error = e.to_string(), status = result.status()),
-        }
-        result
-    }
-
-    /// Flatten all scenarios into LLM history: for each scenario (ordered),
-    /// push rounds[0].message then rounds[1..].message.
-    #[instrument(skip(self))]
-    pub async fn get_history(&self, chat_id: ChatId) -> Result<Vec<Message>, AppError> {
-        let result = self.get_scenarios_for_chat(chat_id).await.map(|scenarios| {
-            scenarios
-                .into_iter()
-                .flat_map(|scenario| scenario.rounds.into_iter().map(|round| round.message))
-                .collect::<Vec<_>>()
-        });
-        match &result {
-            Ok(history) => info!(messages = history.len(), status = result.status()),
             Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result

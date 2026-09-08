@@ -30,6 +30,12 @@ Needs:
 
 `MessageTrigger` — `trigger` field comes from Vercel AI SDK. Figure out what it is and how to handle it.
 
+### Finalize the previous scenario when a new message is sent
+
+Sending a new message while the previous scenario is still incomplete (`Running` /
+`Failed`) has no defined behavior. Needs a design: reject the new message, wait,
+or finalize/cancel the previous scenario before starting the new one.
+
 ### Seamless resume after a dropped stream
 
 The backend can continue an incomplete scenario (`stream_continue` resumes from `next_round`),
@@ -180,6 +186,14 @@ Only `deep_research/explore` (max_llm_calls: 10) can self-correct today.
 Planned fix (apply if real failures are observed):
 - include the list of valid KB ids in the tool error message
 - raise search-round `max_llm_calls` to 2
+
+### LLM history: push the scenario limit to the DB
+
+`build_history` (`ai_service.rs`) loads **all** scenarios of the chat via
+`get_scenarios_for_chat` and only then trims past scenarios to the most recent
+`PAST_HISTORY_LIMIT` in memory. For long conversations this reads the entire dialog
+(every round + JSON payload) to throw most of it away. Add a repository method that lets
+the DB select only the last N scenarios (with their rounds) and fetch just those.
 
 ### Markdown render: defensive fallback on parse failure
 
