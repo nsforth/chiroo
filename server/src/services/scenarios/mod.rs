@@ -23,6 +23,9 @@ pub struct RoundDefinition {
     pub tool_choice: Option<ChatCompletionToolChoiceOption>,
     pub enable_thinking: bool,
     pub preserve_thinking: bool,
+    /// Intermediate rounds are hidden from non-admin users; only the final
+    /// answer round is shown. Admins still see every round.
+    pub hidden: bool,
 }
 
 impl RoundDefinition {
@@ -46,6 +49,7 @@ impl RoundDefinition {
             extra_body: self.extra_body.clone(),
             tool_choice: self.tool_choice.clone(),
             preserve_thinking: self.enable_thinking && self.preserve_thinking,
+            hidden: self.hidden,
             message_id_override: (round_index == 0).then_some(assistant_message_id),
         }
     }
@@ -174,6 +178,7 @@ mod tests {
         assert!(r1.sampling.is_empty());
         assert!(!r1.enable_thinking);
         assert!(!r1.preserve_thinking);
+        assert!(r1.hidden);
         assert_eq!(
             r1.tool_choice,
             Some(
@@ -191,6 +196,7 @@ mod tests {
         assert_eq!(r2.prompt_template, "simple/extract.md");
         assert!(r2.tool_names.contains(&"extract_document".into()));
         assert_eq!(r2.max_llm_calls, 1);
+        assert!(r2.hidden);
         assert_eq!(
             r2.tool_choice,
             Some(
@@ -207,6 +213,7 @@ mod tests {
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "simple/answer.md");
         assert!(r3.tool_names.is_empty());
+        assert!(!r3.hidden);
         assert_eq!(
             r3.tool_choice,
             Some(
@@ -234,6 +241,7 @@ mod tests {
         assert_eq!(r1.max_llm_calls, 1);
         assert!(r1.enable_thinking);
         assert!(r1.preserve_thinking);
+        assert!(r1.hidden);
         assert_eq!(
             r1.tool_choice,
             Some(
@@ -254,6 +262,7 @@ mod tests {
         assert!(r2.tool_choice.is_some());
         assert!(r2.enable_thinking);
         assert!(r2.preserve_thinking);
+        assert!(r2.hidden);
     }
 
     #[test]
@@ -262,6 +271,7 @@ mod tests {
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "deep_research/answer.md");
         assert!(r3.tool_names.is_empty());
+        assert!(!r3.hidden);
         assert_eq!(
             r3.tool_choice,
             Some(

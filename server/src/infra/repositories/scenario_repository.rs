@@ -38,6 +38,7 @@ pub struct RoundDb {
     pub idx: i32,
     pub message: serde_json::Value,
     pub sources: serde_json::Value,
+    pub hidden: bool,
     pub created_at: NaiveDateTime,
 }
 
@@ -58,6 +59,7 @@ pub struct NewRoundDb {
     pub idx: i32,
     pub message: serde_json::Value,
     pub sources: serde_json::Value,
+    pub hidden: bool,
 }
 
 fn map_json_error(e: serde_json::Error) -> InfraError {
@@ -79,6 +81,7 @@ fn round_to_db(scenario_id: Uuid, idx: i32, round: &Round) -> Result<NewRoundDb,
         idx,
         message: serde_json::to_value(&round.message).map_err(map_json_error)?,
         sources: serde_json::to_value(&round.sources).map_err(map_json_error)?,
+        hidden: round.hidden,
     })
 }
 
@@ -97,6 +100,7 @@ fn scenario_from_db(scenario: ScenarioDb, rounds: Vec<RoundDb>) -> Result<Scenar
             Ok(Round {
                 message: parse_json::<Message>(round.message)?,
                 sources: parse_json::<Vec<Source>>(round.sources)?,
+                hidden: round.hidden,
             })
         })
         .collect::<Result<Vec<Round>, InfraError>>()?;

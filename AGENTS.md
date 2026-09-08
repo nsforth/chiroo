@@ -89,7 +89,7 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 | `source-url` | `sourceId`, `url`, `title?` |
 | `source-document` | `sourceId`, `mediaType`, `title` |
 | `file` | `url`, `mediaType` |
-| `data-*` | `id?`, `data` (e.g. `data-chat-title`) |
+| `data-*` | `id?`, `data` (e.g. `data-chat-title`, `data-round`) |
 | `error` | `errorText` |
 | `abort` | `reason?` |
 
@@ -101,6 +101,19 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - Simple text response: 1 step. Tool calls: 1 step per LLM iteration.
 - During `convertToModelMessages`, `step-start` parts split the flat `parts[]` into separate
   assistant ModelMessage blocks per step.
+
+## Rounds (data-round markers)
+
+- A scenario has multiple assistant rounds; they are merged into ONE assistant `UIMessage`.
+- Each round is marked with a `data-round` part `{ type: "data-round", data: { hidden: bool } }`
+  inserted before the round's parts (streamed as a `data-round` SSE chunk, persisted the same way).
+- `RoundDefinition.hidden` (default `false`) marks intermediate rounds hidden; the final answer
+  round is visible. Persisted per-round in `rounds.hidden`.
+- Frontend: `getRenderableParts(message, showHidden)` (utils/ai.ts) drops hidden rounds' parts for
+  non-admins (`showHidden` = `isAdmin`); admins see everything. Sources (`source-url`) are never
+  gated, so they stay visible to everyone.
+- Ordering invariant: `data-round` is emitted after the round's first `LlmCallStart`, so the `start`
+  chunk (message id) always precedes it — otherwise the SDK would push a duplicate message.
 
 ## Tools
 

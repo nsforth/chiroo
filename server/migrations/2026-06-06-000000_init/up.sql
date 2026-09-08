@@ -47,6 +47,7 @@ CREATE TABLE rounds (
     idx INT NOT NULL,
     message JSON NOT NULL,
     sources JSON NOT NULL DEFAULT '[]',
+    hidden BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

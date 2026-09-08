@@ -28,6 +28,7 @@ diesel::table! {
         idx -> Int4,
         message -> Json,
         sources -> Json,
+        hidden -> Bool,
         created_at -> Timestamptz,
     }
 }

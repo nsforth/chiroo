@@ -13,7 +13,7 @@ import ChatToolSearchKnowledgeBase from '../tool/SearchKnowledgeBase.vue'
 import ChatToolExtractDocument from '../tool/ExtractDocument.vue'
 import ChatMessageSources from './ChatMessageSources.vue'
 import ChatMessageEdit from './MessageEdit.vue'
-import { getMergedParts, getMessageSources } from '../../../utils/ai'
+import { getMessageSources, getRenderableParts } from '../../../utils/ai'
 import { formatToolInput, formatToolOutput, getSearchQuery, getSources, getSearchQueries, getSearchChunks, getExtractedDocument } from '../../../utils/tool'
 import type { WeatherUIToolInvocation } from '../../../tools/weather'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
@@ -53,7 +53,7 @@ const emit = defineEmits<{
 
 <template>
   <template
-    v-for="(part, index) in getMergedParts(message.parts)"
+    v-for="(part, index) in getRenderableParts(message, showDetails)"
     :key="`${message.id}-${part.type}-${index}`"
   >
     <UChatReasoning

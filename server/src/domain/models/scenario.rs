@@ -71,6 +71,7 @@ impl Scenario {
             rounds: vec![Round {
                 message: user_message,
                 sources: Vec::new(),
+                hidden: false,
             }],
             created_at: now,
             updated_at: now,
@@ -90,4 +91,6 @@ impl Scenario {
 pub struct Round {
     pub message: Message,
     pub sources: Vec<Source>,
+    /// Hidden rounds are not shown to non-admin users.
+    pub hidden: bool,
 }

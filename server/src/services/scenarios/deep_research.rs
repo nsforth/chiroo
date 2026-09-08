@@ -23,6 +23,7 @@ pub fn deep_research() -> ScenarioDefinition {
                 )),
                 enable_thinking: true,
                 preserve_thinking: true,
+                hidden: true,
             },
             RoundDefinition {
                 prompt_template: "deep_research/explore.md".into(),
@@ -36,6 +37,7 @@ pub fn deep_research() -> ScenarioDefinition {
                 )),
                 enable_thinking: true,
                 preserve_thinking: true,
+                hidden: true,
             },
             RoundDefinition {
                 prompt_template: "deep_research/answer.md".into(),
@@ -49,6 +51,7 @@ pub fn deep_research() -> ScenarioDefinition {
                 )),
                 enable_thinking: true,
                 preserve_thinking: true,
+                hidden: false,
             },
         ],
     }

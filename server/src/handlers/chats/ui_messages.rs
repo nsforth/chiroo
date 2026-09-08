@@ -36,6 +36,7 @@ pub enum UIMessagePart {
     File(FileUIPart),
     Tool(ToolUIPart),
     DataChatTitle(DataUIPart),
+    DataRound(DataUIPart),
     Other(Value),
 }
 
@@ -49,6 +50,7 @@ impl UIMessagePart {
             UIMessagePart::File(_) => "file",
             UIMessagePart::Tool(_) => "tool",
             UIMessagePart::DataChatTitle(_) => "data-chat-title",
+            UIMessagePart::DataRound(_) => "data-round",
             UIMessagePart::Other(_) => "unknown",
         }
     }
@@ -71,6 +73,7 @@ impl Serialize for UIMessagePart {
             UIMessagePart::DataChatTitle(p) => {
                 tagged_value("data-chat-title", p).serialize(serializer)
             },
+            UIMessagePart::DataRound(p) => tagged_value("data-round", p).serialize(serializer),
         }
     }
 }
@@ -250,6 +253,9 @@ pub fn scenario_to_ui_messages(scenario: &Scenario) -> Result<Vec<UIMessage>, Ap
 
     let mut parts: Vec<UIMessagePart> = Vec::new();
     for round in assistant_rounds {
+        parts.push(UIMessagePart::DataRound(DataUIPart {
+            data: serde_json::json!({ "hidden": round.hidden }),
+        }));
         parts.extend(convert_message_parts_to_ui(&round.message.parts));
     }
     parts.extend(source_parts(&scenario.rounds));
@@ -405,14 +411,17 @@ mod tests {
                 Round {
                     message: user.clone(),
                     sources: vec![],
+                    hidden: false,
                 },
                 Round {
                     message: first.clone(),
                     sources: vec![],
+                    hidden: true,
                 },
                 Round {
                     message: second.clone(),
                     sources: vec![],
+                    hidden: false,
                 },
             ],
             created_at: chrono::Utc::now().naive_utc(),
@@ -440,7 +449,17 @@ mod tests {
         );
         assert_eq!(metadata["name"].as_str().unwrap(), "simple");
 
-        // Assistant parts are the concatenation of both assistant rounds.
-        assert_eq!(messages[1].parts.len(), 2);
+        // Assistant parts are the concatenation of both assistant rounds, with a
+        // `data-round` marker before each round carrying its hidden flag.
+        assert_eq!(messages[1].parts.len(), 4);
+        let json = serde_json::to_value(&messages[1].parts).unwrap();
+        assert_eq!(json[0]["type"], "data-round");
+        assert_eq!(json[0]["data"]["hidden"], true);
+        assert_eq!(json[1]["type"], "text");
+        assert_eq!(json[1]["text"], "first");
+        assert_eq!(json[2]["type"], "data-round");
+        assert_eq!(json[2]["data"]["hidden"], false);
+        assert_eq!(json[3]["type"], "text");
+        assert_eq!(json[3]["text"], "second");
     }
 }

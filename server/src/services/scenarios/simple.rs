@@ -21,6 +21,7 @@ pub fn simple() -> ScenarioDefinition {
                 )),
                 enable_thinking: false,
                 preserve_thinking: false,
+                hidden: true,
             },
             RoundDefinition {
                 prompt_template: "simple/extract.md".into(),
@@ -34,6 +35,7 @@ pub fn simple() -> ScenarioDefinition {
                 )),
                 enable_thinking: false,
                 preserve_thinking: false,
+                hidden: true,
             },
             RoundDefinition {
                 prompt_template: "simple/answer.md".into(),
@@ -47,6 +49,7 @@ pub fn simple() -> ScenarioDefinition {
                 )),
                 enable_thinking: false,
                 preserve_thinking: false,
+                hidden: false,
             },
         ],
     }

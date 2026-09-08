@@ -96,6 +96,7 @@ pub struct RunRoundParams {
     pub extra_body: Option<Value>,
     pub tool_choice: Option<ChatCompletionToolChoiceOption>,
     pub preserve_thinking: bool,
+    pub hidden: bool,
     pub message_id_override: Option<MessageId>,
 }
 
@@ -530,6 +531,15 @@ async fn run_round(
 
     for step in 0..params.max_llm_calls {
         send_or_bail(&tx, MessageStreamEvent::LlmCallStart).await?;
+        if step == 0 {
+            send_or_bail(
+                &tx,
+                MessageStreamEvent::RoundMarker {
+                    hidden: params.hidden,
+                },
+            )
+            .await?;
+        }
 
         let tool_names: Vec<&str> = tool_defs
             .iter()
@@ -1238,6 +1248,7 @@ mod tests {
             ),
         ),
         preserve_thinking: true,
+        hidden: false,
         message_id_override: None,
     };
 

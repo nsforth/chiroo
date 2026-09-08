@@ -13,6 +13,7 @@ const props = defineProps<{
   streaming: boolean
   editing: boolean
   vote: boolean | null
+  showDetails: boolean
 }>()
 
 const formattedDate = computed(() => {
@@ -40,7 +41,7 @@ const clipboard = useClipboard()
 const copied = ref(false)
 
 function copy() {
-  clipboard.copy(getMessageText(props.message))
+  clipboard.copy(getMessageText(props.message, props.showDetails))
 
   copied.value = true
 

@@ -80,6 +80,12 @@ pub enum MessageStreamEvent {
         message: Message,
     },
 
+    /// Marks the start of a round; carries whether the round is hidden from
+    /// non-admin users. Emitted once per round, after the first LlmCallStart.
+    RoundMarker {
+        hidden: bool,
+    },
+
     Error {
         error_text: String,
     },

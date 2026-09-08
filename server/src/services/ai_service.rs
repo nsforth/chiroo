@@ -450,6 +450,7 @@ async fn run_scenario(
         let round = Round {
             message: msg.clone(),
             sources: round_sources,
+            hidden: round_def.hidden,
         };
         let idx = scenario.rounds.len() as i32;
         // Persist incrementally under an optimistic lock on updated_at; a concurrent

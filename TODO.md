@@ -39,6 +39,19 @@ rounds would drop the already-rendered rounds. Needs a design: re-stream the who
 scratch on resume, or a custom continuation that appends to the existing message
 (`resumeStream`/reconnect), plus detecting an incomplete scenario (`status != Completed`) on load.
 
+### Migrate the chat transport to WebSocket + pub/sub
+
+Long-running scenarios (e.g. `deep_research`) can run for minutes; losing the stream on a network
+blip wastes tokens. Current HTTP SSE transport can't resume mid-stream or push server-side events.
+
+Planned:
+- Backend: WebSocket endpoint (`axum::ws`) + a pub/sub layer (e.g. STOMP/broker) so the server can
+  deliver only the chunks a client hasn't received yet after a reconnect.
+- Frontend: custom `ChatTransport` (SDK supports pluggable transports via
+  `sendMessages(): Promise<ReadableStream<UIMessageChunk>>`) over WebSocket; enables several
+  concurrently active chats and server-initiated updates.
+- Supersedes / complements the "Seamless resume after a dropped stream" item above.
+
 ### Mark the final-answer round with a backend flag (`isFinalAnswer`)
 
 **Diagnosis (sources cutoff after streaming):**

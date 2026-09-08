@@ -245,6 +245,7 @@ onMounted(() => {
               :streaming="chat.status === 'streaming' && message.id === chat.messages[chat.messages.length - 1]?.id"
               :editing="editingMessageId === message.id"
               :vote="getVote(message)"
+              :show-details="isAdmin"
               @edit="startEdit"
               @regenerate="regenerateMessage"
               @vote="vote"

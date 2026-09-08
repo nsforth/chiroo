@@ -107,6 +107,9 @@ pub enum SseChunk {
         finish_reason: Option<String>,
     },
 
+    #[serde(rename = "data-round")]
+    DataRound { data: serde_json::Value },
+
     #[serde(rename = "error")]
     #[allow(non_snake_case)]
     ErrorChunk { errorText: String },
@@ -301,6 +304,9 @@ fn domain_to_sse_chunks(
                 .score
                 .map(|score| serde_json::json!({ "chiroo": { "score": score } })),
         }],
+        MessageStreamEvent::RoundMarker { hidden } => vec![SseChunk::DataRound {
+            data: serde_json::json!({ "hidden": hidden }),
+        }],
         MessageStreamEvent::LlmCallFinish {
             finish_reason,
             message: _,
@@ -316,5 +322,23 @@ fn domain_to_sse_chunks(
         MessageStreamEvent::Error { error_text } => vec![SseChunk::ErrorChunk {
             errorText: error_text.clone(),
         }],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_marker_serializes_as_data_round_chunk() {
+        let chunks = domain_to_sse_chunks(
+            &MessageStreamEvent::RoundMarker { hidden: true },
+            &mut false,
+            "assistant-id",
+            "scenario-id",
+        );
+        let json = serde_json::to_value(&chunks).unwrap();
+        assert_eq!(json[0]["type"], "data-round");
+        assert_eq!(json[0]["data"]["hidden"], true);
     }
 }
