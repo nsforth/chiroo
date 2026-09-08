@@ -1,11 +1,9 @@
 {
   "errors": {
+    "failedToLoad": "Не удалось загрузить приложение",
     "failedToLoadChats": "Не удалось загрузить чаты",
     "failedToCreateChat": "Не удалось создать чат",
-    "failedToUpdateMessage": "Не удалось обновить сообщение",
-    "failedToRegenerateMessage": "Не удалось перегенерировать сообщение",
     "failedToSaveVote": "Не удалось сохранить голос",
-    "failedToUpdateVisibility": "Не удалось изменить видимость",
     "failedToRenameChat": "Не удалось переименовать чат",
     "failedToDeleteChat": "Не удалось удалить чат",
     "authFailed": "Ошибка аутентификации"
@@ -20,8 +18,7 @@
     "copyLink": "Скопировать ссылку",
     "copied": "Скопировано!",
     "backToHome": "На главную",
-    "retry": "Повторить",
-    "loginWithGitHub": "Войти через GitHub"
+    "retry": "Повторить"
   },
   "greeting": {
     "morning": "Доброе утро",
@@ -90,7 +87,6 @@
     "hideContent": "Скрыть текст"
   },
   "placeholders": {
-    "modelSelectSearch": "Поиск...",
     "chatInputPrompt": "Спросите что-нибудь..."
   },
   "toast": {
@@ -105,19 +101,10 @@
     "chatTitlePlaceholder": "Название чата"
   },
   "userMenu": {
-    "theme": "Тема",
     "language": "Язык",
-    "primary": "Основной",
-    "neutral": "Нейтральный",
     "appearance": "Оформление",
     "light": "Светлая",
     "dark": "Тёмная",
-    "templates": "Шаблоны",
-    "starter": "Starter",
-    "dashboard": "Dashboard",
-    "chat": "Chat",
-    "documentation": "Документация",
-    "githubRepo": "GitHub репозиторий",
     "logout": "Выйти"
   }
 }

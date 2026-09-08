@@ -6,6 +6,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { useChats } from '../composables/useChats'
 import { useUserSession } from '../composables/useUserSession'
 import { useChatActions } from '../composables/useChatActions'
+import { useBranding } from '../composables/useBranding'
 
 const router = useRouter()
 const route = useRoute()
@@ -14,6 +15,7 @@ const { t } = useI18n()
 const { loggedIn, fetchSession } = useUserSession()
 const { groups, fetchChats } = useChats()
 const { renameChat, deleteChat } = useChatActions()
+const { branding } = useBranding()
 
 if (route.path !== '/auth/error') {
   await fetchSession()
@@ -99,14 +101,23 @@ defineShortcuts({
         <ULink
           v-if="!collapsed"
           to="/"
-          class="flex items-center gap-0.5"
+          class="flex items-center gap-2 min-w-0"
         >
           <img
-            src="/logo.png"
-            alt="Logo"
+            :src="branding?.logoUrl"
+            :alt="branding?.name"
             class="h-7 w-auto shrink-0"
           >
-          <span class="text-xl font-bold text-highlighted">Chiroo</span>
+          <span class="flex flex-col min-w-0 leading-tight">
+            <span
+              v-if="branding?.label != null"
+              class="text-xl font-bold text-highlighted truncate"
+            >{{ branding?.label }}</span>
+            <span
+              v-if="branding?.tagline"
+              class="text-xs text-muted truncate"
+            >{{ branding.tagline }}</span>
+          </span>
         </ULink>
 
         <UDashboardSidebarCollapse class="ms-auto" />

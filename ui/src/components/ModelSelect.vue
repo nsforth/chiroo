@@ -14,7 +14,13 @@ const value = computed({
 
 const selected = computed(() => models.value.find((m) => m.value === value.value))
 
-const items = computed(() => models.value.map(({ label, value, icon }) => ({ label, value, icon })))
+const items = computed(() => models.value.map((model) => ({
+  label: model.label,
+  value: model.value,
+  ...(model.iconUrl
+    ? { avatar: { src: model.iconUrl, alt: model.label } }
+    : { icon: model.icon })
+})))
 
 function descriptionOf(value: string): string | undefined {
   return models.value.find((m) => m.value === value)?.description
@@ -26,7 +32,6 @@ function descriptionOf(value: string): string | undefined {
     v-model="value"
     :items="items"
     size="sm"
-    :icon="selected?.icon"
     variant="ghost"
     value-key="value"
     :search-input="false"
@@ -35,6 +40,21 @@ function descriptionOf(value: string): string | undefined {
       trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200'
     }"
   >
+    <template #leading>
+      <img
+        v-if="selected?.iconUrl"
+        :src="selected.iconUrl"
+        :alt="selected.label"
+        class="size-4 rounded-sm object-contain"
+        loading="lazy"
+      >
+      <UIcon
+        v-else
+        :name="selected?.icon ?? 'i-lucide-bot'"
+        class="size-4 shrink-0"
+      />
+    </template>
+
     <template #default>
       <UTooltip :text="selected?.description">
         <span class="truncate">{{ selected?.label ?? modelValue }}</span>

@@ -1,10 +1,110 @@
-use std::{env, sync::Arc, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use dotenvy::dotenv;
+use mime_guess::from_path;
 use secrecy::{SecretBox, SecretString};
 use tokio::sync::OnceCell;
+use tracing::warn;
 
 use crate::utils::crypto::KEY_LEN;
+
+/// Branding asset files, shipped under `server/assets/branding/`. Paths are
+/// fixed: rebranding means replacing the files in place. Only the CSS family
+/// labels of the two fonts remain overridable via `BRAND_FONT_FAMILY` /
+/// `BRAND_MONO_FONT_FAMILY`.
+pub const SCENARIO_ICONS_DIR: &str = "assets/branding/scenarios";
+
+const FONT_FAMILY: &str = "Noto Sans";
+const FONT_PATH: &str = "assets/branding/font.ttf";
+const FONT_ITALIC_PATH: &str = "assets/branding/font-italic.ttf";
+const MONO_FONT_FAMILY: &str = "Source Code Pro";
+const MONO_FONT_PATH: &str = "assets/branding/font-mono.ttf";
+const LOGO_PATH: &str = "assets/branding/logo.png";
+const FAVICON_PATH: &str = "assets/branding/favicon.png";
+const ASSISTANT_ICON_PATH: &str = "assets/branding/assistant.png";
+
+fn is_hex_color(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix('#') else {
+        return false;
+    };
+    (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn validate_hex_color(value: &str, var: &str) {
+    if !is_hex_color(value) {
+        panic!("{var} must be a hex color like #RRGGBB, got {value:?}");
+    }
+}
+
+fn font_format(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()? {
+        "woff2" => Some("woff2"),
+        "woff" => Some("woff"),
+        "ttf" => Some("truetype"),
+        "otf" => Some("opentype"),
+        _ => None,
+    }
+}
+
+pub(crate) fn load_static_asset(path: &Path) -> Option<StaticAsset> {
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(e) => {
+            warn!(path = ?path, error = e.to_string(), status = "failed");
+            return None;
+        },
+    };
+    let version = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())?;
+    let content_type = from_path(path).first_or_octet_stream().to_string();
+    Some(StaticAsset {
+        data,
+        content_type,
+        version,
+    })
+}
+
+fn font_family(family_var: &str, default_family: &str) -> String {
+    env::var(family_var)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| default_family.to_string())
+}
+
+/// Loads a required brand font (main or mono) from its fixed bundled path. The
+/// file always ships with the repo, so a missing/unreadable font aborts startup.
+fn load_required_font(path: &str, family: &str) -> BrandingFont {
+    let path = PathBuf::from(path);
+    let format = font_format(&path);
+    let asset = load_static_asset(&path)
+        .unwrap_or_else(|| panic!("failed to load brand font from {}", path.display()));
+    BrandingFont {
+        family: family.to_string(),
+        format,
+        asset,
+    }
+}
+
+/// Loads the optional italic face for the main font, purely by file presence:
+/// if `assets/branding/font-italic.ttf` exists it is used, otherwise there is
+/// no italic (the browser synthesizes it). It shares the main font's family.
+fn load_optional_italic(main: &BrandingFont) -> Option<BrandingFont> {
+    let path = Path::new(FONT_ITALIC_PATH);
+    let format = font_format(path);
+    load_static_asset(path).map(|asset| BrandingFont {
+        family: main.family.clone(),
+        format,
+        asset,
+    })
+}
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -197,6 +297,53 @@ pub struct SearchConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct BrandingPalette {
+    pub primary: String,
+    pub neutral: String,
+    pub primary_dark: String,
+    pub neutral_dark: String,
+}
+
+#[derive(Clone)]
+pub struct StaticAsset {
+    pub data: Vec<u8>,
+    pub content_type: String,
+    pub version: u64,
+}
+
+impl std::fmt::Debug for StaticAsset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StaticAsset")
+            .field("content_type", &self.content_type)
+            .field("version", &self.version)
+            .field("data_len", &self.data.len())
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BrandingFont {
+    pub family: String,
+    pub format: Option<&'static str>,
+    pub asset: StaticAsset,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrandingConfig {
+    pub name: String,
+    pub label: Option<String>,
+    pub tagline: Option<String>,
+    pub assistant_name: String,
+    pub palette: Option<BrandingPalette>,
+    pub logo: Option<StaticAsset>,
+    pub favicon: Option<StaticAsset>,
+    pub assistant_icon: Option<StaticAsset>,
+    pub font: BrandingFont,
+    pub font_italic: Option<BrandingFont>,
+    pub font_mono: BrandingFont,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub internal_api: InternalApiConfig,
@@ -208,6 +355,7 @@ pub struct Config {
     pub rerank: RerankConfig,
     pub chunking: ChunkingConfig,
     pub search: SearchConfig,
+    pub branding: BrandingConfig,
 }
 
 impl Config {
@@ -376,6 +524,69 @@ async fn init_config() -> Config {
             .expect("SEARCH_CANDIDATE_LIMIT must be a positive integer"),
     };
 
+    let brand_name = env::var("BRAND_NAME").unwrap_or_else(|_| String::from("ChiRoo"));
+    let brand_tagline = env::var("BRAND_TAGLINE").ok().filter(|t| !t.is_empty());
+
+    let brand_primary = env::var("BRAND_PRIMARY_COLOR")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let brand_neutral = env::var("BRAND_NEUTRAL_COLOR")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let brand_palette = match (brand_primary, brand_neutral) {
+        (None, None) => None,
+        (Some(primary), Some(neutral)) => {
+            validate_hex_color(&primary, "BRAND_PRIMARY_COLOR");
+            validate_hex_color(&neutral, "BRAND_NEUTRAL_COLOR");
+            let primary_dark = env::var("BRAND_PRIMARY_DARK_COLOR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| primary.clone());
+            validate_hex_color(&primary_dark, "BRAND_PRIMARY_DARK_COLOR");
+            let neutral_dark = env::var("BRAND_NEUTRAL_DARK_COLOR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| neutral.clone());
+            validate_hex_color(&neutral_dark, "BRAND_NEUTRAL_DARK_COLOR");
+            Some(BrandingPalette {
+                primary,
+                neutral,
+                primary_dark,
+                neutral_dark,
+            })
+        },
+        _ => {
+            panic!(
+                "BRAND_PRIMARY_COLOR and BRAND_NEUTRAL_COLOR must be set together \
+                 (both or neither)"
+            );
+        },
+    };
+
+    let font = load_required_font(FONT_PATH, &font_family("BRAND_FONT_FAMILY", FONT_FAMILY));
+    let font_italic = load_optional_italic(&font);
+    let font_mono = load_required_font(
+        MONO_FONT_PATH,
+        &font_family("BRAND_MONO_FONT_FAMILY", MONO_FONT_FAMILY),
+    );
+
+    let assistant_name = env::var("BRAND_ASSISTANT_NAME").unwrap_or_else(|_| brand_name.clone());
+    let label = env::var("BRAND_LABEL").ok();
+
+    let branding_config = BrandingConfig {
+        name: brand_name,
+        label,
+        tagline: brand_tagline,
+        assistant_name,
+        palette: brand_palette,
+        logo: load_static_asset(Path::new(LOGO_PATH)),
+        favicon: load_static_asset(Path::new(FAVICON_PATH)),
+        assistant_icon: load_static_asset(Path::new(ASSISTANT_ICON_PATH)),
+        font,
+        font_italic,
+        font_mono,
+    };
+
     Config {
         server: server_config,
         internal_api: internal_api_config,
@@ -387,6 +598,7 @@ async fn init_config() -> Config {
         qdrant: qdrant_config,
         chunking: chunking_config,
         search: search_config,
+        branding: branding_config,
     }
 }
 

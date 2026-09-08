@@ -2,6 +2,7 @@ export interface ModelOption {
   label: string
   value: string
   icon: string
+  iconUrl?: string
   description?: string
 }
 

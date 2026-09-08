@@ -3,6 +3,7 @@ pub mod auth_service;
 pub mod chat_service;
 pub mod chunking_service;
 pub mod knowledge_service;
+pub mod localization;
 pub mod prompts;
 pub mod scenario_service;
 pub mod scenarios;

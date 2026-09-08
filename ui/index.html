@@ -3,17 +3,9 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#fafafa" />
-  <link rel="preconnect" href="https://fonts.bunny.net">
-  <link href="https://fonts.bunny.net/css?family=public-sans:400,500,600,700" rel="stylesheet" />
-  <title>ChiRoo</title>
-  <meta name="description" content="An open-source AI chatbot app.">
-  <meta property="og:title" content="Vue AI Chatbot Template">
-  <meta property="og:description" content="An open-source AI chatbot app.">
-  <meta property="og:image" content="https://ui.nuxt.com/assets/templates/vue/chat-light.png">
-  <meta name="twitter:card" content="summary_large_image">
+  <title>Loading...</title>
   <style>
     html {
       background-color: #fafafa
@@ -21,6 +13,37 @@
 
     html.dark {
       background-color: #09090b
+    }
+
+    #app {
+      min-height: 100vh
+    }
+
+    .boot-splash {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .boot-spinner {
+      width: 32px;
+      height: 32px;
+      border-radius: 9999px;
+      border: 3px solid #d4d4d8;
+      border-top-color: #18181b;
+      animation: boot-spin 0.8s linear infinite;
+    }
+
+    html.dark .boot-spinner {
+      border-color: #3f3f46;
+      border-top-color: #fafafa;
+    }
+
+    @keyframes boot-spin {
+      to {
+        transform: rotate(360deg);
+      }
     }
   </style>
   <script>
@@ -36,7 +59,11 @@
 </head>
 
 <body>
-  <div id="app" class="isolate"></div>
+  <div id="app" class="isolate">
+    <div class="boot-splash">
+      <div class="boot-spinner"></div>
+    </div>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 

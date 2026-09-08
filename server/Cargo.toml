@@ -43,6 +43,7 @@ dotenvy = "0.15"
 futures = "0.3"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 indicatif = "0.17"
+mime_guess = "2"
 openidconnect = "4"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 secrecy = "0.10"

@@ -29,6 +29,14 @@ const props = defineProps<{
 
 const sources = computed(() => getMessageSources(props.message))
 
+const hasTextPart = computed(() => props.message.parts.some((part) => isTextUIPart(part)))
+
+const showSources = computed(() =>
+  props.message.role === 'assistant'
+    && sources.value.length > 0
+    && (!props.streaming || hasTextPart.value)
+)
+
 const sourceIndex = computed(() => {
   const map = new Map<string, number>()
   sources.value.forEach((source, index) => map.set(source.url, index + 1))
@@ -127,7 +135,7 @@ const emit = defineEmits<{
     </template>
   </template>
 
-  <template v-if="message.role === 'assistant' && sources.length && !streaming">
+  <template v-if="showSources">
     <ChatMessageSources :sources="sources" />
   </template>
 </template>

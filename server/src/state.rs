@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, StaticAsset};
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::clients::rerank_client::RerankClient;
@@ -27,4 +27,6 @@ pub struct AppState {
     pub embedding_client: EmbeddingClient,
     pub rerank_client: RerankClient,
     pub chunking_service: ChunkingService,
+    pub localizations: std::collections::HashMap<String, serde_json::Value>,
+    pub scenario_icons: std::collections::HashMap<String, StaticAsset>,
 }

@@ -48,6 +48,7 @@ pub struct AiService {
     knowledge_service: KnowledgeService,
     user_service: UserService,
     search_limit: usize,
+    assistant_name: String,
 }
 
 impl AiService {
@@ -59,6 +60,7 @@ impl AiService {
         knowledge_service: KnowledgeService,
         user_service: UserService,
         search_limit: usize,
+        assistant_name: String,
     ) -> Self {
         let openai_config = OpenAIConfig::new()
             .with_api_base(config.base_url())
@@ -74,6 +76,7 @@ impl AiService {
             knowledge_service,
             user_service,
             search_limit,
+            assistant_name,
         }
     }
 
@@ -191,6 +194,7 @@ impl AiService {
         let search_service = self.search_service.clone();
         let knowledge_service = self.knowledge_service.clone();
         let search_limit = self.search_limit;
+        let assistant_name = self.assistant_name.clone();
         let model = model.to_string();
 
         let (tx, rx) = mpsc::channel(64);
@@ -204,6 +208,7 @@ impl AiService {
                 search_service,
                 knowledge_service,
                 search_limit,
+                assistant_name,
                 chat_id,
                 &model,
                 scenario,
@@ -258,6 +263,7 @@ impl AiService {
         let search_service = self.search_service.clone();
         let knowledge_service = self.knowledge_service.clone();
         let search_limit = self.search_limit;
+        let assistant_name = self.assistant_name.clone();
         let model = scenario.name.clone();
 
         let (tx, rx) = mpsc::channel(64);
@@ -271,6 +277,7 @@ impl AiService {
                 search_service,
                 knowledge_service,
                 search_limit,
+                assistant_name,
                 chat_id,
                 &model,
                 scenario,
@@ -304,6 +311,7 @@ async fn run_scenario(
     search_service: SearchService,
     knowledge_service: KnowledgeService,
     search_limit: usize,
+    assistant_name: String,
     chat_id: ChatId,
     model: &str,
     mut scenario: Scenario,
@@ -329,7 +337,7 @@ async fn run_scenario(
 
     let question = scenario.rounds[0].message.text();
     let ctx = TemplateContext {
-        assistant_name: "Chiroo".into(),
+        assistant_name,
         user_name,
         current_date: Utc::now().format("%Y-%m-%d").to_string(),
         question,

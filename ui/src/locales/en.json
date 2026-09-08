@@ -1,11 +1,9 @@
 {
   "errors": {
+    "failedToLoad": "Failed to load the application",
     "failedToLoadChats": "Failed to load chats",
     "failedToCreateChat": "Failed to create chat",
-    "failedToUpdateMessage": "Failed to update message",
-    "failedToRegenerateMessage": "Failed to regenerate message",
     "failedToSaveVote": "Failed to save vote",
-    "failedToUpdateVisibility": "Failed to update visibility",
     "failedToRenameChat": "Failed to rename chat",
     "failedToDeleteChat": "Failed to delete chat",
     "authFailed": "Authentication failed"
@@ -20,8 +18,7 @@
     "copyLink": "Copy link",
     "copied": "Copied!",
     "backToHome": "Back to home",
-    "retry": "Retry",
-    "loginWithGitHub": "Login with GitHub"
+    "retry": "Retry"
   },
   "greeting": {
     "morning": "Good morning",
@@ -90,7 +87,6 @@
     "hideContent": "Hide content"
   },
   "placeholders": {
-    "modelSelectSearch": "Search...",
     "chatInputPrompt": "Type your message here..."
   },
   "toast": {
@@ -105,19 +101,10 @@
     "chatTitlePlaceholder": "Chat title"
   },
   "userMenu": {
-    "theme": "Theme",
     "language": "Language",
-    "primary": "Primary",
-    "neutral": "Neutral",
     "appearance": "Appearance",
     "light": "Light",
     "dark": "Dark",
-    "templates": "Templates",
-    "starter": "Starter",
-    "dashboard": "Dashboard",
-    "chat": "Chat",
-    "documentation": "Documentation",
-    "githubRepo": "GitHub repository",
     "logout": "Log out"
   }
 }
