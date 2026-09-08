@@ -4,6 +4,7 @@ use tracing::{info, instrument};
 use crate::domain::models::document::Document;
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};
 use crate::domain::models::knowledge_base::KnowledgeBaseId;
+use crate::utils::with_document_title;
 
 #[derive(Clone)]
 pub struct ChunkingService {
@@ -22,8 +23,14 @@ impl ChunkingService {
         document: &Document,
         text: &str,
     ) -> Vec<DocumentChunk> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+
+        let text = with_document_title(&document.title, text);
+
         let splitter = MarkdownSplitter::new(self.max_chunk_size);
-        let chunks_raw: Vec<(usize, &str)> = splitter.chunk_indices(text).collect();
+        let chunks_raw: Vec<(usize, &str)> = splitter.chunk_indices(&text).collect();
         let chunk_total = chunks_raw.len();
         let document_total_length = text.chars().count();
 
@@ -107,12 +114,16 @@ mod tests {
 
         assert_eq!(chunks.len(), 1);
         let chunk = &chunks[0];
-        assert_eq!(chunk.content, text);
+        let expected = format!("# {}\n\n{text}", doc.title);
+        assert_eq!(chunk.content, expected);
         assert_eq!(chunk.chunk_index, 0);
         assert_eq!(chunk.chunk_total, 1);
         assert_eq!(chunk.chunk_offset, 0);
-        assert_eq!(chunk.chunk_length as usize, text.len());
-        assert_eq!(chunk.document_total_length as usize, text.len());
+        assert_eq!(chunk.chunk_length as usize, expected.chars().count());
+        assert_eq!(
+            chunk.document_total_length as usize,
+            expected.chars().count()
+        );
         assert_eq!(chunk.document_id, DocumentId("doc-1".to_string()));
         assert_eq!(chunk.kb_id, kb_id);
         assert_eq!(chunk.title, "Small Doc");
@@ -129,6 +140,7 @@ mod tests {
         let doc = make_document("doc-1", kb_id, "Multi", "https://example.com/multi");
 
         let text = "# Header\n\na longer paragraph that exceeds ten";
+        let expected = format!("# {}\n\n{text}", doc.title);
         let chunks = service.chunk_markdown(kb_id, &doc, text);
 
         assert!(chunks.len() > 1, "should produce multiple chunks");
@@ -149,8 +161,8 @@ mod tests {
             );
             assert_eq!(
                 chunk.document_total_length as usize,
-                text.len(),
-                "document_total_length must equal original text length"
+                expected.chars().count(),
+                "document_total_length must equal augmented text length"
             );
             assert_eq!(
                 chunk.document_id,
@@ -159,17 +171,21 @@ mod tests {
             );
         }
 
-        // First chunk starts at offset 0.
+        // First chunk starts at offset 0 and carries the title header.
         assert_eq!(chunks[0].chunk_offset, 0);
+        assert!(
+            chunks[0].content.starts_with(&format!("# {}", doc.title)),
+            "first chunk must carry the title header"
+        );
 
-        // Each chunk's byte_offset + byte_len must point into the original text.
+        // Each chunk's char offset + char length must point into the augmented text.
         for chunk in &chunks {
             let start = chunk.chunk_offset as usize;
             let end = start + chunk.chunk_length as usize;
             assert!(
-                end <= text.len(),
+                end <= expected.chars().count(),
                 "chunk [{start}..{end}] exceeds text length {}",
-                text.len()
+                expected.chars().count()
             );
         }
 
@@ -257,23 +273,24 @@ mod tests {
 
         // Cyrillic text where each char is 2 bytes.
         let text = "Привет мир\n\nКак дела?";
+        let expected = crate::utils::with_document_title(&doc.title, text).into_owned();
         let chunks = service.chunk_markdown(kb_id, &doc, text);
 
         assert!(!chunks.is_empty(), "unicode text must produce chunks");
-        let char_starts: Vec<usize> = text.char_indices().map(|(byte, _)| byte).collect();
+        let char_starts: Vec<usize> = expected.char_indices().map(|(byte, _)| byte).collect();
         for chunk in &chunks {
             let start = chunk.chunk_offset;
             let end = start + chunk.chunk_length;
             let start_byte = char_starts[start];
             let end_byte = if end >= char_starts.len() {
-                text.len()
+                expected.len()
             } else {
                 char_starts[end]
             };
-            let slice = &text[start_byte..end_byte];
+            let slice = &expected[start_byte..end_byte];
             assert_eq!(
                 slice, chunk.content,
-                "chunk content at char offset {start} must match original text slice"
+                "chunk content at char offset {start} must match augmented text slice"
             );
         }
     }

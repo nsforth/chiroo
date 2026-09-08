@@ -238,9 +238,10 @@ impl LLMTool for ExtractDocumentTool {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Document not found: {}", args.document_id))?;
 
-        let text = String::from_utf8(doc_data.data)
+        let raw = String::from_utf8(doc_data.data)
             .map_err(|e| format!("Document content is not valid UTF-8: {e}"))?;
 
+        let text = crate::utils::with_document_title(&doc.title, &raw);
         let extracted = extract_document_slice(&text, args.offset, args.size)?;
 
         let source = Source {
