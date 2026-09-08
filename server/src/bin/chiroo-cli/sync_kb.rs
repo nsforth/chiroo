@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use indicatif::MultiProgress;
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -11,7 +11,28 @@ use serde_json::Value;
 
 use crate::api::{build_doc_form, Api, DEFAULT_PAGE_LIMIT};
 use crate::models::{Doc, Paged, VersionListItem};
-use crate::util::{file_sha256_hex, file_stem, make_bar, map_concurrent};
+use crate::util::{
+    file_sha256_hex, file_stem, make_bar, run_phase, PhaseContext, PhaseItem, StopFlag,
+};
+
+#[derive(Args)]
+pub(crate) struct SyncOptions {
+    /// Disable progress bars; print actions to the console instead
+    #[arg(long)]
+    no_progress: bool,
+    /// With --no-progress, print each action line
+    #[arg(long)]
+    verbose: bool,
+    /// Do not delete server documents missing locally
+    #[arg(long)]
+    no_delete: bool,
+    /// Show the plan without making any changes
+    #[arg(long)]
+    dry_run: bool,
+    /// Maximum number of concurrent create/update operations
+    #[arg(long, default_value_t = 5)]
+    concurrency: usize,
+}
 
 #[derive(Subcommand)]
 pub(crate) enum SyncKbCommand {
@@ -22,21 +43,8 @@ pub(crate) enum SyncKbCommand {
         /// Target knowledge base id
         #[arg(long)]
         kb: String,
-        /// Disable progress bars; print actions to the console instead
-        #[arg(long)]
-        no_progress: bool,
-        /// With --no-progress, print each action line
-        #[arg(long)]
-        verbose: bool,
-        /// Do not delete server documents missing locally
-        #[arg(long)]
-        no_delete: bool,
-        /// Show the plan without making any changes
-        #[arg(long)]
-        dry_run: bool,
-        /// Maximum number of concurrent create/update operations
-        #[arg(long, default_value_t = 5)]
-        concurrency: usize,
+        #[clap(flatten)]
+        options: SyncOptions,
     },
 }
 
@@ -76,26 +84,8 @@ struct Plan<'a> {
 
 pub(crate) async fn run(api: &Api, command: SyncKbCommand) -> Result<()> {
     match command {
-        SyncKbCommand::Markdown {
-            dir,
-            kb,
-            no_progress,
-            verbose,
-            no_delete,
-            dry_run,
-            concurrency,
-        } => {
-            cmd_sync_kb_markdown(
-                api,
-                &dir,
-                &kb,
-                no_progress,
-                verbose,
-                no_delete,
-                dry_run,
-                concurrency,
-            )
-            .await
+        SyncKbCommand::Markdown { dir, kb, options } => {
+            cmd_sync_kb_markdown(api, &dir, &kb, options).await
         },
     }
 }
@@ -108,7 +98,7 @@ fn collect_md_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> 
         let path = entry.path();
         if path.is_dir() {
             collect_md_files_recursive(&path, out)?;
-        } else if path.extension().map_or(false, |ext| ext == "md") {
+        } else if path.extension().is_some_and(|ext| ext == "md") {
             out.push(path);
         }
     }
@@ -229,16 +219,13 @@ fn reconcile<'a>(
     let mut up_to_date = 0usize;
 
     for doc in local {
-        match server.get(&doc.id) {
-            Some(version) => {
-                seen.insert(doc.id.as_str());
-                if *version == doc.version {
-                    up_to_date += 1;
-                } else {
-                    to_update.push(doc);
-                }
-            },
-            None => {},
+        if let Some(version) = server.get(&doc.id) {
+            seen.insert(doc.id.as_str());
+            if *version == doc.version {
+                up_to_date += 1;
+            } else {
+                to_update.push(doc);
+            }
         }
     }
 
@@ -268,56 +255,45 @@ fn reconcile<'a>(
     }
 }
 
-async fn create_document(api: &Api, doc: &LocalDoc, kb_id: &str) -> Result<Doc> {
+async fn publish_document(api: &Api, doc: &LocalDoc, kb_id: Option<&str>) -> Result<Doc> {
     let data =
         fs::read(&doc.path).with_context(|| format!("failed to read {}", doc.path.display()))?;
     let form = build_doc_form(
         Some(&doc.id),
-        Some(kb_id),
+        kb_id,
         &doc.title,
         &doc.url,
         &doc.version,
         &doc.metadata,
         data,
     );
-    api.send_multipart(reqwest::Method::POST, "/internal/api/documents", form)
-        .await
+    match kb_id {
+        Some(_) => {
+            api.send_multipart(reqwest::Method::POST, "/internal/api/documents", form)
+                .await
+        },
+        None => {
+            api.send_multipart(
+                reqwest::Method::PUT,
+                &format!("/internal/api/documents/{}", doc.id),
+                form,
+            )
+            .await
+        },
+    }
 }
 
-async fn update_document(api: &Api, doc: &LocalDoc) -> Result<Doc> {
-    let data =
-        fs::read(&doc.path).with_context(|| format!("failed to read {}", doc.path.display()))?;
-    let form = build_doc_form(
-        Some(&doc.id),
-        None,
-        &doc.title,
-        &doc.url,
-        &doc.version,
-        &doc.metadata,
-        data,
-    );
-    api.send_multipart(
-        reqwest::Method::PUT,
-        &format!("/internal/api/documents/{}", doc.id),
-        form,
-    )
-    .await
+impl PhaseItem for &LocalDoc {
+    fn id(&self) -> &str {
+        self.id.as_str()
+    }
 }
 
-async fn cmd_sync_kb_markdown(
-    api: &Api,
-    dir: &Path,
-    kb: &str,
-    no_progress: bool,
-    verbose: bool,
-    no_delete: bool,
-    dry_run: bool,
-    concurrency: usize,
-) -> Result<()> {
-    if concurrency == 0 {
+async fn cmd_sync_kb_markdown(api: &Api, dir: &Path, kb: &str, opts: SyncOptions) -> Result<()> {
+    if opts.concurrency == 0 {
         bail!("--concurrency must be >= 1");
     }
-    let mp = if no_progress {
+    let mp = if opts.no_progress {
         None
     } else {
         Some(MultiProgress::new())
@@ -335,7 +311,7 @@ async fn cmd_sync_kb_markdown(
     }
 
     let server = fetch_versions_map(api, kb).await?;
-    let plan = reconcile(&scan.docs, &server, no_delete);
+    let plan = reconcile(&scan.docs, &server, opts.no_delete);
 
     println!(
         "Plan: {} to create, {} to update, {} to delete, {} up to date",
@@ -345,7 +321,7 @@ async fn cmd_sync_kb_markdown(
         plan.up_to_date
     );
 
-    if dry_run {
+    if opts.dry_run {
         for doc in &plan.to_create {
             println!("create {} (version {})", doc.id, doc.version);
         }
@@ -358,122 +334,63 @@ async fn cmd_sync_kb_markdown(
         return Ok(());
     }
 
-    let show_actions = no_progress && verbose;
+    let stop = StopFlag::arm();
 
-    let mut created = 0usize;
-    let mut updated = 0usize;
-    let mut deleted = 0usize;
+    let ctx = PhaseContext {
+        mp: &mp,
+        concurrency: opts.concurrency,
+        show_actions: opts.no_progress && opts.verbose,
+        stop: &stop,
+    };
 
-    if !plan.to_create.is_empty() {
-        let bar = mp
-            .as_ref()
-            .map(|m| make_bar(m, plan.to_create.len(), "creating"));
-        let outcomes = map_concurrent(plan.to_create, concurrency, |doc| {
-            let bar = bar.clone();
-            async move {
-                let result = create_document(api, doc, kb).await;
-                if let Some(bar) = &bar {
-                    bar.inc(1);
-                }
-                (doc.id.clone(), result)
-            }
-        })
-        .await;
-        if let Some(bar) = &bar {
-            bar.finish();
-        }
-        for (id, result) in outcomes {
-            match result {
-                Ok(_) => {
-                    created += 1;
-                    if show_actions {
-                        println!("created {id}");
-                    }
-                },
-                Err(e) => {
-                    failed += 1;
-                    eprintln!("error {id}: {e:#}");
-                },
-            }
-        }
-    }
+    let create_outcome = run_phase(
+        plan.to_create,
+        "creating",
+        "created",
+        &ctx,
+        |doc| async move {
+            publish_document(api, doc, Some(kb)).await?;
+            Ok(())
+        },
+    )
+    .await;
+    let update_outcome = run_phase(
+        plan.to_update,
+        "updating",
+        "updated",
+        &ctx,
+        |doc| async move {
+            publish_document(api, doc, None).await?;
+            Ok(())
+        },
+    )
+    .await;
+    let delete_outcome = run_phase(
+        plan.to_delete,
+        "deleting",
+        "deleted",
+        &ctx,
+        |id| async move { api.delete(&format!("/internal/api/documents/{id}")).await },
+    )
+    .await;
 
-    if !plan.to_update.is_empty() {
-        let bar = mp
-            .as_ref()
-            .map(|m| make_bar(m, plan.to_update.len(), "updating"));
-        let outcomes = map_concurrent(plan.to_update, concurrency, |doc| {
-            let bar = bar.clone();
-            async move {
-                let result = update_document(api, doc).await;
-                if let Some(bar) = &bar {
-                    bar.inc(1);
-                }
-                (doc.id.clone(), result)
-            }
-        })
-        .await;
-        if let Some(bar) = &bar {
-            bar.finish();
-        }
-        for (id, result) in outcomes {
-            match result {
-                Ok(_) => {
-                    updated += 1;
-                    if show_actions {
-                        println!("updated {id}");
-                    }
-                },
-                Err(e) => {
-                    failed += 1;
-                    eprintln!("error {id}: {e:#}");
-                },
-            }
-        }
-    }
-
-    if !plan.to_delete.is_empty() {
-        let bar = mp
-            .as_ref()
-            .map(|m| make_bar(m, plan.to_delete.len(), "deleting"));
-        let outcomes = map_concurrent(plan.to_delete, concurrency, |id| {
-            let bar = bar.clone();
-            async move {
-                let result = api.delete(&format!("/internal/api/documents/{id}")).await;
-                if let Some(bar) = &bar {
-                    bar.inc(1);
-                }
-                (id, result)
-            }
-        })
-        .await;
-        if let Some(bar) = &bar {
-            bar.finish();
-        }
-        for (id, result) in outcomes {
-            match result {
-                Ok(()) => {
-                    deleted += 1;
-                    if show_actions {
-                        println!("deleted {id}");
-                    }
-                },
-                Err(e) => {
-                    failed += 1;
-                    eprintln!("error {id}: {e:#}");
-                },
-            }
-        }
-    }
+    failed +=
+        create_outcome.failed.len() + update_outcome.failed.len() + delete_outcome.failed.len();
+    let skipped = create_outcome.skipped + update_outcome.skipped + delete_outcome.skipped;
 
     println!(
-        "Synced: {created} created, {updated} updated, {deleted} deleted, {up_to_date} up to date, {failed} failed",
-        created = created,
-        updated = updated,
-        deleted = deleted,
-        up_to_date = plan.up_to_date,
-        failed = failed,
+        "Synced: {} created, {} updated, {} deleted, {} up to date, {} failed, {} skipped",
+        create_outcome.done.len(),
+        update_outcome.done.len(),
+        delete_outcome.done.len(),
+        plan.up_to_date,
+        failed,
+        skipped
     );
+
+    if skipped > 0 {
+        bail!("sync interrupted: {skipped} operations skipped");
+    }
 
     if failed > 0 {
         bail!("sync finished with {failed} failures");

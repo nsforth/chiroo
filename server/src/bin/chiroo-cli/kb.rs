@@ -5,7 +5,9 @@ use indicatif::MultiProgress;
 use crate::api::{Api, DEFAULT_PAGE_LIMIT};
 use crate::models::{Doc, Kb, KbRequest, ReindexRequest, ReindexResponse};
 use crate::output::{print_json, print_kv, print_table};
-use crate::util::{make_bar, map_concurrent, parse_metadata, parse_reindex_mode};
+use crate::util::{
+    parse_metadata, parse_reindex_mode, run_phase, PhaseContext, PhaseItem, PhaseOutcome, StopFlag,
+};
 
 #[derive(Subcommand)]
 pub(crate) enum KbCommand {
@@ -67,6 +69,12 @@ pub(crate) enum KbCommand {
         #[arg(long, default_value_t = 5)]
         concurrency: usize,
     },
+}
+
+impl PhaseItem for Doc {
+    fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 pub(crate) async fn run(api: &Api, command: KbCommand) -> Result<()> {
@@ -246,61 +254,50 @@ async fn cmd_kb_reindex(
         return Ok(());
     }
 
-    let total = docs.len();
     let mp = if no_progress {
         None
     } else {
         Some(MultiProgress::new())
     };
-    let bar = mp.as_ref().map(|m| make_bar(m, total, "reindexing"));
 
-    let request = ReindexRequest {
-        mode: mode.to_string(),
+    let stop = StopFlag::arm();
+    let ctx = PhaseContext {
+        mp: &mp,
+        concurrency,
+        show_actions: false,
+        stop: &stop,
     };
-    let outcomes = map_concurrent(docs, concurrency, |doc| {
-        let bar = bar.clone();
-        let request = &request;
-        async move {
-            let result: Result<ReindexResponse> = api
-                .send_json(
-                    reqwest::Method::POST,
-                    &format!("/internal/api/documents/{}/reindex", doc.id),
-                    request,
-                )
-                .await;
-            if let Some(bar) = &bar {
-                bar.inc(1);
-            }
-            (doc.id, result)
-        }
-    })
-    .await;
 
-    if let Some(bar) = &bar {
-        bar.finish();
+    let outcome: PhaseOutcome<ReindexResponse> =
+        run_phase(docs, "reindexing", "reindexed", &ctx, |doc| async move {
+            let request = ReindexRequest {
+                mode: mode.to_string(),
+            };
+            api.send_json(
+                reqwest::Method::POST,
+                &format!("/internal/api/documents/{}/reindex", doc.id),
+                &request,
+            )
+            .await
+        })
+        .await;
+
+    let reindexed = outcome
+        .done
+        .iter()
+        .filter(|(_, response)| response.reindexed)
+        .count();
+    let up_to_date = outcome.done.len() - reindexed;
+    let failed = outcome.failed.len();
+    let skipped = outcome.skipped;
+
+    println!(
+        "Reindexed: {reindexed} reindexed, {up_to_date} up to date, {failed} failed, {skipped} skipped"
+    );
+
+    if skipped > 0 {
+        bail!("reindex interrupted: {skipped} operations skipped");
     }
-
-    let mut reindexed = 0usize;
-    let mut up_to_date = 0usize;
-    let mut failed = 0usize;
-
-    for (id, result) in outcomes {
-        match result {
-            Ok(response) => {
-                if response.reindexed {
-                    reindexed += 1;
-                } else {
-                    up_to_date += 1;
-                }
-            },
-            Err(e) => {
-                failed += 1;
-                eprintln!("error {id}: {e:#}");
-            },
-        }
-    }
-
-    println!("Reindexed: {reindexed} reindexed, {up_to_date} up to date, {failed} failed");
 
     if failed > 0 {
         bail!("reindex finished with {failed} failures");
