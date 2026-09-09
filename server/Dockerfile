@@ -10,7 +10,7 @@ RUN cargo build --release --bin chiroo-server --bin chiroo-cli
 
 FROM debian:bookworm-slim
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    libssl3 libgcc-s1 ca-certificates && rm -rf /var/lib/apt/lists/* \
+    libssl3 libpq5 libgcc-s1 ca-certificates && rm -rf /var/lib/apt/lists/* \
  && useradd -r -u 10001 chiroo
 WORKDIR /app
 COPY --from=build /app/target/release/chiroo-server /usr/local/bin/

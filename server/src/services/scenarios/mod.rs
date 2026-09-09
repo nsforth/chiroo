@@ -72,21 +72,20 @@ pub use simple::simple;
 pub struct ScenarioInfo {
     pub id: &'static str,
     pub icon: &'static str,
-    pub icon_file: Option<&'static str>,
 }
 
 const SCENARIOS: &[ScenarioInfo] = &[
     ScenarioInfo {
         id: "simple",
         icon: "sparkles",
-        icon_file: None,
     },
     ScenarioInfo {
         id: "deep_research",
         icon: "compass",
-        icon_file: None,
     },
 ];
+
+const ICON_EXTENSIONS: &[&str] = &["png", "svg", "webp", "jpg", "jpeg"];
 
 pub fn list_scenarios() -> &'static [ScenarioInfo] {
     SCENARIOS
@@ -99,9 +98,12 @@ pub fn load_scenario_icons(dir: Option<&Path>) -> HashMap<String, StaticAsset> {
 
     SCENARIOS
         .iter()
-        .filter_map(|s| Some((s.id, s.icon_file?)))
-        .filter_map(|(id, file)| {
-            load_static_asset(&dir.join(file)).map(|asset| (id.to_string(), asset))
+        .filter_map(|s| {
+            let path = ICON_EXTENSIONS
+                .iter()
+                .map(|ext| dir.join(format!("{}.{}", s.id, ext)))
+                .find(|path| path.try_exists().unwrap_or(false))?;
+            load_static_asset(&path).map(|asset| (s.id.to_string(), asset))
         })
         .collect()
 }
@@ -159,6 +161,71 @@ mod tests {
     use crate::infra::clients::qdrant_client::QdrantClient;
     use crate::infra::clients::rerank_client::RerankClient;
     use crate::services::chunking_service::ChunkingService;
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static ICONS_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn tempfile_icons_dir() -> std::path::PathBuf {
+        let id = ICONS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("chiroo-scenario-icons-{}-{id}", std::process::id()))
+    }
+
+    #[test]
+    fn load_scenario_icons_finds_icon_by_convention() {
+        let dir = tempfile_icons_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("simple.png"), b"png-bytes").unwrap();
+
+        let icons = load_scenario_icons(Some(&dir));
+
+        let asset = icons.get("simple").expect("icon must be loaded");
+        assert_eq!(asset.content_type, "image/png");
+        assert!(!icons.contains_key("deep_research"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_scenario_icons_prefers_extension_order() {
+        let dir = tempfile_icons_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("simple.svg"), b"svg-bytes").unwrap();
+        std::fs::write(dir.join("simple.png"), b"png-bytes").unwrap();
+
+        let icons = load_scenario_icons(Some(&dir));
+
+        assert_eq!(icons["simple"].content_type, "image/png");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_scenario_icons_ignores_unrelated_files() {
+        let dir = tempfile_icons_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("foo.png"), b"foo").unwrap();
+
+        let icons = load_scenario_icons(Some(&dir));
+
+        assert!(icons.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_scenario_icons_missing_dir_is_empty() {
+        let icons = load_scenario_icons(Some(std::path::Path::new(
+            "/nonexistent/chiroo-scenario-icons",
+        )));
+
+        assert!(icons.is_empty());
+    }
+
+    #[test]
+    fn load_scenario_icons_none_dir_is_empty() {
+        assert!(load_scenario_icons(None).is_empty());
+    }
 
     #[test]
     fn simple_scenario_has_three_rounds() {

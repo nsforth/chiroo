@@ -86,7 +86,9 @@ Supported formats for replaced files: `.ttf`, `.otf`, `.woff`, `.woff2`.
 
 ## Scenario icons
 
-Scenario icons are opt-in. Drop icon files into `server/assets/branding/scenarios/`
-and set `icon_file` (a file name within that directory) on the corresponding
-scenario in `server/src/services/scenarios/mod.rs`. Scenarios without an `icon_file`
-have no custom icon. The scenario list itself lives in code, not in configuration.
+Scenario icons are opt-in. Drop an icon file into `server/assets/branding/scenarios/`
+named after the scenario id: `<id>.<ext>` (e.g. `simple.png`, `deep_research.svg`).
+Supported extensions, in priority order when several match: `png`, `svg`, `webp`,
+`jpg`, `jpeg`. Icons are resolved once at server startup; a scenario without a
+matching file has no custom icon and falls back to its built-in icon. The scenario
+list itself lives in code, not in configuration.
