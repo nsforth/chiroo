@@ -95,7 +95,7 @@ pub async fn get_by_id(
             chats::table
                 .find(id.0)
                 .select(ChatDb::as_select())
-                .filter(owner.eq(user_id.0))
+                .filter(owner.eq(user_id.0).or(chats::public.eq(true)))
                 .get_result::<ChatDb>(conn)
                 .optional()
         })

@@ -23,7 +23,7 @@ impl ChatService {
         }
     }
 
-    /// Get all chats (public and owned by any user).
+    /// Get all chats owned by the user.
     #[instrument(skip(self))]
     pub async fn get_chats(&self, user_id: UserId) -> Result<Vec<Chat>, AppError> {
         let r = chat_repository::get_all(&self.pool, user_id).await;
