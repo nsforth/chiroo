@@ -364,10 +364,10 @@ Uses a labeled `'step: for _step in 0..max_steps` loop. The `continue 'step;` la
 
 ### Scenario orchestration
 
-Two public entry points (both return `(ScenarioId, MessageId, Stream<MessageStreamEvent>)`):
+Two public entry points (both return `(ScenarioId, MessageId, scenario_name, Stream<MessageStreamEvent>)`, where `scenario_name` is the resolved scenario/model id used for the `start` message metadata):
 
 - `stream_new(chat_id, model, user_message)` — new turn: build a `Scenario` (status `Running`, `rounds=[user]`), persist, run all assistant rounds.
-- `stream_continue(chat_id, model, scenario)` — resume an incomplete scenario from `next_round = scenario.rounds.len() - 1`.
+- `stream_continue(chat_id, scenario, user_name)` — resume an incomplete scenario from `next_round = scenario.rounds.len() - 1`.
 
 `run_scenario` (private):
 1. Resolves `ScenarioDefinition` by model name (`scenario_by_name`).

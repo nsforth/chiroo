@@ -195,7 +195,7 @@ pub async fn send_message(
         MessageTrigger::Continue => StreamRequest::Continue,
     };
 
-    let (scenario_id, assistant_message_id, domain_stream) =
+    let (scenario_id, assistant_message_id, scenario_name, domain_stream) =
         state.ai_service.stream(chat_id, auth_user, request).await?;
 
     let assistant_message_id = assistant_message_id.0.to_string();
@@ -203,8 +203,13 @@ pub async fn send_message(
     let mut started = false;
 
     let sse_stream = domain_stream.flat_map(move |event| {
-        let chunks =
-            domain_to_sse_chunks(&event, &mut started, &assistant_message_id, &scenario_id);
+        let chunks = domain_to_sse_chunks(
+            &event,
+            &mut started,
+            &assistant_message_id,
+            &scenario_id,
+            &scenario_name,
+        );
         stream::iter(chunks.into_iter().map(|chunk| {
             let json = serde_json::to_string(&chunk).unwrap_or_default();
             Ok(Event::default().data(json))
@@ -219,6 +224,7 @@ fn domain_to_sse_chunks(
     started: &mut bool,
     assistant_id: &str,
     scenario_id: &str,
+    scenario_name: &str,
 ) -> Vec<SseChunk> {
     match event {
         MessageStreamEvent::LlmCallStart => {
@@ -227,7 +233,9 @@ fn domain_to_sse_chunks(
                 vec![
                     SseChunk::Start {
                         message_id: Some(assistant_id.to_string()),
-                        message_metadata: Some(serde_json::json!({ "scenarioId": scenario_id })),
+                        message_metadata: Some(
+                            serde_json::json!({ "scenarioId": scenario_id, "name": scenario_name }),
+                        ),
                     },
                     SseChunk::StartStep,
                 ]

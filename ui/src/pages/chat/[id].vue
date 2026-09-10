@@ -236,14 +236,12 @@ onMounted(() => {
             />
           </template>
 
-          <template
-            v-if="isOwner"
-            #actions="{ message }"
-          >
+          <template #actions="{ message }">
             <ChatMessageActions
               :message="message"
               :streaming="chat.status === 'streaming' && message.id === chat.messages[chat.messages.length - 1]?.id"
               :editing="editingMessageId === message.id"
+              :readonly="!isOwner"
               :vote="getVote(message)"
               :show-details="isAdmin"
               @edit="startEdit"

@@ -93,6 +93,7 @@ impl AiService {
         (
             ScenarioId,
             MessageId,
+            String,
             Box<dyn futures::Stream<Item = MessageStreamEvent> + Send + Unpin>,
         ),
         AppError,
@@ -157,6 +158,7 @@ impl AiService {
         (
             ScenarioId,
             MessageId,
+            String,
             Box<dyn futures::Stream<Item = MessageStreamEvent> + Send + Unpin>,
         ),
         AppError,
@@ -179,6 +181,7 @@ impl AiService {
     ) -> (
         ScenarioId,
         MessageId,
+        String,
         Box<dyn futures::Stream<Item = MessageStreamEvent> + Send + Unpin>,
     ) {
         let definition = scenario_by_name(model).unwrap_or_else(simple);
@@ -190,6 +193,7 @@ impl AiService {
         );
         let scenario_id = scenario.id;
         let assistant_message_id = MessageId::new();
+        let scenario_name = scenario.name.clone();
 
         let llm_client = self.llm_client.clone();
         let prompt_renderer = self.prompt_renderer.clone();
@@ -233,6 +237,7 @@ impl AiService {
         (
             scenario_id,
             assistant_message_id,
+            scenario_name,
             Box::new(ReceiverStream::new(rx)),
         )
     }
@@ -251,6 +256,7 @@ impl AiService {
     ) -> (
         ScenarioId,
         MessageId,
+        String,
         Box<dyn futures::Stream<Item = MessageStreamEvent> + Send + Unpin>,
     ) {
         let scenario_id = scenario.id;
@@ -268,6 +274,7 @@ impl AiService {
         let search_limit = self.search_limit;
         let assistant_name = self.assistant_name.clone();
         let model = scenario.name.clone();
+        let scenario_name = model.clone();
 
         let (tx, rx) = mpsc::channel(64);
         let error_tx = tx.clone();
@@ -302,6 +309,7 @@ impl AiService {
         (
             scenario_id,
             assistant_message_id,
+            scenario_name,
             Box::new(ReceiverStream::new(rx)),
         )
     }
