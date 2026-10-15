@@ -1,32 +1,36 @@
 use std::{
-    env,
+    collections::HashMap,
+    fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, UNIX_EPOCH},
 };
 
+use appconfig::{Case, Environment, File, FileFormat};
 use dotenvy::dotenv;
 use mime_guess::from_path;
 use secrecy::{SecretBox, SecretString};
-use tokio::sync::OnceCell;
+use serde::Deserialize;
 use tracing::warn;
 
 use crate::utils::crypto::KEY_LEN;
 
 /// Branding asset files, shipped under `server/assets/branding/`. Paths are
 /// fixed: rebranding means replacing the files in place. Only the CSS family
-/// labels of the two fonts remain overridable via `BRAND_FONT_FAMILY` /
-/// `BRAND_MONO_FONT_FAMILY`.
+/// labels of the two fonts remain overridable via `CHIROO_BRANDING__FONT_FAMILY` /
+/// `CHIROO_BRANDING__MONO_FONT_FAMILY`.
 pub const SCENARIO_ICONS_DIR: &str = "assets/branding/scenarios";
 
-const FONT_FAMILY: &str = "Noto Sans";
 const FONT_PATH: &str = "assets/branding/font.ttf";
 const FONT_ITALIC_PATH: &str = "assets/branding/font-italic.ttf";
-const MONO_FONT_FAMILY: &str = "Source Code Pro";
 const MONO_FONT_PATH: &str = "assets/branding/font-mono.ttf";
 const LOGO_PATH: &str = "assets/branding/logo.png";
 const FAVICON_PATH: &str = "assets/branding/favicon.png";
 const ASSISTANT_ICON_PATH: &str = "assets/branding/assistant.png";
+
+/// Built-in default configuration, compiled into the binary. This is the
+/// lowest-precedence layer; see `server/config/default.yaml` for the source.
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config/default.yaml");
 
 fn is_hex_color(value: &str) -> bool {
     let Some(hex) = value.strip_prefix('#') else {
@@ -35,9 +39,11 @@ fn is_hex_color(value: &str) -> bool {
     (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn validate_hex_color(value: &str, var: &str) {
-    if !is_hex_color(value) {
-        panic!("{var} must be a hex color like #RRGGBB, got {value:?}");
+fn validate_hex_color(value: &str, var: &str) -> anyhow::Result<()> {
+    if is_hex_color(value) {
+        Ok(())
+    } else {
+        anyhow::bail!("{var} must be a hex color like #RRGGBB, got {value:?}")
     }
 }
 
@@ -52,14 +58,14 @@ fn font_format(path: &Path) -> Option<&'static str> {
 }
 
 pub(crate) fn load_static_asset(path: &Path) -> Option<StaticAsset> {
-    let data = match std::fs::read(path) {
+    let data = match fs::read(path) {
         Ok(data) => data,
         Err(e) => {
             warn!(path = ?path, error = e.to_string(), status = "failed");
             return None;
         },
     };
-    let version = std::fs::metadata(path)
+    let version = fs::metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
@@ -72,25 +78,18 @@ pub(crate) fn load_static_asset(path: &Path) -> Option<StaticAsset> {
     })
 }
 
-fn font_family(family_var: &str, default_family: &str) -> String {
-    env::var(family_var)
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| default_family.to_string())
-}
-
 /// Loads a required brand font (main or mono) from its fixed bundled path. The
 /// file always ships with the repo, so a missing/unreadable font aborts startup.
-fn load_required_font(path: &str, family: &str) -> BrandingFont {
+fn load_required_font(path: &str, family: &str) -> anyhow::Result<BrandingFont> {
     let path = PathBuf::from(path);
     let format = font_format(&path);
     let asset = load_static_asset(&path)
-        .unwrap_or_else(|| panic!("failed to load brand font from {}", path.display()));
-    BrandingFont {
+        .ok_or_else(|| anyhow::anyhow!("failed to load brand font from {}", path.display()))?;
+    Ok(BrandingFont {
         family: family.to_string(),
         format,
         asset,
-    }
+    })
 }
 
 /// Loads the optional italic face for the main font, purely by file presence:
@@ -106,32 +105,42 @@ fn load_optional_italic(main: &BrandingFont) -> Option<BrandingFont> {
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
     host: String,
     port: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct InternalApiConfig {
     host: String,
     port: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Deserialize)]
 pub struct DatabaseConfig {
     url: String,
+    #[serde(deserialize_with = "de_db_key")]
     encryption_key: Arc<SecretBox<[u8; KEY_LEN]>>,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("url", &"[REDACTED]")
+            .field("encryption_key", &self.encryption_key)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct OpenAiConfig {
     base_url: String,
     api_key: SecretString,
     model: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EmbeddingConfig {
     pub base_url: String,
     pub api_key: SecretString,
@@ -157,18 +166,18 @@ impl EmbeddingConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OidcConfig {
     issuer_url: String,
     client_id: SecretString,
     client_secret: SecretString,
-    redirect_uri: String,
     app_base_url: String,
-    secure_cookie: bool,
     state_secret: SecretString,
-    cleanup_interval_secs: Duration,
+    #[serde(with = "humantime_serde")]
+    cleanup_interval: Duration,
     session_ttl_multiplier: u32,
-    default_access_token_expires_secs: Duration,
+    #[serde(with = "humantime_serde")]
+    access_token_expires: Duration,
 }
 
 impl OidcConfig {
@@ -184,32 +193,35 @@ impl OidcConfig {
         &self.client_secret
     }
 
-    pub fn redirect_uri(&self) -> &str {
-        &self.redirect_uri
+    /// Derived from `app_base_url`; not a stored field.
+    pub fn redirect_uri(&self) -> String {
+        format!("{}/api/auth/oidc/callback", self.app_base_url)
     }
 
     pub fn app_base_url(&self) -> &str {
         &self.app_base_url
     }
 
+    /// Derived from `app_base_url`: secure for anything that is not plain HTTP.
     pub fn secure_cookie(&self) -> bool {
-        self.secure_cookie
+        !self.app_base_url.starts_with("http://")
     }
 
     pub fn state_secret(&self) -> &SecretBox<str> {
         &self.state_secret
     }
 
-    pub fn cleanup_interval_secs(&self) -> Duration {
-        self.cleanup_interval_secs
+    pub fn cleanup_interval(&self) -> Duration {
+        self.cleanup_interval
     }
 
     pub fn session_ttl_multiplier(&self) -> u32 {
         self.session_ttl_multiplier
     }
 
-    pub fn default_access_token_expires_secs(&self) -> Duration {
-        self.default_access_token_expires_secs
+    /// Fallback TTL used when the OIDC response carries no access-token expiry.
+    pub fn access_token_expires(&self) -> Duration {
+        self.access_token_expires
     }
 }
 
@@ -237,7 +249,7 @@ impl OpenAiConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RerankConfig {
     pub base_url: String,
     pub api_key: SecretString,
@@ -258,11 +270,13 @@ impl RerankConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct QdrantConfig {
     url: String,
+    #[serde(default)]
     api_key: Option<String>,
     collection_prefix: String,
+    #[serde(with = "humantime_serde")]
     timeout: Duration,
 }
 
@@ -272,7 +286,7 @@ impl QdrantConfig {
     }
 
     pub fn api_key(&self) -> Option<&str> {
-        self.api_key.as_deref()
+        self.api_key.as_deref().filter(|s| !s.is_empty())
     }
 
     pub fn collection_prefix(&self) -> &str {
@@ -284,12 +298,12 @@ impl QdrantConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ChunkingConfig {
     pub max_chunk_size: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchConfig {
     pub limit: usize,
     pub score_threshold: f32,
@@ -343,7 +357,8 @@ pub struct BrandingConfig {
     pub font_mono: BrandingFont,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub server: ServerConfig,
     pub internal_api: InternalApiConfig,
@@ -355,6 +370,7 @@ pub struct Config {
     pub rerank: RerankConfig,
     pub chunking: ChunkingConfig,
     pub search: SearchConfig,
+    #[serde(deserialize_with = "de_branding")]
     pub branding: BrandingConfig,
 }
 
@@ -388,220 +404,417 @@ impl Config {
     }
 }
 
-pub static CONFIG: OnceCell<Config> = OnceCell::const_new();
+/// Raw branding values as they appear in the merged config tree. `name`,
+/// `font_family` and `mono_font_family` are concrete because the embedded
+/// default YAML always provides them; the rest are genuinely optional.
+#[derive(Debug, Clone, Deserialize)]
+struct RawBranding {
+    name: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    tagline: Option<String>,
+    #[serde(default)]
+    assistant_name: Option<String>,
+    font_family: String,
+    mono_font_family: String,
+    #[serde(default)]
+    palette: Option<RawPalette>,
+}
 
-async fn init_config() -> Config {
-    dotenv().ok();
-    let server_config = ServerConfig {
-        host: env::var("HOST").unwrap_or_else(|_| String::from("127.0.0.1")),
-        port: env::var("PORT")
-            .unwrap_or_else(|_| String::from("3000"))
-            .parse::<u16>()
-            .expect("PORT is not and integer"),
-    };
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RawPalette {
+    primary: Option<String>,
+    neutral: Option<String>,
+    primary_dark: Option<String>,
+    neutral_dark: Option<String>,
+}
 
-    let internal_api_config = InternalApiConfig {
-        host: env::var("INTERNAL_API_HOST").unwrap_or_else(|_| String::from("127.0.0.1")),
-        port: env::var("INTERNAL_API_PORT")
-            .unwrap_or_else(|_| String::from("3001"))
-            .parse::<u16>()
-            .expect("INTERNAL_API_PORT is not an integer"),
-    };
+/// Deserializes the database encryption key and rejects any length other than
+/// exactly `KEY_LEN` bytes.
+fn de_db_key<'de, D>(deserializer: D) -> Result<Arc<SecretBox<[u8; KEY_LEN]>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
 
-    let raw_key = env::var("DATABASE_ENCRYPTION_KEY").expect("DATABASE_ENCRYPTION_KEY must be set");
-    let key_bytes: [u8; KEY_LEN] = raw_key
-        .as_bytes()
-        .try_into()
-        .unwrap_or_else(|_| panic!("DATABASE_ENCRYPTION_KEY must be exactly {KEY_LEN} bytes"));
-    let database_config = DatabaseConfig {
-        url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
-        encryption_key: Arc::new(SecretBox::new(Box::new(key_bytes))),
-    };
+    let key = String::deserialize(deserializer)?;
+    let bytes: [u8; KEY_LEN] = key.as_bytes().try_into().map_err(|_| {
+        D::Error::custom(format!("db.encryption_key must be exactly {KEY_LEN} bytes"))
+    })?;
+    Ok(Arc::new(SecretBox::new(Box::new(bytes))))
+}
 
-    let openai_base_url = env::var("OPENAI_BASE_URL").expect("OPENAI_BASE_URL must be set");
-    let openai_api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+/// Deserializes branding values and runs the branding-specific resolution
+/// (asset loading, palette validation) that plain serde cannot express.
+fn de_branding<'de, D>(deserializer: D) -> Result<BrandingConfig, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
 
-    let openai_config = OpenAiConfig {
-        base_url: openai_base_url.clone(),
-        api_key: SecretString::new(openai_api_key.clone().into_boxed_str()),
-        model: env::var("OPENAI_MODEL").expect("OPENAI_MODEL must be set"),
-    };
+    let raw = RawBranding::deserialize(deserializer)?;
+    BrandingConfig::try_from(raw).map_err(|e| D::Error::custom(e.to_string()))
+}
 
-    let embedding_config = EmbeddingConfig {
-        base_url: env::var("EMBEDDING_BASE_URL").unwrap_or(openai_base_url.clone()),
-        api_key: SecretString::new(
-            env::var("EMBEDDING_API_KEY")
-                .unwrap_or(openai_api_key.clone())
-                .into_boxed_str(),
-        ),
-        model: env::var("EMBEDDING_MODEL").expect("EMBEDDING_MODEL must be set"),
-        dimensions: env::var("EMBEDDING_DIMENSIONS")
-            .expect("EMBEDDING_DIMENSIONS must be set")
-            .parse()
-            .expect("EMBEDDING_DIMENSIONS must be a positive integer"),
-    };
+/// Builds the merged configuration from the three layers (default YAML,
+/// optional file, environment) and deserializes it directly into the runtime
+/// [`Config`].
+///
+/// `env_override` is `Some(map)` only in tests; in production it is `None` and
+/// the real process environment is used.
+fn build_with_env(
+    config_path: Option<&Path>,
+    env_override: Option<HashMap<String, String>>,
+) -> Config {
+    let mut builder = appconfig::Config::builder()
+        .add_source(File::from_str(DEFAULT_CONFIG_YAML, FileFormat::Yaml));
 
-    let rerank_config = RerankConfig {
-        base_url: env::var("RERANK_BASE_URL").unwrap_or(openai_base_url),
-        api_key: SecretString::new(
-            env::var("RERANK_API_KEY")
-                .unwrap_or(openai_api_key)
-                .into_boxed_str(),
-        ),
-        model: env::var("RERANK_MODEL").expect("RERANK_MODEL must be set"),
-    };
+    if let Some(path) = config_path {
+        builder = builder.add_source(File::with_name(&path.to_string_lossy()));
+    }
 
-    let app_base_url = env::var("APP_BASE_URL").expect("APP_BASE_URL must be set");
-    let secure_cookie = !app_base_url.starts_with("http://");
+    let mut env = Environment::with_prefix("CHIROO")
+        .prefix_separator("_")
+        .separator("__")
+        .convert_case(Case::Snake);
+    if let Some(map) = env_override {
+        env = env.source(Some(map));
+    }
+    builder = builder.add_source(env);
 
-    let qdrant_config = QdrantConfig {
-        url: env::var("QDRANT_URL").unwrap_or_else(|_| String::from("http://localhost:6334")),
-        api_key: env::var("QDRANT_API_KEY").ok(),
-        collection_prefix: env::var("QDRANT_COLLECTION_PREFIX")
-            .unwrap_or_else(|_| String::from("chiroo")),
-        timeout: env::var("QDRANT_TIMEOUT_SECS")
-            .unwrap_or_else(|_| "30".into())
-            .parse()
-            .map(Duration::from_secs)
-            .expect("QDRANT_TIMEOUT_SECS must be positive integer in seconds"),
-    };
+    builder
+        .build()
+        .expect("failed to build server configuration")
+        .try_deserialize()
+        .expect("failed to deserialize server configuration")
+}
 
-    let oidc_config = OidcConfig {
-        redirect_uri: format!("{app_base_url}/api/auth/oidc/callback"),
-        secure_cookie,
-        app_base_url,
-        issuer_url: env::var("OIDC_ISSUER_URL").expect("OIDC_ISSUER_URL must be set"),
-        client_id: SecretString::new(
-            env::var("OIDC_CLIENT_ID")
-                .expect("OIDC_CLIENT_ID must be set")
-                .into_boxed_str(),
-        ),
-        client_secret: SecretString::new(
-            env::var("OIDC_CLIENT_SECRET")
-                .expect("OIDC_CLIENT_SECRET must be set")
-                .into_boxed_str(),
-        ),
-        state_secret: SecretString::new(
-            env::var("STATE_SECRET")
-                .expect("STATE_SECRET must be set")
-                .into_boxed_str(),
-        ),
-        cleanup_interval_secs: env::var("SESSION_CLEANUP_INTERVAL_SECS")
-            .unwrap_or_else(|_| "600".into())
-            .parse()
-            .map(Duration::from_secs)
-            .expect("Session cleanup interval must be positive integer in seconds"),
-        session_ttl_multiplier: env::var("SESSION_TTL_MULTIPLIER")
-            .unwrap_or_else(|_| "10".into())
-            .parse()
-            .expect("Session ttl multiplier must be positive integer"),
-        default_access_token_expires_secs: env::var("OIDC_ACCESS_TOKEN_EXPIRES_SECS")
-            .unwrap_or_else(|_| "300".into())
-            .parse()
-            .map(Duration::from_secs)
-            .expect("oidc access token expires defult time must be positive integer in seconds"),
-    };
+impl TryFrom<RawPalette> for Option<BrandingPalette> {
+    type Error = anyhow::Error;
 
-    let chunking_config = ChunkingConfig {
-        max_chunk_size: env::var("CHUNK_SIZE")
-            .unwrap_or_else(|_| "512".into())
-            .parse()
-            .expect("CHUNK_SIZE must be a positive integer"),
-    };
-
-    let search_config = SearchConfig {
-        limit: env::var("SEARCH_LIMIT")
-            .unwrap_or_else(|_| "10".into())
-            .parse()
-            .expect("SEARCH_LIMIT must be a positive integer"),
-        score_threshold: env::var("SEARCH_SCORE_THRESHOLD")
-            .unwrap_or_else(|_| "0.5".into())
-            .parse()
-            .expect("SEARCH_SCORE_THRESHOLD must be a float"),
-        candidate_limit: env::var("SEARCH_CANDIDATE_LIMIT")
-            .unwrap_or_else(|_| "30".into())
-            .parse()
-            .expect("SEARCH_CANDIDATE_LIMIT must be a positive integer"),
-    };
-
-    let brand_name = env::var("BRAND_NAME").unwrap_or_else(|_| String::from("ChiRoo"));
-    let brand_tagline = env::var("BRAND_TAGLINE").ok().filter(|t| !t.is_empty());
-
-    let brand_primary = env::var("BRAND_PRIMARY_COLOR")
-        .ok()
-        .filter(|v| !v.is_empty());
-    let brand_neutral = env::var("BRAND_NEUTRAL_COLOR")
-        .ok()
-        .filter(|v| !v.is_empty());
-    let brand_palette = match (brand_primary, brand_neutral) {
-        (None, None) => None,
-        (Some(primary), Some(neutral)) => {
-            validate_hex_color(&primary, "BRAND_PRIMARY_COLOR");
-            validate_hex_color(&neutral, "BRAND_NEUTRAL_COLOR");
-            let primary_dark = env::var("BRAND_PRIMARY_DARK_COLOR")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| primary.clone());
-            validate_hex_color(&primary_dark, "BRAND_PRIMARY_DARK_COLOR");
-            let neutral_dark = env::var("BRAND_NEUTRAL_DARK_COLOR")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| neutral.clone());
-            validate_hex_color(&neutral_dark, "BRAND_NEUTRAL_DARK_COLOR");
-            Some(BrandingPalette {
-                primary,
-                neutral,
-                primary_dark,
-                neutral_dark,
-            })
-        },
-        _ => {
-            panic!(
-                "BRAND_PRIMARY_COLOR and BRAND_NEUTRAL_COLOR must be set together \
-                 (both or neither)"
-            );
-        },
-    };
-
-    let font = load_required_font(FONT_PATH, &font_family("BRAND_FONT_FAMILY", FONT_FAMILY));
-    let font_italic = load_optional_italic(&font);
-    let font_mono = load_required_font(
-        MONO_FONT_PATH,
-        &font_family("BRAND_MONO_FONT_FAMILY", MONO_FONT_FAMILY),
-    );
-
-    let assistant_name = env::var("BRAND_ASSISTANT_NAME").unwrap_or_else(|_| brand_name.clone());
-    let label = env::var("BRAND_LABEL").ok();
-
-    let branding_config = BrandingConfig {
-        name: brand_name,
-        label,
-        tagline: brand_tagline,
-        assistant_name,
-        palette: brand_palette,
-        logo: load_static_asset(Path::new(LOGO_PATH)),
-        favicon: load_static_asset(Path::new(FAVICON_PATH)),
-        assistant_icon: load_static_asset(Path::new(ASSISTANT_ICON_PATH)),
-        font,
-        font_italic,
-        font_mono,
-    };
-
-    Config {
-        server: server_config,
-        internal_api: internal_api_config,
-        db: database_config,
-        openai: openai_config,
-        embedding: embedding_config,
-        rerank: rerank_config,
-        oidc: oidc_config,
-        qdrant: qdrant_config,
-        chunking: chunking_config,
-        search: search_config,
-        branding: branding_config,
+    fn try_from(raw: RawPalette) -> Result<Self, Self::Error> {
+        let primary = raw.primary.as_deref().filter(|s| !s.is_empty());
+        let neutral = raw.neutral.as_deref().filter(|s| !s.is_empty());
+        match (primary, neutral) {
+            (None, None) => Ok(None),
+            (Some(primary), Some(neutral)) => {
+                validate_hex_color(primary, "branding.palette.primary")?;
+                validate_hex_color(neutral, "branding.palette.neutral")?;
+                let primary_dark = raw
+                    .primary_dark
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(primary);
+                validate_hex_color(primary_dark, "branding.palette.primary_dark")?;
+                let neutral_dark = raw
+                    .neutral_dark
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(neutral);
+                validate_hex_color(neutral_dark, "branding.palette.neutral_dark")?;
+                Ok(Some(BrandingPalette {
+                    primary: primary.to_string(),
+                    neutral: neutral.to_string(),
+                    primary_dark: primary_dark.to_string(),
+                    neutral_dark: neutral_dark.to_string(),
+                }))
+            },
+            _ => anyhow::bail!(
+                "branding.palette.primary and branding.palette.neutral must be set \
+                 together (both or neither)"
+            ),
+        }
     }
 }
 
-pub async fn config() -> &'static Config {
-    CONFIG.get_or_init(init_config).await
+impl TryFrom<RawBranding> for BrandingConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawBranding) -> Result<Self, Self::Error> {
+        let palette = raw
+            .palette
+            .map(Option::<BrandingPalette>::try_from)
+            .transpose()?
+            .flatten();
+        let font = load_required_font(FONT_PATH, &raw.font_family)?;
+        let font_italic = load_optional_italic(&font);
+        let font_mono = load_required_font(MONO_FONT_PATH, &raw.mono_font_family)?;
+        let assistant_name = raw
+            .assistant_name
+            .filter(|s| !s.is_empty())
+            .unwrap_or(raw.name.clone());
+        let label = raw.label;
+        let tagline = raw.tagline.filter(|s| !s.is_empty());
+        Ok(Self {
+            name: raw.name,
+            label,
+            tagline,
+            assistant_name,
+            palette,
+            logo: load_static_asset(Path::new(LOGO_PATH)),
+            favicon: load_static_asset(Path::new(FAVICON_PATH)),
+            assistant_icon: load_static_asset(Path::new(ASSISTANT_ICON_PATH)),
+            font,
+            font_italic,
+            font_mono,
+        })
+    }
+}
+
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+/// Loads and caches the server configuration.
+///
+/// Layering: embedded YAML defaults, then the optional `config_path` file
+/// (`-c/--config`), then the `CHIROO_*` environment (populated from `.env`).
+pub fn load_config(config_path: Option<&Path>) -> &'static Config {
+    CONFIG.get_or_init(|| {
+        dotenv().ok();
+        build_with_env(config_path, None)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secrecy::ExposeSecret;
+
+    fn required_env() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert(
+            "CHIROO_DB__URL".into(),
+            "postgres://user:pass@localhost/chiroo".into(),
+        );
+        m.insert("CHIROO_DB__ENCRYPTION_KEY".into(), "k".repeat(KEY_LEN));
+        m.insert("CHIROO_OPENAI__BASE_URL".into(), "http://openai/v1".into());
+        m.insert("CHIROO_OPENAI__API_KEY".into(), "openai-key".into());
+        m.insert("CHIROO_OPENAI__MODEL".into(), "gpt-4o".into());
+        m.insert(
+            "CHIROO_EMBEDDING__BASE_URL".into(),
+            "http://embed/v1".into(),
+        );
+        m.insert("CHIROO_EMBEDDING__API_KEY".into(), "embed-key".into());
+        m.insert("CHIROO_EMBEDDING__MODEL".into(), "emb".into());
+        m.insert("CHIROO_EMBEDDING__DIMENSIONS".into(), "8".into());
+        m.insert("CHIROO_RERANK__BASE_URL".into(), "http://rerank/v1".into());
+        m.insert("CHIROO_RERANK__API_KEY".into(), "rerank-key".into());
+        m.insert("CHIROO_RERANK__MODEL".into(), "rerank".into());
+        m.insert(
+            "CHIROO_OIDC__APP_BASE_URL".into(),
+            "https://app.example".into(),
+        );
+        m.insert("CHIROO_OIDC__ISSUER_URL".into(), "https://issuer".into());
+        m.insert("CHIROO_OIDC__CLIENT_ID".into(), "cid".into());
+        m.insert("CHIROO_OIDC__CLIENT_SECRET".into(), "csec".into());
+        m.insert("CHIROO_OIDC__STATE_SECRET".into(), "ss".into());
+        m
+    }
+
+    fn load(env: HashMap<String, String>) -> Config {
+        build_with_env(None, Some(env))
+    }
+
+    #[test]
+    fn defaults_are_used_when_unset() {
+        let cfg = load(required_env());
+        assert_eq!(cfg.server_port(), 3000);
+        assert_eq!(cfg.server_host(), "127.0.0.1");
+        assert_eq!(cfg.internal_api_port(), 3001);
+        assert_eq!(cfg.qdrant.url(), "http://localhost:6334");
+        assert_eq!(cfg.qdrant.collection_prefix(), "chiroo");
+        assert_eq!(cfg.qdrant.timeout(), Duration::from_secs(30));
+        assert_eq!(
+            cfg.oidc_config().cleanup_interval(),
+            Duration::from_secs(600)
+        );
+        assert_eq!(cfg.oidc_config().session_ttl_multiplier(), 10);
+        assert_eq!(
+            cfg.oidc_config().access_token_expires(),
+            Duration::from_secs(300)
+        );
+        assert_eq!(cfg.chunking.max_chunk_size, 512);
+        assert_eq!(cfg.search.limit, 10);
+        assert_eq!(cfg.search.score_threshold, 0.5);
+        assert_eq!(cfg.search.candidate_limit, 30);
+        assert_eq!(cfg.branding.name, "ChiRoo");
+        assert_eq!(cfg.branding.assistant_name, "ChiRoo");
+    }
+
+    #[test]
+    fn env_overrides_defaults() {
+        let mut env = required_env();
+        env.insert("CHIROO_SERVER__PORT".into(), "4000".into());
+        env.insert("CHIROO_SEARCH__LIMIT".into(), "25".into());
+        env.insert("CHIROO_BRANDING__NAME".into(), "Acme".into());
+        let cfg = load(env);
+        assert_eq!(cfg.server_port(), 4000);
+        assert_eq!(cfg.search.limit, 25);
+        assert_eq!(cfg.branding.name, "Acme");
+        assert_eq!(cfg.branding.assistant_name, "Acme");
+    }
+
+    #[test]
+    fn duration_env_uses_serde_format() {
+        let mut env = required_env();
+        env.insert("CHIROO_QDRANT__TIMEOUT".into(), "1m".into());
+        env.insert("CHIROO_OIDC__CLEANUP_INTERVAL".into(), "30s".into());
+        env.insert("CHIROO_OIDC__ACCESS_TOKEN_EXPIRES".into(), "2min".into());
+        let cfg = load(env);
+        assert_eq!(cfg.qdrant.timeout(), Duration::from_secs(60));
+        assert_eq!(
+            cfg.oidc_config().cleanup_interval(),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            cfg.oidc_config().access_token_expires(),
+            Duration::from_secs(120)
+        );
+    }
+
+    #[test]
+    fn numeric_string_field_stays_a_string() {
+        let mut env = required_env();
+        env.insert("CHIROO_OPENAI__MODEL".into(), "7".into());
+        env.insert("CHIROO_EMBEDDING__DIMENSIONS".into(), "512".into());
+        let cfg = load(env);
+        // `model` is a `String` and must not be coerced to an integer.
+        assert_eq!(cfg.openai.model, "7");
+        // `dimensions` is numeric and is still parsed from the string.
+        assert_eq!(cfg.embedding.dimensions, 512);
+    }
+
+    #[test]
+    fn embedding_and_rerank_use_their_own_values() {
+        let cfg = load(required_env());
+        assert_eq!(cfg.embedding.base_url, "http://embed/v1");
+        assert_eq!(cfg.embedding.api_key.expose_secret(), "embed-key");
+        assert_eq!(cfg.rerank.base_url, "http://rerank/v1");
+        assert_eq!(cfg.rerank.api_key.expose_secret(), "rerank-key");
+    }
+
+    #[test]
+    #[should_panic(expected = "missing configuration field \"embedding.base_url\"")]
+    fn missing_embedding_base_url_panics() {
+        let mut env = required_env();
+        env.remove("CHIROO_EMBEDDING__BASE_URL");
+        let _ = load(env);
+    }
+
+    #[test]
+    #[should_panic(expected = "missing configuration field \"rerank.api_key\"")]
+    fn missing_rerank_api_key_panics() {
+        let mut env = required_env();
+        env.remove("CHIROO_RERANK__API_KEY");
+        let _ = load(env);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown field `foo`")]
+    fn unknown_top_level_section_rejected() {
+        let mut env = required_env();
+        // `foo` is not a known section (typo / stray CHIROO_* var).
+        env.insert("CHIROO_FOO__BAR".into(), "1".into());
+        let _ = load(env);
+    }
+
+    #[test]
+    fn derived_oidc_fields() {
+        let cfg = load(required_env());
+        assert!(cfg.oidc_config().secure_cookie());
+        assert_eq!(
+            cfg.oidc_config().redirect_uri(),
+            "https://app.example/api/auth/oidc/callback"
+        );
+
+        let mut env = required_env();
+        env.insert(
+            "CHIROO_OIDC__APP_BASE_URL".into(),
+            "http://insecure.local".into(),
+        );
+        let cfg = load(env);
+        assert!(!cfg.oidc_config().secure_cookie());
+    }
+
+    #[test]
+    fn palette_defaults_and_validation() {
+        let mut env = required_env();
+        env.insert("CHIROO_BRANDING__PALETTE__PRIMARY".into(), "#112233".into());
+        env.insert("CHIROO_BRANDING__PALETTE__NEUTRAL".into(), "#aabbcc".into());
+        let cfg = load(env);
+        let palette = cfg.branding.palette.expect("palette present");
+        assert_eq!(palette.primary, "#112233");
+        assert_eq!(palette.neutral, "#aabbcc");
+        assert_eq!(palette.primary_dark, "#112233");
+        assert_eq!(palette.neutral_dark, "#aabbcc");
+    }
+
+    #[test]
+    fn label_empty_is_meaningful() {
+        let cfg = load(required_env());
+        assert!(cfg.branding.label.is_none());
+
+        let mut env = required_env();
+        env.insert("CHIROO_BRANDING__LABEL".into(), "Custom".into());
+        let cfg = load(env);
+        assert_eq!(cfg.branding.label.as_deref(), Some("Custom"));
+
+        // An explicit empty string is meaningful (rendered, not hidden).
+        let mut env = required_env();
+        env.insert("CHIROO_BRANDING__LABEL".into(), "".into());
+        let cfg = load(env);
+        assert_eq!(cfg.branding.label.as_deref(), Some(""));
+    }
+
+    /// Removes a temp file on drop so a failing assert doesn't leave it behind.
+    struct TempFile(PathBuf);
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn file_overrides_default_and_is_overridden_by_env() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("chiroo_cfg_test_{}.yaml", std::process::id()));
+        let temp = TempFile(path.clone());
+        fs::write(&path, "server:\n  port: 3500\n").expect("write test config file");
+
+        // File overrides the built-in default.
+        let cfg = build_with_env(Some(&path), Some(required_env()));
+        assert_eq!(cfg.server_port(), 3500);
+
+        // Environment beats the file.
+        let mut env = required_env();
+        env.insert("CHIROO_SERVER__PORT".into(), "4000".into());
+        let cfg = build_with_env(Some(&path), Some(env));
+        assert_eq!(cfg.server_port(), 4000);
+
+        drop(temp);
+    }
+
+    #[test]
+    #[should_panic(expected = "missing configuration field \"db.url\"")]
+    fn missing_required_field_panics() {
+        let mut env = required_env();
+        env.remove("CHIROO_DB__URL");
+        let _ = load(env);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be exactly")]
+    fn wrong_key_length_panics() {
+        let mut env = required_env();
+        env.insert("CHIROO_DB__ENCRYPTION_KEY".into(), "short".into());
+        let _ = load(env);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be set together")]
+    fn palette_requires_both_colors() {
+        let mut env = required_env();
+        env.insert("CHIROO_BRANDING__PALETTE__PRIMARY".into(), "#112233".into());
+        let _ = load(env);
+    }
 }

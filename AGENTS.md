@@ -23,6 +23,68 @@ utils/     → shared utilities (extract_cookie, custom Axum extractors)
 `
 `AppState` is the DI container holding all services.
 
+## Configuration
+
+Configuration uses the `config` crate (dependency renamed `appconfig` to avoid a
+clash with `mod config`), deserialized directly into the runtime `Config` tree —
+the only raw DTO is `RawBranding` (branding section, see below) — resolved from
+three layers, lowest → highest precedence:
+
+1. **Built-in defaults** — `server/config/default.yaml`, embedded via
+   `include_str!`. This is the single source of truth for all non-secret
+   defaults: never duplicate a default value in code.
+2. **A config file** — passed with `-c` / `--config` (format from the extension).
+3. **Environment variables** — `CHIROO_<SECTION>__<FIELD>` (`__` separates section
+   from field, `_` stays inside a field), including anything in `server/.env`.
+
+Flow (`src/config.rs`): `build_with_env` stacks the three layers and calls
+`try_deserialize::<Config>()`. Because layer 1 always provides every default key,
+fields with a default are concrete types (`String`, `u16`, `Duration`); only
+genuinely optional keys (`qdrant.api_key`) are `Option` with `#[serde(default)]`.
+A missing required key is a startup error
+(`missing configuration field "<section>.<field>"`).
+
+Custom (de)serialization is used only where serde can't express the logic:
+
+- `de_db_key` — 32-byte length check → `Arc<SecretBox<[u8; KEY_LEN]>>`.
+- `de_branding` — `RawBranding` → `BrandingConfig`; the only struct with a
+  conversion, because it loads fonts/assets from disk and validates the palette
+  (both-or-neither, hex).
+- Secrets use `secrecy`'s native `Deserialize` (`SecretString`).
+- `Duration` fields use `#[serde(with = "humantime_serde")]` (the serde impl for
+  `std::time::Duration` only reads the `{secs, nanos}` struct form). Values are
+  human-readable duration strings: `"30s"`, `"600s"`, `"5m"`, `"1h"`. A bare
+  number is a startup error.
+
+Derived values are computed getters, never stored fields
+(`OidcConfig::redirect_uri`, `OidcConfig::secure_cookie`). The resolved `Config`
+is held in a `OnceLock` (`load_config -> &'static Config`). The runtime
+`Config`/sub-struct getters are the only surface the services, middleware and
+clients touch — keep them stable.
+
+Adding a setting = a field on the struct (+ `#[serde(rename)]` when the field
+name differs from the config key) and, if it has a default, a line in
+`default.yaml`.
+
+- Env values arrive as plain strings; the `config` deserializer coerces them to
+  the target type (numbers/bools parse from their string form). Do **not**
+  enable `Environment::try_parsing` — it converts purely-numeric values in
+  `String` fields to integers and breaks deserialization (e.g.
+  `CHIROO_OPENAI__MODEL=7`). There is **no** `ignore_empty` — an empty string is
+  meaningful (e.g. `CHIROO_BRANDING__LABEL=""`). Note: an empty string for a
+  *required* field deserializes fine and fails later at use time (only the db
+  key is validated).
+- `Config` has `#[serde(deny_unknown_fields)]`, so an unknown top-level section
+  (a typo like `CHIROO_SERVR__PORT`, or a stray `CHIROO_*` var from another
+  service) is a startup error, not a silent default. The env source only ingests
+  `CHIROO_*` keys, so unrelated vars (`PATH`, …) never reach the deserializer.
+  Unknown keys *inside* a section are still ignored (the attribute is on
+  `Config` only, not the sub-structs) — add it there too if a section must be
+  strict.
+- Secrets have no built-in value (secrets can't be in the embedded default);
+  they come from the `-c` file or env. There are no cross-defaults:
+  embedding/rerank endpoints must be set explicitly.
+
 ## Diesel / Database
 
 - Always use `NOT NULL` unless the column is genuinely optional.
@@ -187,8 +249,8 @@ validation, and tool input schemas — do not hand-roll type guards.
   If the user asks to add a task for later, add it to `TODO.md`.
   When a task is completed, check `TODO.md` and remove the corresponding entry if present.
 - `BRANDING.md` documents product branding configuration. Whenever branding
-  behavior, `BRAND_*` env vars, or their defaults change, update `BRANDING.md`
-  (and keep the README pointer in sync).
+  behavior, the `CHIROO_BRANDING__*` env vars, or their defaults change, update
+  `BRANDING.md` (and keep the README pointer in sync).
 
 ## Service layer logging
 

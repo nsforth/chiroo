@@ -195,13 +195,13 @@ impl OidcClient {
             metadata,
             client_id: ClientId::new(config.client_id().expose_secret().to_string()),
             client_secret: ClientSecret::new(config.client_secret().expose_secret().to_string()),
-            redirect_uri: RedirectUrl::new(config.redirect_uri().to_string())?,
+            redirect_uri: RedirectUrl::new(config.redirect_uri())?,
             http_client,
             issuer_url: config.issuer_url().to_string(),
             jwks_uri,
             state_secret: config.state_secret().clone(),
             session_ttl_multiplier: config.session_ttl_multiplier(),
-            default_expires_in: config.default_access_token_expires_secs(),
+            default_expires_in: config.access_token_expires(),
         })
     }
 

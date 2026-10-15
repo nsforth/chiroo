@@ -2,6 +2,7 @@
 name = "chiroo-server"
 version = "0.1.0"
 edition = "2021"
+default-run = "chiroo-server"
 
 [lib]
 name = "chiroo_server"
@@ -25,6 +26,7 @@ complexity = { level = "warn", priority = -1 }
 
 [dependencies]
 anyhow = "1"
+appconfig = { package = "config", version = "0.15" }
 async-openai = { version = "0.40", features = ["chat-completion", "byot", "embedding"] }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros", "tokio", "multipart"] }
@@ -41,6 +43,7 @@ diesel_migrations = "2.3"
 deadpool-diesel = { version = "0.6", features = ["postgres"] }
 dotenvy = "0.15"
 futures = "0.3"
+humantime-serde = "1"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 indicatif = "0.17"
 mime_guess = "2"

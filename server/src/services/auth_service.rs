@@ -63,9 +63,9 @@ impl AuthService {
     }
 
     #[instrument(skip(self))]
-    pub fn start_background_jobs(self, cleanup_interval_secs: Duration) {
+    pub fn start_background_jobs(self, cleanup_interval: Duration) {
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(cleanup_interval_secs);
+            let mut interval = tokio::time::interval(cleanup_interval);
             loop {
                 interval.tick().await;
                 if let Err(e) = self.cleanup_expired().await {

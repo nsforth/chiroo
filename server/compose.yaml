@@ -10,13 +10,12 @@
 services:
   server:
     environment:
-      - PORT=3000
-      - DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/project_f
-      - HOST=0.0.0.0
+      - CHIROO_SERVER__PORT=3000
+      - CHIROO_DB__URL=postgres://postgres:postgres@host.docker.internal:5432/project_f
+      - CHIROO_SERVER__HOST=0.0.0.0
       - RUST_LOG=info
     build:
       context: .
-      target: final
     ports:
       - 3000:3000
 
@@ -24,7 +23,7 @@ services:
     image: postgres:16
     restart: always
     environment:
-      - POSTGRES_DB=rust
+      - POSTGRES_DB=chiroo
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     ports:

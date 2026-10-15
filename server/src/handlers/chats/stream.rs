@@ -344,6 +344,7 @@ mod tests {
             &mut false,
             "assistant-id",
             "scenario-id",
+            "scenario-name",
         );
         let json = serde_json::to_value(&chunks).unwrap();
         assert_eq!(json[0]["type"], "data-round");

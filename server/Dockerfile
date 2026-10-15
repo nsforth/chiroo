@@ -6,6 +6,7 @@ COPY Cargo.toml Cargo.lock ./
 RUN cargo fetch
 COPY src ./src
 COPY migrations ./migrations
+COPY config ./config
 RUN cargo build --release --bin chiroo-server --bin chiroo-cli
 
 FROM debian:bookworm-slim

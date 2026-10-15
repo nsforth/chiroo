@@ -1,11 +1,13 @@
+use clap::Parser;
 use deadpool_diesel::postgres::{Manager, Pool};
 use deadpool_diesel::Runtime;
 use diesel_migrations::MigrationHarness;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use tracing_subscriber::prelude::*;
 
-use chiroo_server::config::{config, Config};
+use chiroo_server::config::{load_config, Config};
 use chiroo_server::errors::AppError;
 use chiroo_server::infra::clients::embedding_client::EmbeddingClient;
 use chiroo_server::infra::clients::qdrant_client::QdrantClient;
@@ -27,11 +29,22 @@ use chiroo_server::state::AppState;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
 
+#[derive(Parser)]
+#[command(name = "chiroo-server", version, about = "Chiroo backend server")]
+struct ServerArgs {
+    /// Path to a configuration file. The format is detected from the file
+    /// extension (yaml, yml, json, toml, ini, ...). Precedence (low -> high):
+    /// embedded defaults, then this file, then the CHIROO_* environment.
+    #[arg(short = 'c', long = "config", value_name = "PATH")]
+    config: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = ServerArgs::parse();
     init_tracing();
 
-    let app_config = config().await;
+    let app_config = load_config(args.config.as_deref());
     tracing::info!("application configuration is {:?}", app_config);
 
     let manager = Manager::new(app_config.db_url().to_string(), Runtime::Tokio1);
@@ -94,7 +107,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         AuthService::new(session_repo, app_config.oidc_config().clone(), pool.clone());
     auth_service
         .clone()
-        .start_background_jobs(app_config.oidc_config().cleanup_interval_secs());
+        .start_background_jobs(app_config.oidc_config().cleanup_interval());
 
     let scenario_service = ScenarioService::new(pool.clone());
 
