@@ -90,3 +90,32 @@ pub enum MessageStreamEvent {
         error_text: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use async_openai::types::chat::FinishReason as OaiFinish;
+
+    use super::FinishReason;
+
+    #[test]
+    fn oai_finish_reason_mapped() {
+        assert_eq!(FinishReason::from(OaiFinish::Stop), FinishReason::Stop);
+        assert_eq!(FinishReason::from(OaiFinish::Length), FinishReason::Length);
+        assert_eq!(
+            FinishReason::from(OaiFinish::ToolCalls),
+            FinishReason::ToolCalls
+        );
+        assert_eq!(
+            FinishReason::from(OaiFinish::ContentFilter),
+            FinishReason::ContentFilter
+        );
+    }
+
+    #[test]
+    fn oai_finish_reason_unknown_variants_map_to_other() {
+        assert_eq!(
+            FinishReason::from(OaiFinish::FunctionCall),
+            FinishReason::Other
+        );
+    }
+}

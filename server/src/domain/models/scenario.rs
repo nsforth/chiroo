@@ -94,3 +94,84 @@ pub struct Round {
     /// Hidden rounds are not shown to non-admin users.
     pub hidden: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::models::messages::Message;
+
+    use super::*;
+
+    fn chat_id() -> ChatId {
+        ChatId(Uuid::new_v4())
+    }
+
+    fn user_message() -> Message {
+        Message::user(chat_id(), "hello".into())
+    }
+
+    #[test]
+    fn status_as_str_round_trips() {
+        for status in [
+            ScenarioStatus::Pending,
+            ScenarioStatus::Running,
+            ScenarioStatus::Completed,
+            ScenarioStatus::Failed,
+        ] {
+            assert_eq!(ScenarioStatus::from_str(status.as_str()), status);
+        }
+    }
+
+    #[test]
+    fn status_from_str_unknown_falls_back_to_pending() {
+        assert_eq!(ScenarioStatus::from_str("bogus"), ScenarioStatus::Pending);
+        assert_eq!(ScenarioStatus::from_str(""), ScenarioStatus::Pending);
+    }
+
+    #[test]
+    fn new_scenario_has_user_message_as_first_round() {
+        let msg = user_message();
+        let msg_id = msg.id.0;
+        let scenario = Scenario::new(chat_id(), "model-x".into(), ScenarioStatus::Pending, msg);
+        assert_eq!(scenario.rounds.len(), 1);
+        assert!(!scenario.rounds[0].hidden);
+        assert_eq!(scenario.user_message().map(|m| m.id.0), Some(msg_id));
+        assert!(!scenario.is_complete());
+    }
+
+    #[test]
+    fn is_complete_only_for_completed_status() {
+        let mut scenario = Scenario::new(
+            chat_id(),
+            "m".into(),
+            ScenarioStatus::Completed,
+            user_message(),
+        );
+        assert!(scenario.is_complete());
+        scenario.status = ScenarioStatus::Failed;
+        assert!(!scenario.is_complete());
+    }
+
+    #[test]
+    fn user_message_empty_rounds_is_none() {
+        let scenario = Scenario {
+            id: ScenarioId::new(),
+            chat_id: chat_id(),
+            name: "m".into(),
+            status: ScenarioStatus::Pending,
+            rounds: vec![],
+            created_at: chrono::NaiveDateTime::MIN,
+            updated_at: chrono::NaiveDateTime::MIN,
+        };
+        assert!(scenario.user_message().is_none());
+    }
+
+    #[test]
+    fn scenario_status_serde_is_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ScenarioStatus::Completed).unwrap(),
+            "\"completed\""
+        );
+        let status: ScenarioStatus = serde_json::from_str("\"running\"").unwrap();
+        assert_eq!(status, ScenarioStatus::Running);
+    }
+}

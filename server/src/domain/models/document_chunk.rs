@@ -72,3 +72,41 @@ impl SearchedChunk {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_id_is_deterministic() {
+        let doc = DocumentId("doc-1".into());
+        assert_eq!(
+            DocumentChunkId::from_doc_id_and_chunk_idx(&doc, 3),
+            DocumentChunkId::from_doc_id_and_chunk_idx(&doc, 3)
+        );
+    }
+
+    #[test]
+    fn chunk_id_differs_by_chunk_index() {
+        let doc = DocumentId("doc-1".into());
+        assert_ne!(
+            DocumentChunkId::from_doc_id_and_chunk_idx(&doc, 0),
+            DocumentChunkId::from_doc_id_and_chunk_idx(&doc, 1)
+        );
+    }
+
+    #[test]
+    fn chunk_id_differs_by_document() {
+        assert_ne!(
+            DocumentChunkId::from_doc_id_and_chunk_idx(&DocumentId("a".into()), 0),
+            DocumentChunkId::from_doc_id_and_chunk_idx(&DocumentId("b".into()), 0)
+        );
+    }
+
+    #[test]
+    fn chunk_id_is_v5_uuid() {
+        let doc = DocumentId("doc-1".into());
+        let id = DocumentChunkId::from_doc_id_and_chunk_idx(&doc, 0);
+        assert_eq!(id.0.get_variant(), uuid::Variant::RFC4122);
+    }
+}

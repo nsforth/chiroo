@@ -116,3 +116,59 @@ pub enum ToolCallState {
     Done,
     Error,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_title_short_unchanged() {
+        assert_eq!(Message::make_title("Hello"), "Hello");
+    }
+
+    #[test]
+    fn make_title_exactly_15_chars_unchanged() {
+        let text: String = std::iter::repeat('a').take(15).collect();
+        assert_eq!(Message::make_title(&text), text);
+    }
+
+    #[test]
+    fn make_title_truncates_at_15_chars_with_ellipsis() {
+        let text: String = std::iter::repeat('a').take(16).collect();
+        let title = Message::make_title(&text);
+        assert_eq!(title.chars().count(), 18);
+        assert!(title.ends_with("..."));
+    }
+
+    #[test]
+    fn make_title_empty() {
+        assert_eq!(Message::make_title(""), "");
+    }
+
+    #[test]
+    fn make_title_multibyte_chars_are_not_mangled() {
+        let text = "Привет, мир! Это заголовок длиннее пятнадцати символов";
+        let title = Message::make_title(text);
+        assert_eq!(title.chars().count(), 18);
+        assert!(title.ends_with("..."));
+    }
+
+    #[test]
+    fn user_message_has_user_role_and_text_part() {
+        let msg = Message::user(ChatId(Uuid::new_v4()), "hi there".into());
+        assert!(matches!(msg.role, Role::User));
+        assert_eq!(msg.text(), "hi there");
+    }
+
+    #[test]
+    fn text_joins_all_text_parts_and_ignores_others() {
+        let chat_id = ChatId(Uuid::new_v4());
+        let mut msg = Message::user(chat_id, "one".into());
+        msg.parts
+            .push(MessagePart::Text(TextBlock { text: "two".into() }));
+        msg.parts.push(MessagePart::Reasoning(ReasoningBlock {
+            text: "secret thinking".into(),
+        }));
+        assert_eq!(msg.text(), "onetwo");
+    }
+}

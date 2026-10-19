@@ -230,3 +230,72 @@ where
 
     outcome
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_metadata_none_is_null() {
+        assert_eq!(parse_metadata(&None).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn parse_metadata_valid_json() {
+        let value = parse_metadata(&Some(r#"{"team":"ml"}"#.into())).unwrap();
+        assert_eq!(value["team"], "ml");
+    }
+
+    #[test]
+    fn parse_metadata_invalid_json_is_error() {
+        assert!(parse_metadata(&Some("not json".into())).is_err());
+    }
+
+    #[test]
+    fn parse_indexes_none_is_none() {
+        assert_eq!(parse_indexes(&None).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_indexes_null_is_none() {
+        assert_eq!(parse_indexes(&Some("null".into())).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_indexes_valid_json() {
+        let value = parse_indexes(&Some(r#"{"a":{"type":"keyword"}}"#.into())).unwrap();
+        let value = value.expect("non-null indexes");
+        assert_eq!(value["a"]["type"], "keyword");
+    }
+
+    #[test]
+    fn parse_indexes_invalid_json_is_error() {
+        assert!(parse_indexes(&Some("[broken".into())).is_err());
+    }
+
+    #[test]
+    fn parse_reindex_mode_valid() {
+        for mode in ["compare", "force", "full"] {
+            assert_eq!(parse_reindex_mode(mode).unwrap(), mode);
+        }
+    }
+
+    #[test]
+    fn parse_reindex_mode_invalid_is_error() {
+        assert!(parse_reindex_mode("sometimes").is_err());
+    }
+
+    #[test]
+    fn sha256_hex_known_vector() {
+        assert_eq!(
+            sha256_hex(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn file_stem_strips_extension() {
+        assert_eq!(file_stem(Path::new("report.txt")), "report");
+        assert_eq!(file_stem(Path::new("dir/doc.md")), "doc");
+    }
+}

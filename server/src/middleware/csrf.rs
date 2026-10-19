@@ -109,3 +109,51 @@ fn unauthorized_response() -> Response {
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csrf_token_round_trips() {
+        let token = create_csrf_token("secret", "session-1").unwrap();
+        let claims = verify_csrf_token(&token, "secret").unwrap();
+        assert_eq!(claims.sid, "session-1");
+    }
+
+    #[test]
+    fn csrf_token_rejected_with_wrong_secret() {
+        let token = create_csrf_token("secret", "session-1").unwrap();
+        assert!(verify_csrf_token(&token, "other-secret").is_err());
+    }
+
+    #[test]
+    fn csrf_token_rejected_when_tampered() {
+        let token = create_csrf_token("secret", "session-1").unwrap();
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 3);
+        let header = parts[0];
+        let payload = parts[1];
+        let forged = format!("{header}.{payload}.invalid-signature");
+        assert!(verify_csrf_token(&forged, "secret").is_err());
+    }
+
+    #[test]
+    fn csrf_token_rejected_for_garbage() {
+        assert!(verify_csrf_token("not-a-jwt", "secret").is_err());
+    }
+
+    #[test]
+    fn is_mutating_matches_only_write_methods() {
+        for (method, expected) in [
+            (axum::http::Method::POST, true),
+            (axum::http::Method::PUT, true),
+            (axum::http::Method::PATCH, true),
+            (axum::http::Method::DELETE, true),
+            (axum::http::Method::GET, false),
+            (axum::http::Method::HEAD, false),
+        ] {
+            assert_eq!(is_mutating(&method), expected, "{method:?}");
+        }
+    }
+}
