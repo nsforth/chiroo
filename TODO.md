@@ -129,6 +129,16 @@ Rationale:
   `source-url` chunks in one batch. Persisted sources still come from
   `scenario.rounds[..].sources` as today.
 
+### Validate document metadata values against declared `indexes`
+
+`knowledge_service.rs` `create_document` / `update_document` don't check that metadata
+values for fields declared in the KB's `indexes` match the declared type. A wrong-typed
+value (e.g. a number where `keyword` is declared) is silently skipped by the Qdrant field
+index, so filters over that field return fewer/empty results with no error. Add fail-fast
+validation at document write: for each declared index field present in the document
+metadata, verify the value's type matches the index type and reject the request with a
+clear error naming the field and expected type.
+
 ---
 
 ## Bugs
@@ -187,6 +197,17 @@ Only `deep_research/explore` (max_llm_calls: 10) can self-correct today.
 Planned fix (apply if real failures are observed):
 - include the list of valid KB ids in the tool error message
 - raise search-round `max_llm_calls` to 2
+
+### Tool-call retry budget (`max_tool_retries`)
+
+Tool errors (bad filter, hallucinated `kb_id`, wrong-typed value) currently consume
+`max_llm_calls`; a failed tool call in a `max_llm_calls: 1` round ends the round without
+self-correction. Related to "Search round: kb_id hallucination has no self-correct path".
+Introduce a separate `max_tool_retries` budget (config, `OpenAiConfig`) so error-driven
+retries don't consume the successful-call budget: `max_llm_calls` counts successful calls
+(Stop or all tools executed without error), tool errors consume `max_tool_retries` instead.
+Deferred — observe how reliably the model drives the tools; implement only if tool errors
+recur regularly.
 
 ### LLM history: push the scenario limit to the DB
 
