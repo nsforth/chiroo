@@ -6,7 +6,8 @@ use crate::api::{Api, DEFAULT_PAGE_LIMIT};
 use crate::models::{Doc, Kb, KbRequest, ReindexRequest, ReindexResponse};
 use crate::output::{print_json, print_kv, print_table};
 use crate::util::{
-    parse_metadata, parse_reindex_mode, run_phase, PhaseContext, PhaseItem, PhaseOutcome, StopFlag,
+    parse_indexes, parse_metadata, parse_reindex_mode, run_phase, PhaseContext, PhaseItem,
+    PhaseOutcome, StopFlag,
 };
 
 #[derive(Subcommand)]
@@ -36,6 +37,9 @@ pub(crate) enum KbCommand {
         /// JSON metadata, e.g. '{"team":"ml"}'
         #[arg(long)]
         metadata: Option<String>,
+        /// JSON metadata indexes, e.g. '{"reporter":{"type":"keyword"},"updated_at":{"type":"datetime"}}'
+        #[arg(long)]
+        indexes: Option<String>,
         /// Language for BM25 stemming and stopwords, e.g. "russian"
         #[arg(long)]
         language: Option<String>,
@@ -53,6 +57,9 @@ pub(crate) enum KbCommand {
         /// JSON metadata, e.g. '{"team":"ml"}'
         #[arg(long)]
         metadata: Option<String>,
+        /// JSON metadata indexes, e.g. '{"reporter":{"type":"keyword"}}'; use '{}' to remove all indexes
+        #[arg(long)]
+        indexes: Option<String>,
     },
     /// Delete a knowledge base
     Delete { id: String },
@@ -86,15 +93,28 @@ pub(crate) async fn run(api: &Api, command: KbCommand) -> Result<()> {
             description,
             public,
             metadata,
+            indexes,
             language,
-        } => cmd_kb_create(api, &name, &description, public, &metadata, &language).await,
+        } => {
+            cmd_kb_create(
+                api,
+                &name,
+                &description,
+                public,
+                &metadata,
+                &indexes,
+                &language,
+            )
+            .await
+        },
         KbCommand::Update {
             id,
             name,
             description,
             public,
             metadata,
-        } => cmd_kb_update(api, &id, &name, &description, &public, &metadata).await,
+            indexes,
+        } => cmd_kb_update(api, &id, &name, &description, &public, &metadata, &indexes).await,
         KbCommand::Delete { id } => cmd_kb_delete(api, &id).await,
         KbCommand::Reindex {
             id,
@@ -156,6 +176,13 @@ async fn cmd_kb_get(api: &Api, id: &str, json: bool) -> Result<()> {
         ("description", kb.description),
         ("public", kb.public.to_string()),
         ("metadata", kb.metadata.to_string()),
+        (
+            "indexes",
+            kb.indexes
+                .as_ref()
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        ),
         ("language", kb.language.unwrap_or_default()),
         ("createdAt", kb.created_at),
         ("updatedAt", kb.updated_at),
@@ -169,6 +196,7 @@ async fn cmd_kb_create(
     description: &Option<String>,
     public: bool,
     metadata: &Option<String>,
+    indexes: &Option<String>,
     language: &Option<String>,
 ) -> Result<()> {
     let request = KbRequest {
@@ -176,6 +204,7 @@ async fn cmd_kb_create(
         description: description.clone().unwrap_or_default(),
         public,
         metadata: parse_metadata(metadata)?,
+        indexes: parse_indexes(indexes)?,
         language: language.clone(),
     };
     let kb: Kb = api
@@ -196,11 +225,13 @@ async fn cmd_kb_update(
     description: &Option<String>,
     public: &Option<bool>,
     metadata: &Option<String>,
+    indexes: &Option<String>,
 ) -> Result<()> {
     let existing: Kb = api
         .get_json(&format!("/internal/api/knowledge-bases/{id}"), &[])
         .await?;
     let new_metadata = parse_metadata(metadata)?;
+    let new_indexes = parse_indexes(indexes)?;
     let request = KbRequest {
         name: name.clone().unwrap_or(existing.name),
         description: description.clone().unwrap_or(existing.description),
@@ -210,6 +241,7 @@ async fn cmd_kb_update(
         } else {
             new_metadata
         },
+        indexes: new_indexes.or(existing.indexes),
         language: None,
     };
     let kb: Kb = api

@@ -467,3 +467,43 @@ AiService.stream_new / stream_continue → mpsc channel → tokio::spawn run_sce
   └─ append Round { message, sources } → insert_round (incremental)
 ```
 
+## KB indexes & search filters
+
+Knowledge bases have a nullable `indexes` JSON attribute declaring which top-level
+document-metadata fields are indexable/filterable. Admin-set via the internal API or
+`chiroo-cli kb create/update --indexes`. Shape: `{"<field>": {"type": "<type>", "description": "<text>"}}`;
+allowed types: `keyword, integer, float, bool, datetime, uuid`. Only top-level
+document-metadata keys are indexable (field names may not contain `.`). Validated at
+write time — 400 on bad input.
+
+Domain types:
+- `domain/models/kb_index.rs` — `IndexType`, `KbIndex`, `KbIndexes::parse`.
+- `domain/models/search_filter.rs` — `SearchFilter`, `from_llm_value` (parses the tool
+  `filters` argument), `validate` (against a `KbIndexes`), `scope`.
+
+Qdrant: the chunk payload stores the document `metadata` as a structured object under
+the payload key `metadata` (NOT a JSON string); the indexable path is always
+`metadata.<field>`. Field indexes are created/removed/retyped by
+`QdrantClient::sync_field_indexes` on KB create/update — Qdrant backfills new indexes
+over existing points, so changing `indexes` needs no document reindex. NOTE: after the
+string→object payload format change, existing collections need a one-time
+`chiroo-cli kb reindex --mode full` for filters to work on old chunks.
+
+The internal update endpoint (`PUT /internal/api/knowledge-bases/{id}`) is a full
+replace: omitting `indexes` in the request resets it to null, which also removes the
+KB's Qdrant `metadata.*` field indexes on the following sync. `chiroo-cli kb update`
+pre-loads the current KB to preserve omitted values; to clear indexes via the CLI pass
+`--indexes '{}'` (an explicit `null` to the API clears them directly).
+
+Search: two tools — `search_in_all_kbs` (broad search across all KBs, or a subset via
+`kb_ids`; no filters) and `search_in_kb` (single KB by id; `filters` validated strictly
+against that KB's indexes). Filter format ("form A"):
+object, conditions combined with AND, no nesting; a bare scalar value = equality; a range
+= object with any of `eq/gt/gte/lt/lte`; ranges only for `integer`/`float`/`datetime`;
+datetime values are RFC 3339 strings. Datetimes have second granularity (Qdrant datetime
+indexes truncate sub-seconds). Filters are applied to both hybrid-search prefetches
+(dense + BM25) via `search_hybrid(..., filter)`.
+
+The system prompt (`prompts/global_system.md`) lists each KB's "Filterable metadata
+fields".
+

@@ -1392,7 +1392,7 @@ mod tests {
     fn tool_call_block(id: &str, output: Value) -> MessagePart {
         MessagePart::ToolCall(ToolCallBlock {
             tool_call_id: id.to_string(),
-            tool_name: "search_knowledge_base".into(),
+            tool_name: "search_in_all_kbs".into(),
             input: serde_json::json!({ "queries": ["test"] }),
             output: Some(output),
             error: None,
@@ -1435,7 +1435,7 @@ mod tests {
         assert_eq!(json[0]["tool_calls"][0]["id"], "c1");
         assert_eq!(
             json[0]["tool_calls"][0]["function"]["name"],
-            "search_knowledge_base"
+            "search_in_all_kbs"
         );
         assert_eq!(json[0]["tool_calls"][1]["id"], "c2");
 
@@ -1731,7 +1731,7 @@ mod tests {
             tool_chunk(
                 0,
                 Some("call_1"),
-                Some("search_knowledge_base"),
+                Some("search_in_all_kbs"),
                 Some("{\"queries\":"),
             ),
             tool_chunk(0, None, None, Some("[\"rust\"]}")),
@@ -1773,12 +1773,7 @@ mod tests {
     #[test]
     fn accumulator_defers_start_until_tool_call_id_arrives() {
         let events = collect_tool_events(vec![
-            tool_chunk(
-                0,
-                None,
-                Some("search_knowledge_base"),
-                Some("{\"queries\":"),
-            ),
+            tool_chunk(0, None, Some("search_in_all_kbs"), Some("{\"queries\":")),
             tool_chunk(0, Some("call_9"), None, Some("[\"rust\"]}")),
         ]);
 

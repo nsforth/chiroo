@@ -22,6 +22,8 @@ pub struct CreateKbRequest {
     pub metadata: Value,
     #[serde(default)]
     pub language: Option<String>,
+    #[serde(default)]
+    pub indexes: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -32,6 +34,7 @@ pub struct KbResponse {
     pub public: bool,
     pub metadata: Value,
     pub language: Option<String>,
+    pub indexes: Option<Value>,
     #[serde(rename = "createdAt")]
     pub created_at: String,
     #[serde(rename = "updatedAt")]
@@ -47,6 +50,7 @@ impl From<KnowledgeBase> for KbResponse {
             public: kb.public,
             metadata: kb.metadata,
             language: kb.language,
+            indexes: kb.indexes.to_value(),
             created_at: kb.created_at.and_utc().to_rfc3339(),
             updated_at: kb.updated_at.and_utc().to_rfc3339(),
         }
@@ -62,6 +66,8 @@ pub struct UpdateKbRequest {
     pub public: bool,
     #[serde(default)]
     pub metadata: Value,
+    #[serde(default)]
+    pub indexes: Option<Value>,
 }
 
 pub async fn create_kb(
@@ -76,6 +82,7 @@ pub async fn create_kb(
             body.public,
             body.metadata,
             body.language,
+            body.indexes,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(kb.into())))
@@ -113,6 +120,7 @@ pub async fn update_kb(
             body.description,
             body.public,
             body.metadata,
+            body.indexes,
         )
         .await?;
     Ok(Json(kb.into()))

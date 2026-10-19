@@ -88,7 +88,7 @@ const emit = defineEmits<{
       </UChatTool>
 
       <ChatToolSearchKnowledgeBase
-        v-else-if="getToolName(part) === 'search_knowledge_base'"
+        v-else-if="getToolName(part) === 'search_in_all_kbs' || getToolName(part) === 'search_in_kb' || getToolName(part) === 'search_knowledge_base'"
         :streaming="isToolStreaming(part)"
         :queries="getSearchQueries(part)"
         :chunks="getSearchChunks(part)"

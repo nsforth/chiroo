@@ -11,7 +11,7 @@ pub fn simple() -> ScenarioDefinition {
         rounds: vec![
             RoundDefinition {
                 prompt_template: "simple/search.md".into(),
-                tool_names: vec!["search_knowledge_base".into()],
+                tool_names: vec!["search_in_all_kbs".into()],
                 max_llm_calls: 1,
                 reasoning_effort: None,
                 sampling: SamplingParams::default(),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tera::{Context, Tera};
 
+use crate::domain::models::kb_index::KbIndex;
 use crate::domain::models::knowledge_base::KnowledgeBase;
 
 /// Knowledge base entry rendered into the system prompt.
@@ -12,6 +13,7 @@ pub struct KbContext {
     pub name: String,
     pub description: String,
     pub language: Option<String>,
+    pub indexes: Vec<KbIndex>,
 }
 
 impl From<&KnowledgeBase> for KbContext {
@@ -24,6 +26,7 @@ impl From<&KnowledgeBase> for KbContext {
             name: kb.name.clone(),
             description,
             language: kb.language.clone(),
+            indexes: kb.indexes.entries().to_vec(),
         }
     }
 }
@@ -67,6 +70,7 @@ impl PromptRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::kb_index::IndexType;
 
     fn test_kb() -> KbContext {
         KbContext {
@@ -74,6 +78,18 @@ mod tests {
             name: "Company Docs".into(),
             description: "Internal company documentation and policies".into(),
             language: Some("english".into()),
+            indexes: vec![
+                KbIndex {
+                    field: "author".into(),
+                    r#type: IndexType::Keyword,
+                    description: Some("Who wrote the document".into()),
+                },
+                KbIndex {
+                    field: "updated_at".into(),
+                    r#type: IndexType::Datetime,
+                    description: None,
+                },
+            ],
         }
     }
 
@@ -132,6 +148,7 @@ mod tests {
             name: "Support Articles".into(),
             description: "Customer support knowledge base".into(),
             language: None,
+            indexes: vec![],
         });
         let result = renderer()
             .render_global_system(&ctx)
@@ -153,6 +170,42 @@ mod tests {
             .expect("Failed to render");
         assert!(result.contains("No knowledge bases are configured"));
         assert!(!result.contains("Company Docs"));
+        assert!(!result.contains("Fields available for `search_in_all_kbs` filters"));
+    }
+
+    #[test]
+    fn renders_kb_filterable_indexes() {
+        let result = renderer()
+            .render_global_system(&test_context())
+            .expect("Failed to render");
+        assert!(result.contains("Filterable metadata fields:"));
+        assert!(result.contains("- author (keyword): Who wrote the document"));
+        assert!(result.contains("- updated_at (datetime)"));
+    }
+
+    #[test]
+    fn omits_filterable_indexes_block_when_kb_has_none() {
+        let ctx = TemplateContext {
+            knowledge_bases: vec![KbContext {
+                indexes: vec![],
+                ..test_kb()
+            }],
+            ..test_context()
+        };
+        let result = renderer()
+            .render_global_system(&ctx)
+            .expect("Failed to render");
+        assert!(!result.contains("Filterable metadata fields:"));
+        assert!(!result.contains("- author (keyword)"));
+    }
+
+    #[test]
+    fn renders_new_search_tools() {
+        let result = renderer()
+            .render_global_system(&test_context())
+            .expect("Failed to render");
+        assert!(result.contains("search_in_all_kbs` — searches all knowledge bases"));
+        assert!(result.contains("search_in_kb` — searches ONE knowledge base"));
     }
 
     #[test]
@@ -160,7 +213,7 @@ mod tests {
         let result = renderer()
             .render("simple/search.md", &test_context())
             .expect("Failed to render");
-        assert!(result.contains("search_knowledge_base"));
+        assert!(result.contains("search_in_all_kbs"));
         assert!(result.contains("What is Rust?"));
     }
 
@@ -185,7 +238,7 @@ mod tests {
         let result = renderer()
             .render("deep_research/search.md", &test_context())
             .expect("Failed to render");
-        assert!(result.contains("search_knowledge_base"));
+        assert!(result.contains("search_in_all_kbs"));
     }
 
     #[test]

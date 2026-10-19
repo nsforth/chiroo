@@ -20,6 +20,16 @@ pub(crate) fn parse_metadata(raw: &Option<String>) -> Result<Value> {
     }
 }
 
+pub(crate) fn parse_indexes(raw: &Option<String>) -> Result<Option<Value>> {
+    match raw {
+        None => Ok(None),
+        Some(text) => {
+            let value: Value = serde_json::from_str(text).context("invalid --indexes JSON")?;
+            Ok(if value.is_null() { None } else { Some(value) })
+        },
+    }
+}
+
 pub(crate) fn parse_reindex_mode(mode: &str) -> Result<&str> {
     match mode {
         "compare" | "force" | "full" => Ok(mode),

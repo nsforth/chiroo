@@ -8,6 +8,7 @@ use crate::domain::models::document::{
     CreateDocument, Document, DocumentData, DocumentId, MimeType, ReindexMode,
 };
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};
+use crate::domain::models::kb_index::KbIndexes;
 use crate::domain::models::knowledge_base::{CreateKnowledgeBase, KnowledgeBase, KnowledgeBaseId};
 use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
@@ -76,13 +77,20 @@ impl KnowledgeService {
         public: bool,
         metadata: Value,
         language: Option<String>,
+        indexes: Option<Value>,
     ) -> Result<KnowledgeBase, AppError> {
+        let indexes = indexes.filter(|v| !v.is_null());
+        let parsed_indexes = match &indexes {
+            Some(v) => Some(KbIndexes::parse(v)?),
+            None => None,
+        };
         let cmd = CreateKnowledgeBase {
             name,
             description,
             public,
             metadata,
             language,
+            indexes,
         };
         let result = knowledge_base_repository::insert(&self.pool, &cmd).await;
         match &result {
@@ -101,6 +109,10 @@ impl KnowledgeService {
             dimensions = self.embedding_dimensions,
             status = "collection_created"
         );
+
+        self.qdrant_client
+            .sync_field_indexes(&kb.id, &parsed_indexes.unwrap_or_default())
+            .await?;
 
         Ok(kb)
     }
@@ -134,7 +146,13 @@ impl KnowledgeService {
         description: String,
         public: bool,
         metadata: Value,
+        indexes: Option<Value>,
     ) -> Result<KnowledgeBase, AppError> {
+        let indexes = indexes.filter(|v| !v.is_null());
+        let parsed_indexes = match &indexes {
+            Some(v) => Some(KbIndexes::parse(v)?),
+            None => None,
+        };
         let kb = KnowledgeBase {
             id,
             name,
@@ -142,6 +160,7 @@ impl KnowledgeService {
             public,
             metadata,
             language: None,
+            indexes: parsed_indexes.clone().unwrap_or_default(),
             created_at: chrono::NaiveDateTime::MIN,
             updated_at: chrono::NaiveDateTime::MIN,
         };
@@ -153,7 +172,13 @@ impl KnowledgeService {
             Ok(_) => info!(status = "success"),
             Err(e) => info!(error = e.to_string(), status = "failed"),
         }
-        Ok(result?)
+        let updated = result?;
+
+        self.qdrant_client
+            .sync_field_indexes(&kb.id, &kb.indexes)
+            .await?;
+
+        Ok(updated)
     }
 
     #[instrument(skip(self))]
@@ -739,6 +764,7 @@ mod tests {
                     false,
                     serde_json::json!({}),
                     None,
+                    None,
                 )
                 .await
                 .expect("create_kb");
@@ -793,6 +819,7 @@ mod tests {
                     "desc".into(),
                     false,
                     serde_json::json!({}),
+                    None,
                     None,
                 )
                 .await
@@ -872,6 +899,7 @@ mod tests {
                     false,
                     serde_json::json!({}),
                     None,
+                    None,
                 )
                 .await
                 .expect("create_kb");
@@ -948,6 +976,7 @@ mod tests {
                     false,
                     serde_json::json!({}),
                     None,
+                    None,
                 )
                 .await
                 .expect("create_kb");
@@ -1002,6 +1031,7 @@ mod tests {
                     "desc".into(),
                     false,
                     serde_json::json!({}),
+                    None,
                     None,
                 )
                 .await
@@ -1100,6 +1130,7 @@ mod tests {
                     false,
                     serde_json::json!({}),
                     None,
+                    None,
                 )
                 .await
                 .expect("create_kb");
@@ -1150,6 +1181,7 @@ mod tests {
                     "desc".into(),
                     false,
                     serde_json::json!({}),
+                    None,
                     None,
                 )
                 .await

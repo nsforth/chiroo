@@ -303,7 +303,7 @@ mod tests {
     fn tool_call_part_maps_to_dynamic_tool_ui_part() {
         let part = MessagePart::ToolCall(ToolCallBlock {
             tool_call_id: "call-1".into(),
-            tool_name: "search_knowledge_base".into(),
+            tool_name: "search_in_all_kbs".into(),
             input: serde_json::json!({ "queries": ["rust ownership"] }),
             output: Some(serde_json::json!({ "chunks": [{ "document_id": "doc-1" }] })),
             error: None,
@@ -312,9 +312,9 @@ mod tests {
 
         let ui = domain_part_to_ui(&part);
         let json = serde_json::to_value(&ui).unwrap();
-        assert_eq!(json["type"], "tool-search_knowledge_base");
+        assert_eq!(json["type"], "tool-search_in_all_kbs");
         assert_eq!(json["toolCallId"], "call-1");
-        assert_eq!(json["toolName"], "search_knowledge_base");
+        assert_eq!(json["toolName"], "search_in_all_kbs");
         assert_eq!(json["state"], "output-available");
         assert_eq!(json["providerExecuted"], true);
         assert_eq!(json["input"]["queries"][0], "rust ownership");
@@ -365,7 +365,7 @@ mod tests {
     fn pending_tool_call_maps_to_input_streaming() {
         let part = MessagePart::ToolCall(ToolCallBlock {
             tool_call_id: "call-3".into(),
-            tool_name: "search_knowledge_base".into(),
+            tool_name: "search_in_all_kbs".into(),
             input: serde_json::json!({ "queries": [] }),
             output: None,
             error: None,

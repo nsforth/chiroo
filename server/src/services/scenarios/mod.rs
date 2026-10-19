@@ -10,7 +10,9 @@ use crate::domain::models::tool::LLMTool;
 use crate::infra::clients::llm_client::RunRoundParams;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::search_service::SearchService;
-use crate::services::tools::knowledge_base::{ExtractDocumentTool, SearchKnowledgeBaseTool};
+use crate::services::tools::knowledge_base::{
+    ExtractDocumentTool, SearchAllKbsTool, SearchInKbTool,
+};
 
 #[derive(Clone)]
 pub struct RoundDefinition {
@@ -135,7 +137,12 @@ fn create_tool(
     limit: usize,
 ) -> Option<Box<dyn LLMTool>> {
     match name {
-        "search_knowledge_base" => Some(Box::new(SearchKnowledgeBaseTool::new(
+        "search_in_all_kbs" => Some(Box::new(SearchAllKbsTool::new(
+            search_service.clone(),
+            knowledge_service.clone(),
+            limit,
+        ))),
+        "search_in_kb" => Some(Box::new(SearchInKbTool::new(
             search_service.clone(),
             knowledge_service.clone(),
             limit,
@@ -239,7 +246,7 @@ mod tests {
         let scenario = simple();
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "simple/search.md");
-        assert!(r1.tool_names.contains(&"search_knowledge_base".into()));
+        assert!(r1.tool_names.contains(&"search_in_all_kbs".into()));
         assert!(r1.reasoning_effort.is_none());
         assert_eq!(r1.max_llm_calls, 1);
         assert!(r1.sampling.is_empty());
@@ -303,7 +310,7 @@ mod tests {
         let scenario = deep_research();
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "deep_research/search.md");
-        assert_eq!(r1.tool_names, vec!["search_knowledge_base"]);
+        assert_eq!(r1.tool_names, vec!["search_in_all_kbs"]);
         assert!(r1.reasoning_effort.is_some());
         assert_eq!(r1.max_llm_calls, 1);
         assert!(r1.enable_thinking);
@@ -324,7 +331,8 @@ mod tests {
         let scenario = deep_research();
         let r2 = &scenario.rounds[1];
         assert_eq!(r2.prompt_template, "deep_research/explore.md");
-        assert!(r2.tool_names.contains(&"search_knowledge_base".into()));
+        assert!(r2.tool_names.contains(&"search_in_all_kbs".into()));
+        assert!(r2.tool_names.contains(&"search_in_kb".into()));
         assert!(r2.tool_names.contains(&"extract_document".into()));
         assert!(r2.tool_choice.is_some());
         assert!(r2.enable_thinking);
@@ -408,12 +416,16 @@ mod tests {
         let search = make_search_service();
         let knowledge = make_knowledge_service();
         let tools = create_tools(
-            &["search_knowledge_base".into(), "extract_document".into()],
+            &[
+                "search_in_all_kbs".into(),
+                "search_in_kb".into(),
+                "extract_document".into(),
+            ],
             &search,
             &knowledge,
             10,
         );
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
     }
 
     #[test]
@@ -421,7 +433,7 @@ mod tests {
         let search = make_search_service();
         let knowledge = make_knowledge_service();
         let tools = create_tools(
-            &["search_knowledge_base".into(), "nonexistent".into()],
+            &["search_in_kb".into(), "nonexistent".into()],
             &search,
             &knowledge,
             10,

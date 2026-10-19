@@ -9,6 +9,8 @@ pub(crate) struct Kb {
     pub(crate) public: bool,
     pub(crate) metadata: Value,
     #[serde(default)]
+    pub(crate) indexes: Option<Value>,
+    #[serde(default)]
     pub(crate) language: Option<String>,
     #[serde(rename = "createdAt")]
     pub(crate) created_at: String,
@@ -22,6 +24,8 @@ pub(crate) struct KbRequest {
     pub(crate) description: String,
     pub(crate) public: bool,
     pub(crate) metadata: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) indexes: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) language: Option<String>,
 }

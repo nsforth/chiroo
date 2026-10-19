@@ -3,13 +3,15 @@ use std::time::Duration;
 
 use qdrant_client::qdrant::condition::ConditionOneOf;
 use qdrant_client::qdrant::points_selector::PointsSelectorOneOf;
+use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, vectors::VectorsOptions, Condition, CreateCollectionBuilder,
-    CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance, DocumentBuilder,
-    FieldCondition, FieldType, Filter, Fusion, NamedVectors, PointId, PointStruct, PointsIdsList,
-    PrefetchQueryBuilder, QueryPointsBuilder, ScoredPoint, ScrollPointsBuilder,
-    SetPayloadPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder, UpsertPointsBuilder,
-    Vector, VectorParamsBuilder, Vectors, VectorsOutput,
+    CreateFieldIndexCollectionBuilder, DatetimeRange, DeleteFieldIndexCollectionBuilder,
+    DeletePointsBuilder, Distance, DocumentBuilder, FieldCondition, FieldType, Filter, Fusion,
+    Match, NamedVectors, PayloadSchemaType, PointId, PointStruct, PointsIdsList,
+    PrefetchQueryBuilder, QueryPointsBuilder, Range, ScoredPoint, ScrollPointsBuilder,
+    SetPayloadPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder, Timestamp,
+    UpsertPointsBuilder, Vector, VectorParamsBuilder, Vectors, VectorsOutput,
 };
 use qdrant_client::{Payload, Qdrant};
 use serde::{Deserialize, Serialize};
@@ -19,7 +21,9 @@ use uuid::Uuid;
 
 use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId, SearchedChunk};
+use crate::domain::models::kb_index::{IndexType, KbIndexes};
 use crate::domain::models::knowledge_base::KnowledgeBaseId;
+use crate::domain::models::search_filter::{FilterOp, SearchFilter, SearchFilterCondition};
 use crate::errors::AppError;
 
 const SPARSE_VECTOR_NAME: &str = "bm25";
@@ -105,6 +109,83 @@ impl QdrantClient {
             debug!(error = msg, status = "failed");
             AppError::QdrantError(msg)
         })?;
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    pub async fn sync_field_indexes(
+        &self,
+        kb_id: &KnowledgeBaseId,
+        indexes: &KbIndexes,
+    ) -> Result<(), AppError> {
+        let name = self.collection_name(kb_id);
+
+        let info = self.client.collection_info(&name).await.map_err(|e| {
+            let msg = e.to_string();
+            debug!(error = msg, status = "failed");
+            AppError::QdrantError(msg)
+        })?;
+        let payload_schema = info.result.map(|c| c.payload_schema).unwrap_or_default();
+
+        let desired: HashMap<String, FieldType> = indexes
+            .entries()
+            .iter()
+            .map(|entry| {
+                (
+                    format!("metadata.{}", entry.field),
+                    index_field_type(entry.r#type),
+                )
+            })
+            .collect();
+
+        for (key, field_type) in &desired {
+            let needs_recreate = payload_schema
+                .get(key)
+                .map(|existing| {
+                    PayloadSchemaType::try_from(existing.data_type).ok()
+                        != Some(index_schema_type(*field_type))
+                })
+                .unwrap_or(true);
+
+            if needs_recreate {
+                if payload_schema.contains_key(key) {
+                    self.client
+                        .delete_field_index(DeleteFieldIndexCollectionBuilder::new(&name, key))
+                        .await
+                        .map_err(|e| {
+                            let msg = e.to_string();
+                            debug!(error = msg, status = "failed");
+                            AppError::QdrantError(msg)
+                        })?;
+                }
+                self.client
+                    .create_field_index(CreateFieldIndexCollectionBuilder::new(
+                        &name,
+                        key,
+                        *field_type,
+                    ))
+                    .await
+                    .map_err(|e| {
+                        let msg = e.to_string();
+                        debug!(error = msg, status = "failed");
+                        AppError::QdrantError(msg)
+                    })?;
+            }
+        }
+
+        for key in payload_schema.keys() {
+            if key.starts_with("metadata.") && !desired.contains_key(key) {
+                self.client
+                    .delete_field_index(DeleteFieldIndexCollectionBuilder::new(&name, key))
+                    .await
+                    .map_err(|e| {
+                        let msg = e.to_string();
+                        debug!(error = msg, status = "failed");
+                        AppError::QdrantError(msg)
+                    })?;
+            }
+        }
+
         Ok(())
     }
 
@@ -211,7 +292,7 @@ impl QdrantClient {
         let payload = Payload::try_from(serde_json::json!({
             "title": title,
             "url": url,
-            "metadata": serde_json::to_string(metadata).unwrap_or_default(),
+            "metadata": metadata,
         }))
         .map_err(|e| AppError::QdrantError(e.to_string()))?;
 
@@ -330,7 +411,7 @@ impl QdrantClient {
                     .map_err(|e| AppError::QdrantError(e.to_string()))?;
 
                 let embedding = extract_dense_vector(&point.vectors);
-                let metadata = serde_json::from_str(&cp.metadata).unwrap_or_default();
+                let metadata = cp.metadata;
 
                 results.push(DocumentChunk {
                     id: DocumentChunkId(uuid),
@@ -367,10 +448,13 @@ impl QdrantClient {
         query_text: &str,
         limit: u64,
         language: Option<&str>,
+        filter: Option<&SearchFilter>,
     ) -> Result<Vec<SearchedChunk>, AppError> {
         let name = self.collection_name(kb_id);
 
-        let dense_prefetch = PrefetchQueryBuilder::default()
+        let qfilter: Option<Filter> = filter.filter(|f| !f.is_empty()).map(build_search_filter);
+
+        let mut dense_prefetch = PrefetchQueryBuilder::default()
             .query(dense_vector)
             .limit(limit);
 
@@ -387,10 +471,15 @@ impl QdrantClient {
             )),
         };
 
-        let sparse_prefetch = PrefetchQueryBuilder::default()
+        let mut sparse_prefetch = PrefetchQueryBuilder::default()
             .query(bm25_query)
             .using(SPARSE_VECTOR_NAME.to_string())
             .limit(limit);
+
+        if let Some(qfilter) = qfilter {
+            dense_prefetch = dense_prefetch.filter(qfilter.clone());
+            sparse_prefetch = sparse_prefetch.filter(qfilter);
+        }
 
         let response = self
             .client
@@ -416,6 +505,178 @@ impl QdrantClient {
             .collect();
 
         Ok(results)
+    }
+}
+
+fn index_field_type(index_type: IndexType) -> FieldType {
+    match index_type {
+        IndexType::Keyword => FieldType::Keyword,
+        IndexType::Integer => FieldType::Integer,
+        IndexType::Float => FieldType::Float,
+        IndexType::Bool => FieldType::Bool,
+        IndexType::Datetime => FieldType::Datetime,
+        IndexType::Uuid => FieldType::Uuid,
+    }
+}
+
+fn index_schema_type(field_type: FieldType) -> PayloadSchemaType {
+    match field_type {
+        FieldType::Keyword => PayloadSchemaType::Keyword,
+        FieldType::Integer => PayloadSchemaType::Integer,
+        FieldType::Float => PayloadSchemaType::Float,
+        FieldType::Geo => PayloadSchemaType::Geo,
+        FieldType::Text => PayloadSchemaType::Text,
+        FieldType::Bool => PayloadSchemaType::Bool,
+        FieldType::Datetime => PayloadSchemaType::Datetime,
+        FieldType::Uuid => PayloadSchemaType::Uuid,
+    }
+}
+
+fn build_search_filter(filter: &SearchFilter) -> Filter {
+    let must = filter
+        .conditions()
+        .iter()
+        .map(condition_to_qdrant)
+        .collect();
+    Filter {
+        must,
+        ..Default::default()
+    }
+}
+
+fn condition_to_qdrant(condition: &SearchFilterCondition) -> Condition {
+    let key = format!("metadata.{}", condition.field);
+    let index_type = condition
+        .index_type
+        .expect("filter must be scoped to a KB before building the Qdrant filter");
+
+    let field_condition = if condition.op == FilterOp::Eq {
+        eq_field_condition(key, index_type, &condition.value)
+    } else {
+        range_field_condition(key, index_type, condition.op, &condition.value)
+    };
+
+    Condition {
+        condition_one_of: Some(ConditionOneOf::Field(field_condition)),
+        ..Default::default()
+    }
+}
+
+fn eq_field_condition(key: String, index_type: IndexType, value: &Value) -> FieldCondition {
+    match index_type {
+        IndexType::Keyword | IndexType::Uuid | IndexType::Datetime => FieldCondition {
+            key,
+            r#match: Some(Match {
+                match_value: Some(MatchValue::Keyword(
+                    value.as_str().expect("validated as a string").to_string(),
+                )),
+            }),
+            ..Default::default()
+        },
+        IndexType::Bool => FieldCondition {
+            key,
+            r#match: Some(Match {
+                match_value: Some(MatchValue::Boolean(
+                    value.as_bool().expect("validated as a boolean"),
+                )),
+            }),
+            ..Default::default()
+        },
+        IndexType::Integer => FieldCondition {
+            key,
+            r#match: Some(Match {
+                match_value: Some(MatchValue::Integer(
+                    value.as_i64().expect("validated as an integer"),
+                )),
+            }),
+            ..Default::default()
+        },
+        IndexType::Float => {
+            let v = value.as_f64().expect("validated as a number");
+            FieldCondition {
+                key,
+                range: Some(Range {
+                    gte: Some(v),
+                    lte: Some(v),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        },
+    }
+}
+
+fn range_field_condition(
+    key: String,
+    index_type: IndexType,
+    op: FilterOp,
+    value: &Value,
+) -> FieldCondition {
+    match index_type {
+        IndexType::Integer | IndexType::Float => {
+            let v = value.as_f64().expect("validated as a number");
+            let range = match op {
+                FilterOp::Gt => Range {
+                    gt: Some(v),
+                    ..Default::default()
+                },
+                FilterOp::Gte => Range {
+                    gte: Some(v),
+                    ..Default::default()
+                },
+                FilterOp::Lt => Range {
+                    lt: Some(v),
+                    ..Default::default()
+                },
+                FilterOp::Lte => Range {
+                    lte: Some(v),
+                    ..Default::default()
+                },
+                FilterOp::Eq => unreachable!(),
+            };
+            FieldCondition {
+                key,
+                range: Some(range),
+                ..Default::default()
+            }
+        },
+        IndexType::Datetime => {
+            let parsed = chrono::DateTime::parse_from_rfc3339(
+                value
+                    .as_str()
+                    .expect("validated as an RFC 3339 datetime string"),
+            )
+            .expect("validated as an RFC 3339 datetime");
+            let timestamp = Timestamp {
+                seconds: parsed.timestamp(),
+                nanos: parsed.timestamp_subsec_nanos() as i32,
+            };
+            let datetime_range = match op {
+                FilterOp::Gt => DatetimeRange {
+                    gt: Some(timestamp),
+                    ..Default::default()
+                },
+                FilterOp::Gte => DatetimeRange {
+                    gte: Some(timestamp),
+                    ..Default::default()
+                },
+                FilterOp::Lt => DatetimeRange {
+                    lt: Some(timestamp),
+                    ..Default::default()
+                },
+                FilterOp::Lte => DatetimeRange {
+                    lte: Some(timestamp),
+                    ..Default::default()
+                },
+                FilterOp::Eq => unreachable!(),
+            };
+            FieldCondition {
+                key,
+                datetime_range: Some(datetime_range),
+                ..Default::default()
+            }
+        },
+        _ => unreachable!("validate() rejects range operators on keyword, uuid and bool fields"),
     }
 }
 
@@ -496,7 +757,8 @@ struct ChunkPayload {
     version: String,
     title: String,
     url: String,
-    metadata: String,
+    #[serde(default)]
+    metadata: Value,
 }
 
 impl From<&DocumentChunk> for ChunkPayload {
@@ -512,7 +774,7 @@ impl From<&DocumentChunk> for ChunkPayload {
             version: chunk.version.clone(),
             title: chunk.title.clone(),
             url: chunk.url.clone(),
-            metadata: serde_json::to_string(&chunk.metadata).unwrap_or_default(),
+            metadata: chunk.metadata.clone(),
         }
     }
 }
@@ -524,8 +786,7 @@ impl ChunkPayload {
         kb_id: KnowledgeBaseId,
         score: f32,
     ) -> Result<SearchedChunk, AppError> {
-        let metadata = serde_json::from_str(&self.metadata)
-            .map_err(|e| AppError::QdrantError(e.to_string()))?;
+        let metadata = self.metadata;
         Ok(SearchedChunk {
             id,
             document_id: DocumentId(self.document_id),
@@ -572,15 +833,23 @@ fn searched_chunk_from_scored_point(
 }
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
 
+    use qdrant_client::qdrant::condition::ConditionOneOf;
+    use qdrant_client::qdrant::r#match::MatchValue;
+    use qdrant_client::qdrant::{
+        DatetimeRange, FieldCondition, FieldType, Match, PayloadSchemaType, Range, Timestamp,
+    };
     use serde_json::Value;
     use uuid::Uuid;
 
     use super::QdrantClient;
     use crate::domain::models::document::DocumentId;
     use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};
+    use crate::domain::models::kb_index::{IndexType, KbIndexes};
     use crate::domain::models::knowledge_base::KnowledgeBaseId;
+    use crate::domain::models::search_filter::SearchFilter;
 
     const QDRANT_URL: &str = "http://localhost:6334";
     const VECTOR_SIZE: u64 = 4;
@@ -689,6 +958,7 @@ mod tests {
                 "largest non-negative integer",
                 5,
                 None,
+                None,
             )
             .await
             .expect("search hybrid");
@@ -781,7 +1051,7 @@ mod tests {
             .expect("delete chunks");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "chunk", 5, None)
+            .search_hybrid(&kb_id, small_embedding(0.5), "chunk", 5, None, None)
             .await
             .expect("search");
 
@@ -821,7 +1091,7 @@ mod tests {
             .expect("delete by document");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.3), "chunk", 10, None)
+            .search_hybrid(&kb_id, small_embedding(0.3), "chunk", 10, None, None)
             .await
             .expect("search");
 
@@ -892,7 +1162,7 @@ mod tests {
             .expect("create collection");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None)
+            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None, None)
             .await
             .expect("search on empty collection");
 
@@ -914,7 +1184,7 @@ mod tests {
         let client = make_client("search_nonexistent");
 
         let result = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None)
+            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None, None)
             .await;
 
         assert!(
@@ -934,5 +1204,238 @@ mod tests {
             result.is_ok(),
             "delete nonexistent collection should be idempotent"
         );
+    }
+
+    fn chunk_payload_json(metadata: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "document_id": "doc-1",
+            "chunk_index": 0,
+            "chunk_total": 1,
+            "chunk_offset": 0,
+            "chunk_length": 3,
+            "document_total_length": 10,
+            "content": "abc",
+            "version": "v1",
+            "title": "t",
+            "url": "https://example.com",
+            "metadata": metadata,
+        })
+    }
+
+    #[test]
+    fn chunk_payload_deserializes_object_metadata() {
+        let json = chunk_payload_json(serde_json::json!({ "author": "Alice" }));
+        let cp: super::ChunkPayload = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(cp.metadata, serde_json::json!({ "author": "Alice" }));
+    }
+
+    #[test]
+    fn chunk_payload_deserializes_missing_metadata() {
+        let mut json = chunk_payload_json(serde_json::Value::Null);
+        json.as_object_mut().expect("object").remove("metadata");
+        let cp: super::ChunkPayload = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(cp.metadata, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn index_field_type_maps_all_variants() {
+        assert_eq!(
+            super::index_field_type(IndexType::Keyword),
+            FieldType::Keyword
+        );
+        assert_eq!(
+            super::index_field_type(IndexType::Integer),
+            FieldType::Integer
+        );
+        assert_eq!(super::index_field_type(IndexType::Float), FieldType::Float);
+        assert_eq!(super::index_field_type(IndexType::Bool), FieldType::Bool);
+        assert_eq!(
+            super::index_field_type(IndexType::Datetime),
+            FieldType::Datetime
+        );
+        assert_eq!(super::index_field_type(IndexType::Uuid), FieldType::Uuid);
+    }
+
+    #[test]
+    fn build_search_filter_maps_conditions_to_must() {
+        let indexes = KbIndexes::parse(&serde_json::json!({
+            "reporter": { "type": "keyword" },
+            "count": { "type": "integer" },
+            "updated_at": { "type": "datetime" },
+            "flag": { "type": "bool" },
+        }))
+        .expect("valid indexes");
+
+        let filter = SearchFilter::from_llm_value(&serde_json::json!({
+            "reporter": "alice",
+            "count": { "gte": 10, "lte": 20 },
+            "updated_at": { "gte": "2026-01-01T00:00:00Z" },
+            "flag": true,
+        }))
+        .expect("valid filter")
+        .scope(&indexes);
+
+        let qfilter = super::build_search_filter(&filter);
+        assert_eq!(qfilter.must.len(), 5);
+
+        let field_conditions: Vec<&FieldCondition> = qfilter
+            .must
+            .iter()
+            .map(|c| match &c.condition_one_of {
+                Some(ConditionOneOf::Field(fc)) => fc,
+                other => panic!("expected a field condition, got {other:?}"),
+            })
+            .collect();
+
+        let keys: Vec<&str> = field_conditions.iter().map(|fc| fc.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "metadata.count",
+                "metadata.count",
+                "metadata.flag",
+                "metadata.reporter",
+                "metadata.updated_at",
+            ]
+        );
+
+        let count_gte = &field_conditions[0];
+        assert_eq!(
+            count_gte.range,
+            Some(Range {
+                gte: Some(10.0),
+                gt: None,
+                lt: None,
+                lte: None,
+            })
+        );
+        assert_eq!(count_gte.r#match, None);
+
+        let count_lte = &field_conditions[1];
+        assert_eq!(
+            count_lte.range,
+            Some(Range {
+                gte: None,
+                gt: None,
+                lt: None,
+                lte: Some(20.0),
+            })
+        );
+
+        let flag = &field_conditions[2];
+        assert_eq!(
+            flag.r#match,
+            Some(Match {
+                match_value: Some(MatchValue::Boolean(true)),
+            })
+        );
+
+        let reporter = &field_conditions[3];
+        assert_eq!(
+            reporter.r#match,
+            Some(Match {
+                match_value: Some(MatchValue::Keyword("alice".to_string())),
+            })
+        );
+
+        let updated_at = &field_conditions[4];
+        let dt =
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z").expect("valid RFC 3339");
+        assert_eq!(
+            updated_at.datetime_range,
+            Some(DatetimeRange {
+                gte: Some(Timestamp {
+                    seconds: dt.timestamp(),
+                    nanos: 0,
+                }),
+                gt: None,
+                lt: None,
+                lte: None,
+            })
+        );
+        assert_eq!(updated_at.r#match, None);
+    }
+
+    async fn payload_schema(
+        client: &QdrantClient,
+        kb_id: &KnowledgeBaseId,
+    ) -> HashMap<String, PayloadSchemaType> {
+        let name = client.collection_name(kb_id);
+        let info = client
+            .client
+            .collection_info(&name)
+            .await
+            .expect("collection_info");
+        let info = info.result.expect("collection info should be present");
+        info.payload_schema
+            .into_iter()
+            .map(|(key, value)| {
+                (
+                    key,
+                    PayloadSchemaType::try_from(value.data_type)
+                        .expect("known payload schema type"),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Qdrant"]
+    async fn sync_field_indexes() {
+        let kb_id = make_kb_id();
+        let client = make_client("sync_field_indexes");
+
+        client
+            .create_collection(&kb_id, VECTOR_SIZE)
+            .await
+            .expect("create collection");
+
+        let indexes = KbIndexes::parse(&serde_json::json!({
+            "reporter": { "type": "keyword" },
+            "updated_at": { "type": "datetime" },
+        }))
+        .expect("valid indexes");
+        client
+            .sync_field_indexes(&kb_id, &indexes)
+            .await
+            .expect("initial sync");
+
+        let schema = payload_schema(&client, &kb_id).await;
+        assert_eq!(
+            schema.get("metadata.reporter"),
+            Some(&PayloadSchemaType::Keyword)
+        );
+        assert_eq!(
+            schema.get("metadata.updated_at"),
+            Some(&PayloadSchemaType::Datetime)
+        );
+        assert_eq!(schema.get("document_id"), Some(&PayloadSchemaType::Keyword));
+
+        let changed = KbIndexes::parse(&serde_json::json!({
+            "reporter": { "type": "integer" },
+            "count": { "type": "integer" },
+        }))
+        .expect("valid indexes");
+        client
+            .sync_field_indexes(&kb_id, &changed)
+            .await
+            .expect("second sync");
+
+        let schema = payload_schema(&client, &kb_id).await;
+        assert_eq!(
+            schema.get("metadata.reporter"),
+            Some(&PayloadSchemaType::Integer)
+        );
+        assert_eq!(
+            schema.get("metadata.count"),
+            Some(&PayloadSchemaType::Integer)
+        );
+        assert!(!schema.contains_key("metadata.updated_at"));
+        assert_eq!(schema.get("document_id"), Some(&PayloadSchemaType::Keyword));
+
+        client
+            .delete_collection(&kb_id)
+            .await
+            .expect("delete collection");
     }
 }

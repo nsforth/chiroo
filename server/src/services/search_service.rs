@@ -6,6 +6,7 @@ use tracing::{info, instrument};
 
 use crate::domain::models::document_chunk::{DocumentChunkId, SearchedChunk};
 use crate::domain::models::knowledge_base::KnowledgeBase;
+use crate::domain::models::search_filter::SearchFilter;
 use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
@@ -39,15 +40,14 @@ impl SearchService {
     }
 
     #[instrument(skip(self, kbs), fields(kbs = %kbs.log_view()))]
-    pub async fn search_one(
+    pub async fn search_all(
         &self,
-        query: &str,
+        queries: Vec<String>,
         kbs: &[KnowledgeBase],
         limit: usize,
+        filters: &SearchFilter,
     ) -> Result<Vec<SearchedChunk>, AppError> {
-        let result = self
-            .search_impl(vec![query.to_string()], kbs, None, limit)
-            .await;
+        let result = self.search_impl(queries, kbs, limit, Some(filters)).await;
         match &result {
             Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
             Err(e) => info!(error = e.to_string(), status = "failed"),
@@ -55,45 +55,24 @@ impl SearchService {
         result
     }
 
-    #[instrument(skip(self, kbs), fields(kbs = %kbs.log_view()))]
-    pub async fn search_many(
+    #[instrument(skip(self, kb), fields(kb = %kb.name))]
+    pub async fn search_in_kb(
         &self,
         queries: Vec<String>,
-        kbs: &[KnowledgeBase],
+        kb: &KnowledgeBase,
         limit: usize,
+        filters: &SearchFilter,
     ) -> Result<Vec<SearchedChunk>, AppError> {
-        let result = self.search_impl(queries, kbs, None, limit).await;
-        match &result {
-            Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
-        }
-        result
-    }
-
-    #[instrument(skip(self, kbs), fields(kbs = %kbs.log_view()))]
-    pub async fn search_grouped(
-        &self,
-        queries: Vec<String>,
-        kbs: &[KnowledgeBase],
-        per_query_limit: usize,
-        total_limit: usize,
-    ) -> Result<Vec<SearchedChunk>, AppError> {
-        let result = self
-            .search_impl(queries, kbs, Some(per_query_limit), total_limit)
-            .await;
-        match &result {
-            Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
-        }
-        result
+        self.search_all(queries, std::slice::from_ref(kb), limit, filters)
+            .await
     }
 
     async fn search_impl(
         &self,
         queries: Vec<String>,
         kbs: &[KnowledgeBase],
-        per_query_limit: Option<usize>,
         total_limit: usize,
+        filters: Option<&SearchFilter>,
     ) -> Result<Vec<SearchedChunk>, AppError> {
         let unique = dedup_queries(queries);
         if unique.is_empty() {
@@ -116,6 +95,7 @@ impl SearchService {
             let rerank_client = self.rerank_client.clone();
             let kbs = kbs.clone();
             let query = query.clone();
+            let filters = filters;
 
             futures.push(async move {
                 search_one_query(
@@ -126,6 +106,7 @@ impl SearchService {
                     dense_vector,
                     candidate_limit,
                     threshold,
+                    filters,
                 )
                 .await
             });
@@ -133,11 +114,7 @@ impl SearchService {
 
         let mut all = Vec::new();
         for result in join_all(futures).await {
-            let mut chunks = result?;
-            if let Some(limit) = per_query_limit {
-                chunks.truncate(limit);
-            }
-            all.extend(chunks);
+            all.extend(result?);
         }
 
         Ok(merge_top(all, total_limit))
@@ -152,8 +129,17 @@ async fn search_one_query(
     dense_vector: Vec<f32>,
     candidate_limit: u64,
     threshold: f32,
+    filters: Option<&SearchFilter>,
 ) -> Result<Vec<SearchedChunk>, AppError> {
-    let chunks = search_in_kbs(qdrant_client, kbs, query, dense_vector, candidate_limit).await?;
+    let chunks = search_in_kbs(
+        qdrant_client,
+        kbs,
+        query,
+        dense_vector,
+        candidate_limit,
+        filters,
+    )
+    .await?;
     let chunks = dedup_chunks(chunks);
 
     let contents: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
@@ -172,6 +158,7 @@ async fn search_in_kbs(
     query: &str,
     dense_vector: Vec<f32>,
     candidate_limit: u64,
+    filters: Option<&SearchFilter>,
 ) -> Result<Vec<SearchedChunk>, AppError> {
     let futures = kbs.iter().map(|kb| {
         let client = qdrant_client.clone();
@@ -180,6 +167,7 @@ async fn search_in_kbs(
         let dense_vector = dense_vector.clone();
         let query = query.to_string();
         async move {
+            let scoped = filters.map(|f| f.scope(&kb.indexes));
             client
                 .search_hybrid(
                     &kb_id,
@@ -187,6 +175,7 @@ async fn search_in_kbs(
                     &query,
                     candidate_limit,
                     language.as_deref(),
+                    scoped.as_ref(),
                 )
                 .await
         }
@@ -458,6 +447,7 @@ mod tests {
                     false,
                     serde_json::json!({}),
                     None,
+                    None,
                 )
                 .await
                 .expect("create_kb");
@@ -482,10 +472,11 @@ mod tests {
                 .expect("create_document");
 
             let chunks = search_service
-                .search_many(
+                .search_all(
                     vec!["What is the capital of France?".to_string()],
                     &[kb.clone()],
                     10,
+                    &SearchFilter::default(),
                 )
                 .await
                 .expect("search");

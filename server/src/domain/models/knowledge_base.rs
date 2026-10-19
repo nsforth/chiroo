@@ -4,6 +4,7 @@ use serde_json::Value;
 use tera::Context;
 use uuid::Uuid;
 
+use crate::domain::models::kb_index::KbIndexes;
 use crate::errors::AppError;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub struct CreateKnowledgeBase {
     pub public: bool,
     pub metadata: Value,
     pub language: Option<String>,
+    pub indexes: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +28,7 @@ pub struct KnowledgeBase {
     pub public: bool,
     pub metadata: Value,
     pub language: Option<String>,
+    pub indexes: KbIndexes,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

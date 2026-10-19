@@ -70,6 +70,8 @@ function resolvePartStatus(part: UIMessage['parts'][number], isLast: boolean): S
 
 function resolveToolStreamingStatus(part: ToolPart): StreamingStatus {
   switch (getToolName(part)) {
+    case 'search_in_all_kbs':
+    case 'search_in_kb':
     case 'search_knowledge_base':
       return { type: 'searching', query: getSearchQueries(part).join(', ') }
     case 'web_search':

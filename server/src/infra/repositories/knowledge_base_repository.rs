@@ -8,6 +8,7 @@ use serde_json::Value;
 use tracing::instrument;
 use uuid::Uuid;
 
+use crate::domain::models::kb_index::KbIndexes;
 use crate::domain::models::knowledge_base::{CreateKnowledgeBase, KnowledgeBase, KnowledgeBaseId};
 use crate::infra::db::schema::knowledge_bases;
 use crate::infra::errors::{map_infra_error, InfraError};
@@ -22,6 +23,7 @@ struct KnowledgeBaseDb {
     pub public: bool,
     pub metadata: Value,
     pub language: Option<String>,
+    pub indexes: Option<Value>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -34,6 +36,7 @@ struct NewKnowledgeBaseDb {
     public: bool,
     metadata: Value,
     language: Option<String>,
+    indexes: Option<Value>,
 }
 
 impl Into<KnowledgeBase> for KnowledgeBaseDb {
@@ -45,6 +48,12 @@ impl Into<KnowledgeBase> for KnowledgeBaseDb {
             public: self.public,
             metadata: self.metadata,
             language: self.language,
+            indexes: match &self.indexes {
+                None | Some(Value::Null) => KbIndexes::default(),
+                Some(v) => KbIndexes::parse(v).unwrap_or_else(|e| {
+                    panic!("corrupt indexes for knowledge base {}: {e}", self.id)
+                }),
+            },
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -62,6 +71,7 @@ pub async fn insert(
         public: cmd.public,
         metadata: cmd.metadata.clone(),
         language: cmd.language.clone(),
+        indexes: cmd.indexes.clone(),
     };
     let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(|conn| {
@@ -122,6 +132,7 @@ pub async fn update(
     let description = kb.description.clone();
     let public = kb.public;
     let metadata = kb.metadata.clone();
+    let indexes = kb.indexes.to_value();
     let conn = pool.get().await.map_err(map_infra_error)?;
     conn.interact(move |conn| {
         diesel::update(knowledge_bases::table.find(id))
@@ -130,6 +141,7 @@ pub async fn update(
                 knowledge_bases::description.eq(description),
                 knowledge_bases::public.eq(public),
                 knowledge_bases::metadata.eq(metadata),
+                knowledge_bases::indexes.eq(indexes),
                 knowledge_bases::updated_at.eq(diesel::dsl::now),
             ))
             .returning(KnowledgeBaseDb::as_returning())

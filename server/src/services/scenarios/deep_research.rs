@@ -13,7 +13,7 @@ pub fn deep_research() -> ScenarioDefinition {
         rounds: vec![
             RoundDefinition {
                 prompt_template: "deep_research/search.md".into(),
-                tool_names: vec!["search_knowledge_base".into()],
+                tool_names: vec!["search_in_all_kbs".into()],
                 max_llm_calls: 1,
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 sampling: SamplingParams::default(),
@@ -27,7 +27,11 @@ pub fn deep_research() -> ScenarioDefinition {
             },
             RoundDefinition {
                 prompt_template: "deep_research/explore.md".into(),
-                tool_names: vec!["search_knowledge_base".into(), "extract_document".into()],
+                tool_names: vec![
+                    "search_in_all_kbs".into(),
+                    "search_in_kb".into(),
+                    "extract_document".into(),
+                ],
                 max_llm_calls: 10,
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 sampling: SamplingParams::default(),

@@ -177,8 +177,9 @@ Affected:
 
 ### Search round: kb_id hallucination has no self-correct path
 
-`search_knowledge_base` rejects bad `kb_ids` with a tool error ("Invalid knowledge base id: ..." /
-"Unknown knowledge base id: ..."), but `simple/search` and `deep_research/search` rounds have
+`search_in_all_kbs` / `search_in_kb` reject bad `kb_ids` / `kb_id` with a tool error ("Invalid
+knowledge base id: ..." / "Unknown knowledge base id: ..." / "knowledge base not found: ..."),
+but `simple/search` and `deep_research/search` rounds have
 `max_llm_calls: 1`, so a hallucinated id ends the round with a tool error: extract runs without
 document_ids and the final answer degrades to "not found" even when the data exists.
 Only `deep_research/explore` (max_llm_calls: 10) can self-correct today.
@@ -198,3 +199,11 @@ the DB select only the last N scenarios (with their rounds) and fetch just those
 ### Markdown render: defensive fallback on parse failure
 
 Comark parses LLM/assistant and tool (search/extract) markdown without a `.catch` in its async `setup`, so a parser crash blanks the whole part (no console error). Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and the tool content components (`SearchKnowledgeBase.vue`, `ExtractDocument.vue`). Deferred after the comark 0.3→0.6 upgrade, which fixed the known nested-bracket link crash.
+
+### Qdrant datetime granularity
+
+Qdrant datetime indexes have second granularity: sub-seconds in document metadata values and
+filter values are silently truncated (an `eq` on a datetime can match all values within the
+same second). Needs a decision: truncate at document save (only fields declared `datetime` in
+`indexes`), truncate/validate filter values, and keep DB metadata ↔ Qdrant payload consistent
+on reindex — currently they can drift.
