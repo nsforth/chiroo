@@ -20,7 +20,6 @@ infra/     → Diesel schema, repositories (SQL queries)
 domain/    → pure data types (Chat, ChatId, UserId, Vote, Scenario, Round, MessageId)
 utils/     → shared utilities (extract_cookie, custom Axum extractors)
 ```
-`
 `AppState` is the DI container holding all services.
 
 ## Configuration
@@ -94,21 +93,22 @@ name differs from the config key) and, if it has a default, a line in
 
 A chat turn is a `Scenario`; the user message is the first round. Domain types in `domain/models/scenario.rs`:
 
-- `Scenario { id: ScenarioId, chat_id, name, status, rounds: Vec<Round>, created_at, updated_at }`
+- `Scenario { id: ScenarioId, chat_id, name, status, rounds: Vec<Round>, usage: Option<TokenUsage>, created_at, updated_at }`
   - `status: Pending | Running | Completed | Failed`
   - `rounds[0]` is always the user message (`Message` with role `User`); `rounds[1..]` are assistant rounds.
-- `Round { message: Message, sources: Vec<Source> }`
+- `Round { message: Message, sources: Vec<Source>, hidden: bool, usage: Option<TokenUsage> }`
+  - The message role is NOT a separate storage column — it lives inside the `message` JSON.
 
 Storage is normalized `scenarios` + `rounds` tables (NOT a JSON blob). The domain `Scenario` is read/written whole; `scenario_repository` encapsulates the two-table mapping:
 
-- `scenarios`: `id, chat_id, name, status, created_at, updated_at`
-- `rounds`: `id, scenario_id, idx, role, message JSON, sources JSON, created_at`
+- `scenarios`: `id, chat_id, name, status, token_usage (nullable JSON), created_at, updated_at`
+- `rounds`: `id, scenario_id, idx, message JSON, sources JSON, hidden (bool), token_usage (nullable JSON), created_at`
 
 Persistence strategy:
 - `insert_scenario` — new turn (scenario row + `rounds[0]`).
 - `insert_round` — one round at a time during generation (incremental, O(N)).
 - `update_scenario` — full rewrite (delete + re-insert rounds) only at finalization / continue-start.
-- `votes` are keyed by `scenario_id`.
+- `votes` are keyed by `(chat_id, scenario_id)` (composite primary key).
 
 The assistant `UIMessage.id` is the **first assistant round's** `message.id` (`rounds[1]`); `scenario_id` is carried separately in `metadata.scenarioId` (for voting) and never used as a message id.
 
@@ -129,7 +129,9 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
   → JSON.parse → strictObject schema validation → processUIMessageStream
 ```
 
-**All chunks must pass `z.strictObject` schema — extra fields break validation.**
+The `z.strictObject` validation lives in the `ai` SDK package (`processUIMessageStream`,
+used by `DefaultChatTransport`), not in `ui/src`. **All chunks must pass the
+strict-object schema — extra fields break validation.**
 
 `[DONE]` is optional. Stream ends when HTTP response body closes.
 
@@ -172,8 +174,9 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - `RoundDefinition.hidden` (default `false`) marks intermediate rounds hidden; the final answer
   round is visible. Persisted per-round in `rounds.hidden`.
 - Frontend: `getRenderableParts(message, showHidden)` (utils/ai.ts) drops hidden rounds' parts for
-  non-admins (`showHidden` = `isAdmin`); admins see everything. Sources (`source-url`) are never
-  gated, so they stay visible to everyone.
+  non-admins (`showHidden` = `isAdmin`) and strips structural markers (`step-start`, `source-url`);
+  admins see everything. Sources are rendered separately via `getMessageSources(message)`, which
+  reads the raw `parts[]` directly (no hidden gating), so they stay visible to everyone.
 - Ordering invariant: `data-round` is emitted after the round's first `LlmCallStart`, so the `start`
   chunk (message id) always precedes it — otherwise the SDK would push a duplicate message.
 
@@ -200,12 +203,14 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 
 ## Frontend flow
 
-- Home page (`index.vue`): `createChat()` → `POST /api/chats { firstMessage: prompt }`
+- Home page (`index.vue`): `createChat()` → `POST /api/chats { firstMessage: prompt, model }`
   → `router.push('/chat/{id}')`
 - Chat page (`[id].vue`):
   1. `GET /api/chats/{id}` → loads chat + messages (one user `UIMessage` + one assistant `UIMessage` per scenario)
-  2. `new Chat({ id, messages, transport: DefaultChatTransport({ api: '/api/chats/{id}', body: { model } }) })`
-  3. `onMounted`: if `messages.length === 1`, calls `chat.regenerate()` (triggers continuation of the pending scenario)
+  2. `new Chat({ id, messages, transport: DefaultChatTransport({ api: '/api/chats/{id}', headers, prepareSendMessagesRequest }) })`
+     — `model` is injected per-request via `prepareSendMessagesRequest` → `buildSendMessageBody`
+     (`utils/chatTransport.ts`, added only for new submissions), not a static transport `body`
+  3. `onMounted`: if `isOwner` and `messages.length === 1`, calls `chat.regenerate()` (triggers continuation of the pending scenario)
 - `chat.sendMessage({ text })`: appends user text, POSTs `{ trigger: "submit-message" }`
 - `chat.sendMessage({ text, messageId })`: edit — backend deletes the scenario + reruns
 - `chat.regenerate({ messageId })`: backend deletes the target scenario (+ later ones) and reruns `stream_new` with the stored user message (model taken from `scenario.name`, not from the frontend selector)
@@ -344,10 +349,11 @@ where
 - `AuthResult` enum: `Valid(AuthUser)`, `Refreshed(AuthUser, access_token)`, `Expired`, `Invalid`.
   `AuthService::verify_or_refresh` does a single session lookup by `provider_sid` from the
   access token JWT — user identity comes from `session.user_id`, not a separate `users` query.
-- Refresh flow: middleware catches `Expired` → `auth_service.refresh_session` looks up
-  the session by `provider_sid` from JWT's `sid` claim, refreshes via OIDC, upserts new
-  tokens, returns new `AuthUser` + new `access_token`. Middleware sets `Set-Cookie` with
-  `path=/api` on the response.
+- Refresh flow: `verify_or_refresh` itself detects an expired access token (via the session's
+  `expires_at`) and calls `refresh_session` — which looks up the session by `provider_sid` from
+  the JWT's `sid` claim, refreshes via OIDC, upserts new tokens, and returns new `AuthUser` +
+  new `access_token` (`Refreshed`). Middleware sets `Set-Cookie` with `path=/api` on the
+  response. A *failed* refresh surfaces as `Expired` → middleware returns 401.
 - CSRF middleware (`middleware/csrf.rs`): on POST/PUT/PATCH/DELETE, validates
   `x-csrf-token` header matches the `csrf-token` cookie (JWT HS256 with `{jti, sid}`),
   verifies JWT signature, and checks `sid` in JWT matches `AuthUser.session_id`.
@@ -358,7 +364,9 @@ where
   `utils/cookies.rs`. Iterates over `split(';')` to handle any cookie order.
 - Frontend: `apiFetch` with 401 interceptor → `POST /api/auth/login` → `{loginUrl}` →
   redirect to Keycloak. Dedup via `loginPromise`.
-- Session TTL: computed as `access_token_expires_in × session_ttl_multiplier` (configurable, default 10).
+- Session TTL: session expiry comes from the refresh token's own `exp` claim when present;
+  otherwise it falls back to `now + access_token_expires_in × session_ttl_multiplier`
+  (multiplier configurable, default 10).
 - Ownership checks: `chat_service::check_ownership(chat_id, user_id)` → lightweight
   `SELECT EXISTS(...)` via `chat_repository::is_owner`. Used in `send_message`, `get_votes`,
   `vote` handlers.
@@ -367,9 +375,9 @@ where
 
 ### Dependencies
 
-`async-openai = { version = "0.40", features = ["chat-completion", "byot"] }`
+`async-openai = { version = "0.40", features = ["chat-completion", "byot", "embedding"] }`
 
-`AiService` owns `Client<OpenAIConfig>` and a model name. It orchestrates a whole `Scenario` (multiple rounds) per request; `LlmClient` executes a single round. Each request spawns a tokio task that runs the round loop, accumulates events, persists rounds incrementally, and forwards SSE events. Handler only maps `StreamEvent → SseChunk → SSE`.
+`AiService` owns `Client<OpenAIConfig>` and a model name. It orchestrates a whole `Scenario` (multiple rounds) per request; `LlmClient` (`infra/clients/llm_client.rs`) executes a single round. Each request spawns a tokio task that runs the round loop, accumulates events, persists rounds incrementally, and forwards SSE events. Handler only maps `StreamEvent → SseChunk → SSE`.
 
 ### `byot` (Bring Your Own Types)
 
@@ -405,13 +413,23 @@ let mut stream: CustomStream = client.chat().create_stream_byot(request).await?;
 
 ### Tool-call loop
 
-Uses a labeled `'step: for _step in 0..max_steps` loop. The `continue 'step;` label is required because `continue` inside nested `for choice` / `while stream` would only continue the innermost loop. Without the label, control falls through to `return Ok(())` after the inner stream exhausts, silently terminating the LLM loop after one tool call.
+`run_round` uses a plain (unlabeled) `for step in 0..params.max_llm_calls` loop. Each iteration
+calls `run_one_llm_call`, which streams one LLM call and returns a `StepResult`:
+
+- `Stop { message, usage }` — final answer: append the message to the round, send
+  `LlmCallFinish` and `return Ok(())` (the round is complete).
+- `ToolCalls { message, completed_tools, usage }` — tools are executed at the end of the loop
+  body, their results pushed to `messages`, and the loop naturally proceeds to the next step.
+- `Err` — send an `Error` event and bail.
+
+Loop exhaustion (call limit reached): if the round produced any output it is closed cleanly with
+`LlmCallFinish(Stop)`; if it produced nothing, an `Error` event is sent.
 
 ### Scenario orchestration
 
 Two public entry points (both return `(ScenarioId, MessageId, scenario_name, Stream<MessageStreamEvent>)`, where `scenario_name` is the resolved scenario/model id used for the `start` message metadata):
 
-- `stream_new(chat_id, model, user_message)` — new turn: build a `Scenario` (status `Running`, `rounds=[user]`), persist, run all assistant rounds.
+- `stream_new(chat_id, model, user_message, user_name)` — new turn: build a `Scenario` (status `Running`, `rounds=[user]`), persist, run all assistant rounds.
 - `stream_continue(chat_id, scenario, user_name)` — resume an incomplete scenario from `next_round = scenario.rounds.len() - 1`.
 
 `run_scenario` (private):
@@ -426,7 +444,7 @@ Two public entry points (both return `(ScenarioId, MessageId, scenario_name, Str
    For a new turn the scenarios are loaded **before** `insert_scenario` (the current
    question lives in the round prompt templates, not in history); for continuation
    they are loaded **after** `update_scenario` (already-run rounds must be visible).
-3. Runs each round via `llm_client.execute_round`, collects the completed `Round { message, sources }`, saves it incrementally with `insert_round`.
+3. Runs each round via `llm_client.execute_round`, collects the completed `Round { message, sources, hidden, usage }`, saves it incrementally with `insert_round`.
 4. Sets `Completed` (or `Failed`) and does a final full `update_scenario`.
 
 The `start` chunk's `messageId` is the **first assistant round's** `message.id` (pre-generated, forced onto round 0 via `message_id_override`).
@@ -438,16 +456,17 @@ Regeneration: `send_message` with `trigger: "regenerate-message"` + `messageId` 
 ```
 AiService.stream_new / stream_continue → mpsc channel → tokio::spawn run_scenario:
   └─ per round: build OpenAI request with tools
-  └─ llm_client.execute_round → 'step: loop (max_steps)
-       └─ send LlmCallStart
-       └─ create_stream_byot → iterate chunks
-            ├─ reasoning_content → ReasoningDelta
-            ├─ content → TextDelta
-            ├─ tool_calls → ToolCallStart/Delta
-            └─ finish_reason:
-                 ├─ ToolCalls → execute tools → continue 'step
-                 └─ Stop → send LlmCallFinish → return
-  └─ append Round { message, sources } → insert_round (incremental)
+  └─ llm_client.execute_round → run_round: for step in 0..max_llm_calls
+        └─ send LlmCallStart (RoundMarker on step 0)
+        └─ run_one_llm_call → create_stream_byot → iterate chunks
+             ├─ reasoning_content → ReasoningDelta
+             ├─ content → TextDelta
+             ├─ tool_calls → ToolCallStart/Delta
+             └─ StepResult:
+                  ├─ ToolCalls → execute tools → next iteration
+                  ├─ Stop → send LlmCallFinish → return
+                  └─ Err → send Error → return
+  └─ append Round { message, sources, hidden, usage } → insert_round (incremental)
 ```
 
 ## KB indexes & search filters
