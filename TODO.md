@@ -24,11 +24,9 @@ Needs:
 
 ### Structured auth error logging
 
-`AuthService::verify_or_refresh` — no structured logs for auth errors (`Invalid`, `Expired`, DB errors). Only ad-hoc `tracing::info` / `tracing::debug` calls.
-
-### Investigate `trigger` field in SendMessageRequest
-
-`MessageTrigger` — `trigger` field comes from Vercel AI SDK. Figure out what it is and how to handle it.
+`AuthService::verify_or_refresh` — the main path logs `info!(auth_result = %result, ...)`, but the
+`Err(_e) => AuthResult::Expired` branch swallows the refresh failure reason. Log the error
+when a token refresh fails.
 
 ### Finalize the previous scenario when a new message is sent
 
@@ -38,12 +36,16 @@ or finalize/cancel the previous scenario before starting the new one.
 
 ### Seamless resume after a dropped stream
 
-The backend can continue an incomplete scenario (`stream_continue` resumes from `next_round`),
-but the frontend has no way to resume a partially-completed scenario after a disconnect:
-`chat.regenerate()` slices off the partial assistant message, so re-streaming only the remaining
-rounds would drop the already-rendered rounds. Needs a design: re-stream the whole scenario from
-scratch on resume, or a custom continuation that appends to the existing message
-(`resumeStream`/reconnect), plus detecting an incomplete scenario (`status != Completed`) on load.
+Resume already works for the first turn: the frontend's no-op `chat.regenerate()` maps to the
+`continue` trigger (`chatTransport.ts`), the backend `StreamRequest::Continue` finds the
+incomplete scenario and `stream_continue` re-streams from `next_round`, and the `start` chunk
+carries the persisted first assistant round's message id, so the SDK appends to the existing
+message instead of dropping the partial one.
+
+Remaining: auto-resume on page load fires only when `messages.length === 1` (`[id].vue`
+`onMounted`). For chats with several messages whose last scenario is incomplete (`Running` /
+`Failed`) there is no resume on load. Needs a design: detect an incomplete scenario
+(`status != Completed`) on load and trigger `continue` for such chats.
 
 ### Migrate the chat transport to WebSocket + pub/sub
 
@@ -56,28 +58,24 @@ Planned:
 - Frontend: custom `ChatTransport` (SDK supports pluggable transports via
   `sendMessages(): Promise<ReadableStream<UIMessageChunk>>`) over WebSocket; enables several
   concurrently active chats and server-initiated updates.
-- Supersedes / complements the "Seamless resume after a dropped stream" item above.
+- Post-scenario-downtime resume is already covered by the `continue` trigger (see the
+  "Seamless resume after a dropped stream" item); this item is about mid-stream resume after a
+  network blip, server-initiated pushes, and several concurrently active chats.
 
 ### Mark the final-answer round with a backend flag (`isFinalAnswer`)
 
 **Diagnosis (sources cutoff after streaming):**
 
-The sources list (`ChatMessageSources`) is gated by a `streaming` prop =
-`chat.status === 'streaming' && message.id === chat.messages.at(-1)?.id`
-(`[id].vue` → `MessageContent.vue`), so it only appears once the whole SSE
-stream ends (`status` flips to `'ready'` in `chat.ts`). At that moment:
+The sources list (`ChatMessageSources`) is gated in `MessageContent.vue` by
+`showSources = role === 'assistant' && sources.length > 0 && (!streaming || hasTextPart)`,
+so it appears either as soon as the message's first text part arrives or when the whole SSE
+stream ends. Both signals are frontend heuristics: sources can appear at the bottom of a long
+message after streaming has already stopped, where `ChatMessages` auto-scroll (which only runs
+while `status === 'streaming'`) will not bring them into view, and the sticky `spacing-offset` /
+`--last-message-height` sizing goes stale when the status bar disappears.
 
-- The list is inserted (+~50–60px) at the bottom of the last message, but
-  `ChatMessages` auto-scroll only runs while `status === 'streaming'`
-  (`ChatMessages.vue:75–87, 180–183`) → the new sources land below the visible
-  fold and are never scrolled into view (chat "doesn't finish scrolling",
-  sources partially cut off at the bottom).
-- The status bar disappears (sticky bottom block shrinks, `spacing-offset`
-  `188 → 160`) while `--last-message-height` (computed once at submit-time by
-  `ChatMessages`) is not recomputed → stale sizing for short last messages.
-
-Root cause: "the stream is over" is the wrong signal. What's needed is "the
-final answer part has started".
+Root cause: "the stream is over" / "text started" is the wrong signal. What's needed is
+"the final answer round has started".
 
 **Solution: mark the final-answer round from the backend.**
 
@@ -161,15 +159,11 @@ Affected:
 - `vote_repository.rs` — `VoteDb`, `NewVoteDb` exposed
 - `user_repository.rs` — `UserDb` exposed, `upsert` takes individual fields
 
-### Replace `serde_json::Value` with `UIMessage`
-
-`stream.rs` — `SendMessageRequest.messages: Vec<serde_json::Value>` instead of typed `Vec<UIMessage>`.
-
 ### Stream handler: struct + state machine
 
 `domain_to_sse_chunks` — uses a mutable `started: &mut bool` flag. Replace with a proper state machine.
 
-### Extract UIMessage converter from handler
+### Extract vote converter from handler
 
 `votes.rs` — `VoteDb → VoteResponse` conversion done inline in `get_votes`. Move to a dedicated converter / `From` impl.
 
@@ -180,10 +174,6 @@ Affected:
 ### OIDC metadata cache: refresh entire metadata
 
 `fetch_jwk_set` — when JWKS is refreshed, the whole discovery metadata (issuer, endpoints, JWK cache) must be refreshed too, otherwise keys and metadata become desynchronized.
-
-### Stream errors: make them specific
-
-`MessageStreamEvent::Error` — carries no reason. Replace with a structured variant containing an error text or code.
 
 ### Search round: kb_id hallucination has no self-correct path
 
@@ -219,7 +209,7 @@ the DB select only the last N scenarios (with their rounds) and fetch just those
 
 ### Markdown render: defensive fallback on parse failure
 
-Comark parses LLM/assistant and tool (search/extract) markdown without a `.catch` in its async `setup`, so a parser crash blanks the whole part (no console error). Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and the tool content components (`SearchKnowledgeBase.vue`, `ExtractDocument.vue`). Deferred after the comark 0.3→0.6 upgrade, which fixed the known nested-bracket link crash.
+Comark parses LLM/assistant and tool (search/extract) markdown without a `.catch` in its async `setup` (`ChatComark.vue`), so a parser crash blanks the whole part (no console error). Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and the tool content components (`SearchKnowledgeBase.vue`, `ExtractDocument.vue`).
 
 ### Qdrant datetime granularity
 
@@ -228,3 +218,28 @@ filter values are silently truncated (an `eq` on a datetime can match all values
 same second). Needs a decision: truncate at document save (only fields declared `datetime` in
 `indexes`), truncate/validate filter values, and keep DB metadata ↔ Qdrant payload consistent
 on reindex — currently they can drift.
+
+---
+
+## Testing
+
+### AiService: end-to-end scenario orchestration test
+
+No live test covers `AiService` orchestration (`stream_new` / `stream_continue`): multi-round
+execution, tool-call loop (multiple steps), incremental `insert_round`, final status, and SSE
+invariants (`start.messageId` = first assistant round id, `start` before `data-round`,
+`metadata.scenarioId`). Needs LLM + embedding + Qdrant + Postgres; `#[ignore]` like the other
+live tests.
+
+### Auth: live tests against Keycloak
+
+`OidcClient` (metadata, JWKS, code/token exchange) and `AuthService` (`verify_token`,
+`verify_or_refresh` Valid/Refreshed/Expired/Invalid, refresh flow) have no integration tests.
+Needs a local Keycloak instance; `#[ignore]`.
+
+### HTTP-level e2e tests
+
+Zero coverage at the handler layer. Candidates: POST `/api/chats` → SSE chunk contract
+(ordering + strictObject compatibility with the frontend schema), auth login → callback →
+cookies, middleware expired-refresh + CSRF failures, internal API 400s on bad `indexes` /
+document metadata.
