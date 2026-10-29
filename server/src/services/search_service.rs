@@ -493,5 +493,349 @@ mod tests {
 
             knowledge_service.delete_kb(kb.id).await.expect("delete_kb");
         }
+
+        /// KB with indexable metadata and three documents sharing the same text,
+        /// so a single query retrieves all of them and only the filter narrows.
+        async fn make_filter_fixture(
+            test_id: &str,
+        ) -> (KnowledgeService, SearchService, KnowledgeBase, Vec<String>) {
+            let pool = get_or_create_test_pool().await;
+            let qdrant = make_qdrant_client(test_id);
+            let embedding = make_embedding_client();
+            let rerank = make_rerank_client();
+            let knowledge_service = KnowledgeService::new(
+                pool.clone(),
+                make_chunking_service(),
+                qdrant.clone(),
+                embedding.clone(),
+                EMBEDDING_DIMENSIONS,
+            );
+            // Zero threshold so reranker scores never hide chunks the filter kept.
+            let search_service = SearchService::new(embedding, qdrant, rerank, 0.0, 30);
+
+            let kb = knowledge_service
+                .create_kb(
+                    "filterable".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                    Some(serde_json::json!({
+                        "section": { "type": "keyword" },
+                        "priority": { "type": "integer" },
+                        "updated_at": { "type": "datetime" }
+                    })),
+                )
+                .await
+                .expect("create_kb");
+
+            let docs = [
+                ("alpha", 1, "2026-01-01T00:00:00Z"),
+                ("beta", 2, "2026-02-01T00:00:00Z"),
+                ("beta", 3, "2026-03-01T00:00:00Z"),
+            ];
+            let mut doc_ids = Vec::new();
+            for (section, priority, updated_at) in docs {
+                let doc_id = Uuid::new_v4().to_string();
+                knowledge_service
+                    .create_document(
+                        doc_id.clone(),
+                        kb.id,
+                        "Quarterly review".into(),
+                        "https://example.com/review".into(),
+                        "v1".into(),
+                        MimeType::TextPlain,
+                        serde_json::json!({
+                            "section": section,
+                            "priority": priority,
+                            "updated_at": updated_at,
+                        }),
+                        b"Notes about the quarterly planning and budget review process.".to_vec(),
+                    )
+                    .await
+                    .expect("create_document");
+                doc_ids.push(doc_id);
+            }
+
+            (knowledge_service, search_service, kb, doc_ids)
+        }
+
+        fn chunk_doc_ids(chunks: &[SearchedChunk]) -> Vec<String> {
+            let mut ids: Vec<String> = chunks.iter().map(|c| c.document_id.0.clone()).collect();
+            ids.sort();
+            ids
+        }
+
+        async fn search_with_filter(
+            search: &SearchService,
+            kb: &KnowledgeBase,
+            filters: serde_json::Value,
+        ) -> Vec<SearchedChunk> {
+            let filter = SearchFilter::from_llm_value(&filters).expect("valid filter value");
+            search
+                .search_in_kb(
+                    vec!["quarterly planning and budget review".to_string()],
+                    kb,
+                    30,
+                    &filter,
+                )
+                .await
+                .expect("search_in_kb")
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, embedding, and rerank services"]
+        async fn search_filter_keyword_eq() {
+            let (knowledge, search, kb, doc_ids) = make_filter_fixture("filter_kw").await;
+            let (doc_a, doc_b, doc_c) =
+                (doc_ids[0].clone(), doc_ids[1].clone(), doc_ids[2].clone());
+
+            let all = search_with_filter(&search, &kb, serde_json::json!({})).await;
+            let all_ids: std::collections::HashSet<_> =
+                all.iter().map(|c| &c.document_id.0).collect();
+            for id in [&doc_a, &doc_b, &doc_c] {
+                assert!(
+                    all_ids.contains(&id),
+                    "unfiltered search must retrieve every doc, got {all_ids:?}"
+                );
+            }
+
+            let chunks =
+                search_with_filter(&search, &kb, serde_json::json!({ "section": "beta" })).await;
+            assert!(!chunks.is_empty(), "beta docs must match");
+            let ids = chunk_doc_ids(&chunks);
+            assert!(ids.contains(&doc_b), "beta doc #2 must match, got {ids:?}");
+            assert!(ids.contains(&doc_c), "beta doc #3 must match, got {ids:?}");
+            assert!(
+                !ids.contains(&doc_a),
+                "alpha doc must be filtered out, got {ids:?}"
+            );
+
+            knowledge.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, embedding, and rerank services"]
+        async fn search_filter_integer_range() {
+            let (knowledge, search, kb, doc_ids) = make_filter_fixture("filter_int").await;
+            let (doc_a, doc_b, doc_c) =
+                (doc_ids[0].clone(), doc_ids[1].clone(), doc_ids[2].clone());
+
+            let chunks = search_with_filter(
+                &search,
+                &kb,
+                serde_json::json!({ "priority": { "gte": 2 } }),
+            )
+            .await;
+            let ids = chunk_doc_ids(&chunks);
+            assert!(
+                !ids.contains(&doc_a),
+                "priority 1 must be excluded, got {ids:?}"
+            );
+            assert!(ids.contains(&doc_b), "priority 2 must match, got {ids:?}");
+            assert!(ids.contains(&doc_c), "priority 3 must match, got {ids:?}");
+
+            let chunks =
+                search_with_filter(&search, &kb, serde_json::json!({ "priority": { "gt": 2 } }))
+                    .await;
+            let ids = chunk_doc_ids(&chunks);
+            assert!(ids.contains(&doc_c), "priority 3 must match, got {ids:?}");
+            assert!(
+                !ids.contains(&doc_b),
+                "priority 2 must be excluded by gt, got {ids:?}"
+            );
+            assert!(
+                !ids.contains(&doc_a),
+                "priority 1 must be excluded, got {ids:?}"
+            );
+
+            knowledge.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, embedding, and rerank services"]
+        async fn search_filter_datetime_range() {
+            let (knowledge, search, kb, doc_ids) = make_filter_fixture("filter_dt").await;
+            let (doc_a, doc_b, doc_c) =
+                (doc_ids[0].clone(), doc_ids[1].clone(), doc_ids[2].clone());
+
+            let chunks = search_with_filter(
+                &search,
+                &kb,
+                serde_json::json!({
+                    "updated_at": { "gte": "2026-02-01T00:00:00Z", "lt": "2026-03-01T00:00:00Z" }
+                }),
+            )
+            .await;
+            let ids = chunk_doc_ids(&chunks);
+            assert!(ids.contains(&doc_b), "Feb doc must match, got {ids:?}");
+            assert!(
+                !ids.contains(&doc_a),
+                "Jan doc must be excluded, got {ids:?}"
+            );
+            assert!(
+                !ids.contains(&doc_c),
+                "Mar doc must be excluded by lt, got {ids:?}"
+            );
+
+            knowledge.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, embedding, and rerank services"]
+        async fn search_filter_and_combination() {
+            let (knowledge, search, kb, doc_ids) = make_filter_fixture("filter_and").await;
+            let (doc_a, doc_b, doc_c) =
+                (doc_ids[0].clone(), doc_ids[1].clone(), doc_ids[2].clone());
+
+            // section=beta AND priority=2 -> only doc B.
+            let chunks = search_with_filter(
+                &search,
+                &kb,
+                serde_json::json!({ "section": "beta", "priority": 2 }),
+            )
+            .await;
+            let ids = chunk_doc_ids(&chunks);
+            assert!(ids.contains(&doc_b), "doc B must match, got {ids:?}");
+            assert!(
+                !ids.contains(&doc_a),
+                "alpha doc must be excluded, got {ids:?}"
+            );
+            assert!(
+                !ids.contains(&doc_c),
+                "priority 3 must be excluded, got {ids:?}"
+            );
+
+            knowledge.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, embedding, and rerank services"]
+        async fn search_filter_unindexed_field_is_dropped() {
+            let (knowledge, search, kb, _) = make_filter_fixture("filter_unknown").await;
+
+            // Fields with no index in this KB are scoped out, so the filter is a no-op.
+            let chunks =
+                search_with_filter(&search, &kb, serde_json::json!({ "no_such_field": "x" })).await;
+            assert_eq!(
+                chunk_doc_ids(&chunks).len(),
+                3,
+                "dropped filter must not narrow the result"
+            );
+
+            knowledge.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, embedding, and rerank services"]
+        async fn search_all_respects_kb_subset() {
+            let pool = get_or_create_test_pool().await;
+            let qdrant = make_qdrant_client("filter_subset");
+            let embedding = make_embedding_client();
+            let rerank = make_rerank_client();
+            let knowledge_service = KnowledgeService::new(
+                pool.clone(),
+                make_chunking_service(),
+                qdrant.clone(),
+                embedding.clone(),
+                EMBEDDING_DIMENSIONS,
+            );
+            let search_service = SearchService::new(embedding, qdrant, rerank, 0.0, 30);
+
+            let kb_a = knowledge_service
+                .create_kb(
+                    "kb a".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                    None,
+                )
+                .await
+                .expect("create_kb a");
+            let kb_b = knowledge_service
+                .create_kb(
+                    "kb b".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                    None,
+                )
+                .await
+                .expect("create_kb b");
+
+            let doc_a = Uuid::new_v4().to_string();
+            let doc_b = Uuid::new_v4().to_string();
+            knowledge_service
+                .create_document(
+                    doc_a.clone(),
+                    kb_a.id,
+                    "Alpha report".into(),
+                    "https://example.com/a".into(),
+                    "v1".into(),
+                    MimeType::TextPlain,
+                    serde_json::json!({}),
+                    b"Notes about the quarterly planning and budget review process.".to_vec(),
+                )
+                .await
+                .expect("create_document a");
+            knowledge_service
+                .create_document(
+                    doc_b.clone(),
+                    kb_b.id,
+                    "Beta report".into(),
+                    "https://example.com/b".into(),
+                    "v1".into(),
+                    MimeType::TextPlain,
+                    serde_json::json!({}),
+                    b"Notes about the quarterly planning and budget review process.".to_vec(),
+                )
+                .await
+                .expect("create_document b");
+
+            let query = vec!["quarterly planning and budget review".to_string()];
+
+            // Both KBs: both documents must be reachable.
+            let all = search_service
+                .search_all(
+                    query.clone(),
+                    &[kb_a.clone(), kb_b.clone()],
+                    30,
+                    &SearchFilter::default(),
+                )
+                .await
+                .expect("search_all");
+            let all_ids: std::collections::HashSet<_> =
+                all.iter().map(|c| &c.document_id.0).collect();
+            assert!(
+                all_ids.contains(&doc_a),
+                "kb A doc must be present, got {all_ids:?}"
+            );
+            assert!(
+                all_ids.contains(&doc_b),
+                "kb B doc must be present, got {all_ids:?}"
+            );
+
+            // Subset with only KB A: KB B must not leak in.
+            let subset = search_service
+                .search_all(query, &[kb_a.clone()], 30, &SearchFilter::default())
+                .await
+                .expect("search_all subset");
+            assert!(!subset.is_empty(), "subset search must return chunks");
+            assert!(
+                subset.iter().all(|c| c.kb_id == kb_a.id),
+                "only chunks from the requested KB may be returned"
+            );
+
+            knowledge_service
+                .delete_kb(kb_a.id)
+                .await
+                .expect("delete_kb a");
+            knowledge_service
+                .delete_kb(kb_b.id)
+                .await
+                .expect("delete_kb b");
+        }
     }
 }

@@ -1240,5 +1240,170 @@ mod tests {
 
             service.delete_kb(kb.id).await.expect("delete_kb");
         }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres"]
+        async fn create_kb_rejects_invalid_indexes() {
+            let pool = get_or_create_test_pool().await;
+            let service = KnowledgeService::new(
+                pool.clone(),
+                make_chunking_service(),
+                make_qdrant_client("kb_index_validation"),
+                make_embedding_client(),
+                EMBEDDING_DIMENSIONS,
+            );
+
+            let cases: Vec<&str> = vec![
+                r#"{"a.b": {"type": "keyword"}}"#,  // field name with a dot
+                r#"{"x": {"type": "not-a-type"}}"#, // unknown type
+                r#"{"x": "keyword"}"#,              // spec is not an object
+                r#"[ "keyword" ]"#,                 // not an object at all
+                r#"{"": {"type": "keyword"}}"#,     // empty field name
+            ];
+            for raw in cases {
+                let indexes = serde_json::from_str::<Value>(raw).expect("valid JSON");
+                let err = service
+                    .create_kb(
+                        "bad".into(),
+                        "desc".into(),
+                        false,
+                        serde_json::json!({}),
+                        None,
+                        Some(indexes),
+                    )
+                    .await
+                    .expect_err("invalid indexes must be rejected");
+                assert!(
+                    matches!(err, AppError::BadRequest(_)),
+                    "case {raw}: expected BadRequest, got {err}"
+                );
+            }
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, and embedding service"]
+        async fn update_kb_replaces_indexes_full_replace_semantics() {
+            let pool = get_or_create_test_pool().await;
+            let service = KnowledgeService::new(
+                pool.clone(),
+                make_chunking_service(),
+                make_qdrant_client("kb_index_replace"),
+                make_embedding_client(),
+                EMBEDDING_DIMENSIONS,
+            );
+
+            let kb = service
+                .create_kb(
+                    "idx".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                    Some(serde_json::json!({ "section": { "type": "keyword" } })),
+                )
+                .await
+                .expect("create_kb");
+            assert!(
+                service
+                    .get_kb(kb.id)
+                    .await
+                    .expect("get_kb")
+                    .unwrap()
+                    .indexes
+                    .find("section")
+                    .is_some(),
+                "created KB should carry the section index"
+            );
+
+            // Full replace: the new set exactly replaces the old one.
+            let updated = service
+                .update_kb(
+                    kb.id,
+                    "idx".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    Some(serde_json::json!({ "priority": { "type": "integer" } })),
+                )
+                .await
+                .expect("update_kb");
+            assert!(updated.indexes.find("priority").is_some());
+            assert!(
+                updated.indexes.find("section").is_none(),
+                "replaced index must be gone"
+            );
+
+            // Omitting indexes (None) clears them entirely.
+            let cleared = service
+                .update_kb(
+                    kb.id,
+                    "idx".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                )
+                .await
+                .expect("update_kb");
+            assert!(cleared.indexes.is_empty(), "indexes must be cleared");
+            assert!(
+                service
+                    .get_kb(kb.id)
+                    .await
+                    .expect("get_kb")
+                    .unwrap()
+                    .indexes
+                    .is_empty(),
+                "cleared indexes must persist"
+            );
+
+            service.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, and embedding service"]
+        async fn update_kb_rejects_invalid_indexes_and_keeps_old() {
+            let pool = get_or_create_test_pool().await;
+            let service = KnowledgeService::new(
+                pool.clone(),
+                make_chunking_service(),
+                make_qdrant_client("kb_index_update_reject"),
+                make_embedding_client(),
+                EMBEDDING_DIMENSIONS,
+            );
+
+            let kb = service
+                .create_kb(
+                    "idx".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                    Some(serde_json::json!({ "section": { "type": "keyword" } })),
+                )
+                .await
+                .expect("create_kb");
+
+            let err = service
+                .update_kb(
+                    kb.id,
+                    "idx".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    Some(serde_json::json!({ "a.b": { "type": "keyword" } })),
+                )
+                .await
+                .expect_err("invalid indexes must be rejected");
+            assert!(matches!(err, AppError::BadRequest(_)));
+
+            let unchanged = service.get_kb(kb.id).await.expect("get_kb").unwrap();
+            assert!(
+                unchanged.indexes.find("section").is_some(),
+                "failed update must not touch the existing indexes"
+            );
+
+            service.delete_kb(kb.id).await.expect("delete_kb");
+        }
     }
 }
