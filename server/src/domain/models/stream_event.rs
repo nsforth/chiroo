@@ -1,5 +1,6 @@
 use crate::domain::models::messages::Message;
 use crate::domain::models::source::Source;
+use crate::domain::models::token_usage::TokenUsage;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -78,6 +79,7 @@ pub enum MessageStreamEvent {
     LlmCallFinish {
         finish_reason: FinishReason,
         message: Message,
+        usage: Option<TokenUsage>,
     },
 
     /// Marks the start of a round; carries whether the round is hidden from

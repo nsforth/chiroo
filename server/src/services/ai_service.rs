@@ -15,6 +15,7 @@ use crate::domain::models::sampling::preset_by_name;
 use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatus};
 use crate::domain::models::source::Source;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
+use crate::domain::models::token_usage::TokenUsage;
 use crate::errors::AppError;
 use crate::infra::clients::llm_client::LlmClient;
 use crate::services::knowledge_service::KnowledgeService;
@@ -69,7 +70,11 @@ impl AiService {
             .with_api_base(config.base_url())
             .with_api_key(config.api_key().expose_secret());
 
-        let llm_client = LlmClient::new(Client::with_config(openai_config), config.model());
+        let llm_client = LlmClient::new(
+            Client::with_config(openai_config),
+            config.model(),
+            config.include_usage(),
+        );
 
         Self {
             llm_client,
@@ -432,17 +437,24 @@ async fn run_scenario(
         let mut round_stream = llm_client.execute_round(chat_id, params);
         let mut round_message: Option<Message> = None;
         let mut round_sources: Vec<Source> = Vec::new();
+        let mut round_usage: TokenUsage = TokenUsage::default();
 
         while let Some(event) = round_stream.next().await {
             if let MessageStreamEvent::SourceUrl(source) = &event {
                 round_sources.push(source.clone());
             }
             if let MessageStreamEvent::LlmCallFinish {
-                finish_reason: FinishReason::Stop,
+                finish_reason,
                 ref message,
-            } = event
+                usage,
+            } = &event
             {
-                round_message = Some(message.clone());
+                if let Some(u) = usage {
+                    round_usage.add(u);
+                }
+                if let FinishReason::Stop = finish_reason {
+                    round_message = Some(message.clone());
+                }
             }
             if tx.send(event).await.is_err() {
                 return Ok(());
@@ -459,6 +471,11 @@ async fn run_scenario(
             message: msg.clone(),
             sources: round_sources,
             hidden: round_def.hidden,
+            usage: if round_usage == TokenUsage::default() {
+                None
+            } else {
+                Some(round_usage.clone())
+            },
         };
         let idx = scenario.rounds.len() as i32;
         // Persist incrementally under an optimistic lock on updated_at; a concurrent
@@ -468,6 +485,18 @@ async fn run_scenario(
             .insert_round(scenario.id, idx, &round, scenario.updated_at)
             .await
             .map_err(|e| format!("Failed to save round: {e}"))?;
+        // The scenario total is the sum of its rounds; rounds without reported
+        // usage contribute nothing, so `None` stays `None` until the first
+        // reported round.
+        if let Some(u) = &round.usage {
+            match scenario.usage.take() {
+                Some(mut acc) => {
+                    acc.add(u);
+                    scenario.usage = Some(acc);
+                },
+                None => scenario.usage = Some(u.clone()),
+            }
+        }
         scenario.rounds.push(round);
         history.push(msg);
     }
@@ -572,6 +601,7 @@ mod tests {
             message: msg,
             sources: Vec::new(),
             hidden: true,
+            usage: None,
         }
     }
 
@@ -588,6 +618,7 @@ mod tests {
             message: assistant_msg(answer),
             sources: Vec::new(),
             hidden: false,
+            usage: None,
         });
         scenario
     }

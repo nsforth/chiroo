@@ -11,6 +11,7 @@ pub mod search_filter;
 pub mod session;
 pub mod source;
 pub mod stream_event;
+pub mod token_usage;
 pub mod tool;
 pub mod user;
 pub mod votes;

@@ -451,7 +451,7 @@ mod tests {
 
     fn make_pool() -> Pool {
         let manager = Manager::new(
-            "postgres://chiroo:1234@localhost/chiroo_tests".to_string(),
+            "postgres://chiroo:1234@127.0.0.1/chiroo_tests".to_string(),
             Runtime::Tokio1,
         );
         Pool::builder(manager)
@@ -470,7 +470,7 @@ mod tests {
 
     fn make_qdrant_client() -> QdrantClient {
         QdrantClient::new(
-            "http://localhost:6334",
+            "http://127.0.0.1:6334",
             None,
             "test".to_string(),
             std::time::Duration::from_secs(30),

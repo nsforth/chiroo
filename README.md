@@ -121,6 +121,7 @@ the field, a single `_` stays inside a field), e.g. `CHIROO_OPENAI__BASE_URL`.
 | `CHIROO_OPENAI__BASE_URL` | ✅ | — | OpenAI-compatible API endpoint |
 | `CHIROO_OPENAI__API_KEY` | ✅ | — | API key |
 | `CHIROO_OPENAI__MODEL` | ✅ | — | Model name (e.g. `gpt-4o`) |
+| `CHIROO_OPENAI__INCLUDE_USAGE` | | `true` | Request token usage in streaming completion responses |
 | `CHIROO_EMBEDDING__BASE_URL` | ✅ | — | Embeddings API endpoint |
 | `CHIROO_EMBEDDING__API_KEY` | ✅ | — | Embeddings API key |
 | `CHIROO_EMBEDDING__MODEL` | ✅ | — | Embedding model name |

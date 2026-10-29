@@ -1,6 +1,7 @@
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::Message;
 use crate::domain::models::source::Source;
+use crate::domain::models::token_usage::TokenUsage;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -50,6 +51,7 @@ pub struct Scenario {
     pub name: String,
     pub status: ScenarioStatus,
     pub rounds: Vec<Round>,
+    pub usage: Option<TokenUsage>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -72,7 +74,9 @@ impl Scenario {
                 message: user_message,
                 sources: Vec::new(),
                 hidden: false,
+                usage: None,
             }],
+            usage: None,
             created_at: now,
             updated_at: now,
         }
@@ -93,6 +97,7 @@ pub struct Round {
     pub sources: Vec<Source>,
     /// Hidden rounds are not shown to non-admin users.
     pub hidden: bool,
+    pub usage: Option<TokenUsage>,
 }
 
 #[cfg(test)]
@@ -159,6 +164,7 @@ mod tests {
             name: "m".into(),
             status: ScenarioStatus::Pending,
             rounds: vec![],
+            usage: None,
             created_at: chrono::NaiveDateTime::MIN,
             updated_at: chrono::NaiveDateTime::MIN,
         };

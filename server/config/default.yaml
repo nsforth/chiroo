@@ -4,7 +4,8 @@
 # CHIROO_* environment variables. Only static defaults live here; required
 # secrets and endpoints (database, openai, embedding, rerank, oidc) are
 # intentionally omitted and must be supplied via the config file or the
-# CHIROO_* environment variables.
+# CHIROO_* environment variables. `openai.include_usage` is a default, not a
+# required key, and is the only optional key of its section listed here.
 #
 # This file is compiled into the binary; copy it as a starting point for your
 # own config file.
@@ -19,6 +20,9 @@ server:
 internal_api:
   host: "127.0.0.1"
   port: 3001
+
+openai:
+  include_usage: true
 
 qdrant:
   url: "http://localhost:6334"

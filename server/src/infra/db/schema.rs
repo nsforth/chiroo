@@ -16,6 +16,7 @@ diesel::table! {
         name -> Varchar,
         #[max_length = 20]
         status -> Varchar,
+        token_usage -> Nullable<Json>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -29,6 +30,7 @@ diesel::table! {
         message -> Json,
         sources -> Json,
         hidden -> Bool,
+        token_usage -> Nullable<Json>,
         created_at -> Timestamptz,
     }
 }

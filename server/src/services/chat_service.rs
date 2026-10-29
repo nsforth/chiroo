@@ -172,3 +172,227 @@ impl ChatService {
         result
     }
 }
+
+#[cfg(test)]
+mod integration {
+    use deadpool_diesel::postgres::{Manager, Pool};
+    use deadpool_diesel::Runtime;
+    use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+    use tokio::sync::OnceCell;
+    use uuid::Uuid;
+
+    use super::*;
+
+    const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
+
+    static TEST_POOL: OnceCell<Pool> = OnceCell::const_new();
+
+    fn test_db_url() -> String {
+        std::env::var("TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://chiroo:1234@127.0.0.1/chiroo_tests".to_string())
+    }
+
+    async fn get_or_create_test_pool() -> Pool {
+        TEST_POOL
+            .get_or_init(|| async {
+                let manager = Manager::new(test_db_url(), Runtime::Tokio1);
+                let pool = Pool::builder(manager)
+                    .build()
+                    .expect("Failed to create test pool");
+
+                let conn = pool.get().await.expect("Failed to get connection");
+                conn.interact(|conn| conn.run_pending_migrations(MIGRATIONS).map(|_| ()))
+                    .await
+                    .expect("interact failed")
+                    .expect("migrations failed");
+
+                pool
+            })
+            .await
+            .clone()
+    }
+
+    fn make_service(pool: &Pool) -> ChatService {
+        let scenario_service = ScenarioService::new(pool.clone());
+        ChatService::new(pool.clone(), scenario_service)
+    }
+
+    fn make_user() -> UserId {
+        UserId(Uuid::new_v4())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn create_chat_with_first_message_creates_pending_scenario() {
+        let pool = get_or_create_test_pool().await;
+        let service = make_service(&pool);
+        let user = make_user();
+
+        let chat = service
+            .create_chat(Some("Hello there!".into()), "test-model".into(), user)
+            .await
+            .expect("create_chat");
+
+        assert_eq!(chat.owner, user);
+        assert_eq!(chat.title.as_deref(), Some("Hello there!"));
+
+        let got = service.get_chat(chat.id, user).await.expect("get_chat");
+        assert_eq!(got.id.0, chat.id.0);
+
+        let scenarios = service
+            .scenario_service
+            .get_scenarios_for_chat(chat.id)
+            .await
+            .expect("get_scenarios_for_chat");
+        assert_eq!(
+            scenarios.len(),
+            1,
+            "first message should create one scenario"
+        );
+        let scenario = &scenarios[0];
+        assert_eq!(scenario.name, "test-model");
+        assert!(
+            !scenario.is_complete(),
+            "fresh scenario should not be completed"
+        );
+        let user_msg = scenario
+            .user_message()
+            .expect("rounds[0] is the user message");
+        assert_eq!(user_msg.text(), "Hello there!");
+
+        service
+            .delete_chat(&chat.id, &user)
+            .await
+            .expect("delete_chat");
+        assert!(
+            matches!(
+                service.get_chat(chat.id, user).await,
+                Err(AppError::NotFound(_))
+            ),
+            "chat should be gone after delete"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn create_chat_truncates_long_title() {
+        let pool = get_or_create_test_pool().await;
+        let service = make_service(&pool);
+        let user = make_user();
+
+        let chat = service
+            .create_chat(
+                Some("A much longer first message than fifteen characters".into()),
+                "test-model".into(),
+                user,
+            )
+            .await
+            .expect("create_chat");
+
+        assert_eq!(
+            chat.title.as_deref(),
+            Some("A much longer f..."),
+            "title should be the first 15 chars plus ellipsis"
+        );
+
+        service
+            .delete_chat(&chat.id, &user)
+            .await
+            .expect("delete_chat");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn create_chat_without_first_message_has_no_scenario() {
+        let pool = get_or_create_test_pool().await;
+        let service = make_service(&pool);
+        let user = make_user();
+
+        let chat = service
+            .create_chat(None, "test-model".into(), user)
+            .await
+            .expect("create_chat");
+        assert_eq!(chat.title, None);
+
+        let scenarios = service
+            .scenario_service
+            .get_scenarios_for_chat(chat.id)
+            .await
+            .expect("get_scenarios_for_chat");
+        assert!(scenarios.is_empty(), "no scenario without a first message");
+
+        service
+            .delete_chat(&chat.id, &user)
+            .await
+            .expect("delete_chat");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn ownership_checks_reject_non_owner() {
+        let pool = get_or_create_test_pool().await;
+        let service = make_service(&pool);
+        let owner = make_user();
+        let intruder = make_user();
+
+        let chat = service
+            .create_chat(None, "test-model".into(), owner)
+            .await
+            .expect("create_chat");
+
+        assert!(
+            matches!(
+                service.check_ownership(chat.id, intruder).await,
+                Err(AppError::NotFound(_))
+            ),
+            "non-owner should not pass ownership check"
+        );
+        assert!(
+            matches!(
+                service.get_chat(chat.id, intruder).await,
+                Err(AppError::NotFound(_))
+            ),
+            "non-owner should not see the chat"
+        );
+        assert!(
+            service.delete_chat(&chat.id, &intruder).await.is_err(),
+            "non-owner should not delete the chat"
+        );
+
+        service
+            .delete_chat(&chat.id, &owner)
+            .await
+            .expect("delete_chat");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn get_chats_returns_only_own_chats() {
+        let pool = get_or_create_test_pool().await;
+        let service = make_service(&pool);
+        let alice = make_user();
+        let bob = make_user();
+
+        let alice_chat = service
+            .create_chat(None, "test-model".into(), alice)
+            .await
+            .expect("create_chat");
+        service
+            .create_chat(None, "test-model".into(), bob)
+            .await
+            .expect("create_chat");
+
+        let chats = service.get_chats(alice).await.expect("get_chats");
+        assert_eq!(
+            chats.len(),
+            1,
+            "each user should see exactly their own chat"
+        );
+        assert_eq!(chats[0].id.0, alice_chat.id.0);
+
+        service
+            .delete_chat(&alice_chat.id, &alice)
+            .await
+            .expect("delete_chat");
+    }
+}

@@ -138,6 +138,9 @@ pub struct OpenAiConfig {
     base_url: String,
     api_key: SecretString,
     model: String,
+    /// Request token usage in streaming chat completion responses
+    /// (`stream_options.include_usage`).
+    include_usage: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -246,6 +249,10 @@ impl OpenAiConfig {
 
     pub fn model(&self) -> String {
         self.model.clone()
+    }
+
+    pub fn include_usage(&self) -> bool {
+        self.include_usage
     }
 }
 
@@ -639,6 +646,7 @@ mod tests {
         assert_eq!(cfg.search.candidate_limit, 30);
         assert_eq!(cfg.branding.name, "ChiRoo");
         assert_eq!(cfg.branding.assistant_name, "ChiRoo");
+        assert!(cfg.openai.include_usage());
     }
 
     #[test]
@@ -670,6 +678,14 @@ mod tests {
             cfg.oidc_config().access_token_expires(),
             Duration::from_secs(120)
         );
+    }
+
+    #[test]
+    fn include_usage_can_be_disabled() {
+        let mut env = required_env();
+        env.insert("CHIROO_OPENAI__INCLUDE_USAGE".into(), "false".into());
+        let cfg = load(env);
+        assert!(!cfg.openai.include_usage());
     }
 
     #[test]

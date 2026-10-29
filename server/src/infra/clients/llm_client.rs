@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::{
@@ -7,8 +8,9 @@ use async_openai::types::chat::{
     ChatCompletionMessageToolCalls, ChatCompletionRequestAssistantMessageArgs,
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
     ChatCompletionRequestToolMessageArgs, ChatCompletionRequestUserMessageArgs,
-    ChatCompletionToolChoiceOption, ChatCompletionTools, CreateChatCompletionRequest,
-    CreateChatCompletionRequestArgs, FinishReason, FunctionCall, ReasoningEffort,
+    ChatCompletionStreamOptions, ChatCompletionToolChoiceOption, ChatCompletionTools,
+    CompletionUsage, CreateChatCompletionRequest, CreateChatCompletionRequestArgs, FinishReason,
+    FunctionCall, ReasoningEffort,
 };
 use async_openai::Client;
 use futures::StreamExt;
@@ -26,7 +28,12 @@ use crate::domain::models::messages::{
 };
 use crate::domain::models::sampling::SamplingParams;
 use crate::domain::models::stream_event::{FinishReason as DomainFinishReason, MessageStreamEvent};
+use crate::domain::models::token_usage::TokenUsage;
 use crate::domain::models::tool::{LLMTool, ToolExecution};
+
+/// Grace period for reading the trailing usage chunk after `finish_reason`;
+/// guards against a misbehaving server that keeps the stream open.
+const USAGE_GRACE_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ─── BYOT response types ───
 
@@ -72,11 +79,30 @@ struct CustomChoice {
 #[derive(Debug, Deserialize)]
 struct CustomChunk {
     choices: Vec<CustomChoice>,
+    /// Present (non-null) only on the final chunk when
+    /// `stream_options.include_usage` is set; null on all other chunks.
+    #[serde(default)]
+    usage: Option<CompletionUsage>,
 }
 
 type CustomStream = Pin<
     Box<dyn futures::Stream<Item = Result<CustomChunk, async_openai::error::OpenAIError>> + Send>,
 >;
+
+impl From<&CompletionUsage> for TokenUsage {
+    fn from(u: &CompletionUsage) -> Self {
+        Self {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+            cached_prompt_tokens: u
+                .prompt_tokens_details
+                .as_ref()
+                .and_then(|d| d.cached_tokens)
+                .unwrap_or(0),
+        }
+    }
+}
 
 // ─── Public API ───
 
@@ -84,6 +110,7 @@ type CustomStream = Pin<
 pub struct LlmClient {
     client: Client<OpenAIConfig>,
     model: String,
+    include_usage: bool,
 }
 
 pub struct RunRoundParams {
@@ -101,8 +128,12 @@ pub struct RunRoundParams {
 }
 
 impl LlmClient {
-    pub fn new(client: Client<OpenAIConfig>, model: String) -> Self {
-        Self { client, model }
+    pub fn new(client: Client<OpenAIConfig>, model: String, include_usage: bool) -> Self {
+        Self {
+            client,
+            model,
+            include_usage,
+        }
     }
 
     #[instrument(
@@ -117,10 +148,13 @@ impl LlmClient {
     ) -> impl futures::Stream<Item = MessageStreamEvent> + Send {
         let client = self.client.clone();
         let model = self.model.clone();
+        let include_usage = self.include_usage;
         let (tx, rx) = mpsc::channel(64);
 
         tokio::spawn(async move {
-            if let Err(e) = run_round(client, model, params, chat_id, tx.clone()).await {
+            if let Err(e) =
+                run_round(client, model, params, chat_id, include_usage, tx.clone()).await
+            {
                 info!(
                     chat_id = ?chat_id,
                     error = format_error_chain(&*e, ""),
@@ -416,10 +450,12 @@ impl Accumulator {
 enum StepResult {
     Stop {
         message: Message,
+        usage: Option<TokenUsage>,
     },
     ToolCalls {
         message: Message,
         completed_tools: Vec<ChatCompletionMessageToolCall>,
+        usage: Option<TokenUsage>,
     },
 }
 
@@ -509,6 +545,7 @@ async fn run_round(
     model: String,
     mut params: RunRoundParams,
     chat_id: ChatId,
+    include_usage: bool,
     tx: mpsc::Sender<MessageStreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tool_defs: Vec<ChatCompletionTools> = params.tools.iter().map(|t| t.definition()).collect();
@@ -573,15 +610,17 @@ async fn run_round(
             params.extra_body.as_ref(),
             params.tool_choice.clone(),
             chat_id,
+            include_usage,
             &tx,
         )
         .await
         {
-            Ok(StepResult::Stop { message }) => {
+            Ok(StepResult::Stop { message, usage }) => {
                 debug!(
                     step,
                     finish_reason = "stop",
                     parts = message.parts.len(),
+                    usage = ?usage,
                     status = "llm_call_finish"
                 );
                 messages.push(build_openai_assistant_message(
@@ -596,6 +635,7 @@ async fn run_round(
                     MessageStreamEvent::LlmCallFinish {
                         finish_reason: DomainFinishReason::Stop,
                         message: round_message,
+                        usage,
                     },
                 )
                 .await?;
@@ -605,11 +645,13 @@ async fn run_round(
             Ok(StepResult::ToolCalls {
                 message,
                 completed_tools,
+                usage,
             }) => {
                 debug!(
                     step,
                     finish_reason = "tool_calls",
                     tool_count = completed_tools.len(),
+                    usage = ?usage,
                     status = "llm_call_finish"
                 );
                 messages.push(build_openai_assistant_message(
@@ -639,6 +681,7 @@ async fn run_round(
                     MessageStreamEvent::LlmCallFinish {
                         finish_reason: DomainFinishReason::ToolCalls,
                         message: round_message.clone(),
+                        usage,
                     },
                 )
                 .await?;
@@ -738,6 +781,7 @@ async fn run_round(
         MessageStreamEvent::LlmCallFinish {
             finish_reason: DomainFinishReason::Stop,
             message: round_message,
+            usage: None,
         },
     )
     .await?;
@@ -756,6 +800,7 @@ async fn run_one_llm_call(
     extra_body: Option<&Value>,
     tool_choice: Option<ChatCompletionToolChoiceOption>,
     chat_id: ChatId,
+    include_usage: bool,
     tx: &mpsc::Sender<MessageStreamEvent>,
 ) -> Result<StepResult, Box<dyn std::error::Error + Send + Sync>> {
     let request = build_request(
@@ -766,6 +811,7 @@ async fn run_one_llm_call(
         sampling,
         extra_body,
         tool_choice,
+        include_usage,
     );
 
     let mut stream: CustomStream = client
@@ -775,38 +821,92 @@ async fn run_one_llm_call(
         .inspect_err(|e| debug!(error = e.to_string(), status = "failed"))?;
     let mut acc = Accumulator::new(chat_id);
 
-    while let Some(result) = stream.next().await {
-        let response = result.inspect_err(|e| debug!(error = e.to_string(), status = "failed"))?;
+    let mut pending: Option<StepResult> = None;
+    // Last non-null usage chunk wins; with `include_usage` the final chunk
+    // (empty choices, sent after the finish_reason chunk) carries the total.
+    let mut usage: Option<TokenUsage> = None;
 
-        for choice in response.choices {
-            for event in acc.process_delta(&choice.delta) {
-                send_or_bail(tx, event).await?;
+    loop {
+        // Once the step result is in, only the trailing usage chunk is of
+        // interest; bound the wait so a server that keeps the stream open
+        // cannot hang the round.
+        let chunk = if pending.is_some() {
+            match tokio::time::timeout(USAGE_GRACE_TIMEOUT, stream.next()).await {
+                Ok(chunk) => chunk,
+                Err(_) => {
+                    debug!(status = "usage_grace_timeout");
+                    break;
+                },
             }
+        } else {
+            stream.next().await
+        };
 
-            if let Some(reason) = &choice.finish_reason {
-                let (end_events, result) = acc.finish();
-                for event in end_events {
-                    send_or_bail(tx, event).await?;
+        let Some(chunk) = chunk else {
+            break; // stream ended
+        };
+
+        match chunk {
+            Ok(response) => {
+                if let Some(u) = response.usage.as_ref() {
+                    usage = Some(u.into());
                 }
 
-                return Ok(match reason {
-                    FinishReason::ToolCalls => StepResult::ToolCalls {
-                        message: result.message,
-                        completed_tools: result.completed_tools,
-                    },
-                    FinishReason::Stop => StepResult::Stop {
-                        message: result.message,
-                    },
-                    _ => {
-                        let reason_str = format!("{reason:?}");
-                        return Err(reason_str.into());
-                    },
-                });
-            }
+                for choice in response.choices {
+                    for event in acc.process_delta(&choice.delta) {
+                        send_or_bail(tx, event).await?;
+                    }
+
+                    if let Some(reason) = &choice.finish_reason {
+                        let (end_events, result) = acc.finish();
+                        for event in end_events {
+                            send_or_bail(tx, event).await?;
+                        }
+
+                        pending = Some(match reason {
+                            FinishReason::ToolCalls => StepResult::ToolCalls {
+                                message: result.message,
+                                completed_tools: result.completed_tools,
+                                usage: None,
+                            },
+                            FinishReason::Stop => StepResult::Stop {
+                                message: result.message,
+                                usage: None,
+                            },
+                            _ => {
+                                let reason_str = format!("{reason:?}");
+                                return Err(reason_str.into());
+                            },
+                        });
+                        break;
+                    }
+                }
+
+                // The usage chunk is the last meaningful one; nothing worth
+                // reading remains once both the result and usage are known.
+                if pending.is_some() && usage.is_some() {
+                    break;
+                }
+            },
+            Err(e) => {
+                if pending.is_some() {
+                    // The model output is complete; losing the trailing usage
+                    // chunk must not fail the step.
+                    debug!(error = e.to_string(), status = "usage_drain_failed");
+                    break;
+                }
+                return Err(Box::new(e));
+            },
         }
     }
 
-    Err("Stream ended without finish_reason".into())
+    let mut step = pending.ok_or_else(|| "Stream ended without finish_reason")?;
+    match &mut step {
+        StepResult::Stop { usage: slot, .. } | StepResult::ToolCalls { usage: slot, .. } => {
+            *slot = usage;
+        },
+    }
+    Ok(step)
 }
 
 // ─── Request building ───
@@ -827,12 +927,19 @@ fn build_request(
     sampling: SamplingParams,
     extra_body: Option<&Value>,
     tool_choice: Option<ChatCompletionToolChoiceOption>,
+    include_usage: bool,
 ) -> ChatCompletionRequestWithExtra {
     let mut builder = CreateChatCompletionRequestArgs::default();
     builder
         .model(model)
         .messages(messages.to_vec())
         .stream(true);
+    if include_usage {
+        builder.stream_options(ChatCompletionStreamOptions {
+            include_usage: Some(true),
+            include_obfuscation: None,
+        });
+    }
     if !tools.is_empty() {
         builder.tools(tools.to_vec());
     }
@@ -1138,17 +1245,18 @@ mod tests {
     };
     use crate::domain::models::sampling::SamplingParams;
     use crate::domain::models::stream_event::MessageStreamEvent;
+    use crate::domain::models::token_usage::TokenUsage;
     use crate::domain::models::tool::{LLMTool, ToolExecution};
     use crate::infra::clients::llm_client::{Accumulator, CustomDelta, LlmClient, RunRoundParams};
 
     use futures::StreamExt;
 
     #[derive(Clone)]
-    struct TracingWeatherTool {
+    struct TracingSampleTool {
         calls: Arc<Mutex<Vec<String>>>,
     }
 
-    impl TracingWeatherTool {
+    impl TracingSampleTool {
         fn new() -> Self {
             Self {
                 calls: Arc::new(Mutex::new(Vec::new())),
@@ -1161,12 +1269,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl LLMTool for TracingWeatherTool {
+    impl LLMTool for TracingSampleTool {
         fn definition(&self) -> ChatCompletionTools {
             ChatCompletionTools::Function(ChatCompletionTool {
                 function: FunctionObject {
-                    name: "get_weather".into(),
-                    description: Some("Get current weather for a location".into()),
+                    name: "get_sample".into(),
+                    description: Some("Get sample data for a location".into()),
                     parameters: Some(serde_json::json!({
                         "type": "object",
                         "properties": {
@@ -1190,51 +1298,37 @@ mod tests {
 
             Ok(ToolExecution::new(serde_json::json!({
                 "location": "London",
-                "temperature": 18,
-                "temperatureHigh": 22,
-                "temperatureLow": 12,
-                "condition": {
-                    "text": "Cloudy",
-                    "icon": "i-lucide-cloud"
-                },
-                "humidity": 72,
-                "windSpeed": 15,
-                "dailyForecast": [
-                    {"day": "Today", "high": 22, "low": 14,
-                     "condition": {"text": "Cloudy", "icon": "i-lucide-cloud"}},
-                    {"day": "Thu", "high": 24, "low": 16,
-                     "condition": {"text": "Sunny", "icon": "i-lucide-sun"}},
-                    {"day": "Fri", "high": 20, "low": 11,
-                     "condition": {"text": "Rainy", "icon": "i-lucide-cloud-rain"}}
-                ]
+                "value": 42,
+                "status": "ok"
             })))
         }
     }
 
     #[tokio::test]
-    #[ignore = "requires local LLM at http://localhost:11434/v1"]
-    async fn round_with_weather_tool_and_reasoning() {
+    #[ignore = "requires local LLM at http://127.0.0.1:11434/v1"]
+    async fn round_with_sample_tool_and_reasoning() {
         let config = OpenAIConfig::new()
-            .with_api_base("http://localhost:11434/v1")
+            .with_api_base("http://127.0.0.1:11434/v1")
             .with_api_key("not-needed");
 
         let client = LlmClient::new(
             async_openai::Client::with_config(config),
-            "Qwen3.6-27B".into(),
+            "Qwen3.8-27B".into(),
+            true,
         );
 
-        let tool = TracingWeatherTool::new();
+        let tool = TracingSampleTool::new();
 
         let chat_id = ChatId(Uuid::new_v4());
 
         let mut user_msg = Message::new(chat_id, Role::User);
         user_msg.parts.push(MessagePart::Text(TextBlock {
-            text: "What's the weather in London?".into(),
+            text: "Give me a sample fact about London.".into(),
         }));
 
         let params = RunRoundParams {
         system_prompt:
-            "You MUST call the get_weather tool to answer. NEVER answer without calling it first."
+            "You MUST call the get_sample tool to answer. NEVER answer without calling it first."
                 .into(),
         history: vec![user_msg],
         tools: vec![Box::new(tool.clone())],
@@ -1242,11 +1336,9 @@ mod tests {
         reasoning_effort: None,
         sampling: SamplingParams::default(),
         extra_body: None,
-        tool_choice: Some(
-            async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
-                async_openai::types::chat::ToolChoiceOptions::Required,
-            ),
-        ),
+        // Auto (not Required): the system prompt forces the first tool call,
+        // but the model must be free to answer with text afterwards.
+        tool_choice: None,
         preserve_thinking: true,
         hidden: false,
         message_id_override: None,
@@ -1263,7 +1355,7 @@ mod tests {
 
         assert!(
             tool.call_count() >= 1,
-            "LLM should call get_weather at least once, got {}",
+            "LLM should call get_sample at least once, got {}",
             tool.call_count()
         );
 
@@ -1276,10 +1368,10 @@ mod tests {
             matches!(
                 e,
                 MessageStreamEvent::ToolCallStart { tool_name, .. }
-                if tool_name == "get_weather"
+                if tool_name == "get_sample"
             )
         });
-        assert!(has_tool_start, "Should emit ToolCallStart for get_weather");
+        assert!(has_tool_start, "Should emit ToolCallStart for get_sample");
 
         let has_tool_result = events
             .iter()
@@ -1296,6 +1388,18 @@ mod tests {
             )
         });
         assert!(has_stop, "Should finish with Stop");
+
+        // Best-effort: the local model may or may not report usage.
+        let reported: Vec<TokenUsage> = events
+            .iter()
+            .filter_map(|e| match e {
+                MessageStreamEvent::LlmCallFinish { usage: Some(u), .. } => Some(u.clone()),
+                _ => None,
+            })
+            .collect();
+        if let Some(u) = reported.first() {
+            assert!(u.total_tokens > 0, "Reported usage should be non-zero");
+        }
 
         let has_reasoning = events.iter().any(|e| {
             matches!(
@@ -1315,6 +1419,7 @@ mod tests {
                 if let MessageStreamEvent::LlmCallFinish {
                     finish_reason: crate::domain::models::stream_event::FinishReason::Stop,
                     message,
+                    ..
                 } = e
                 {
                     Some(message)
@@ -1360,20 +1465,14 @@ mod tests {
         );
 
         for tc in &tool_calls {
-            assert_eq!(
-                tc.tool_name, "get_weather",
-                "Tool name should be get_weather"
-            );
+            assert_eq!(tc.tool_name, "get_sample", "Tool name should be get_sample");
             assert!(
                 matches!(tc.state, ToolCallState::Done),
                 "Tool call state should be Done"
             );
             assert!(tc.output.is_some(), "Tool call should have output set");
             let output = tc.output.as_ref().unwrap();
-            assert!(
-                output.get("temperature").is_some(),
-                "Output should contain temperature"
-            );
+            assert!(output.get("value").is_some(), "Output should contain value");
         }
     }
 
@@ -1840,7 +1939,7 @@ mod tests {
             repeat_penalty: Some(1.1),
             seed: Some(42),
         };
-        let request = super::build_request("MODEL", &[], &[], None, sampling, None, None);
+        let request = super::build_request("MODEL", &[], &[], None, sampling, None, None, false);
         let value = serde_json::to_value(&request).unwrap();
         let parsed: CreateChatCompletionRequest = serde_json::from_value(value.clone()).unwrap();
 
@@ -1868,6 +1967,7 @@ mod tests {
             SamplingParams::default(),
             None,
             None,
+            false,
         );
         let value = serde_json::to_value(&request).unwrap();
 
@@ -1905,6 +2005,7 @@ mod tests {
             sampling,
             Some(&serde_json::json!({ "top_k": 5 })),
             None,
+            false,
         );
         let value = serde_json::to_value(&request).unwrap();
 
@@ -1913,5 +2014,60 @@ mod tests {
         let repeat_penalty: f32 = serde_json::from_value(value["repeat_penalty"].clone()).unwrap();
         assert_eq!(repeat_penalty, 1.1);
         assert!(value.get("min_p").is_none());
+    }
+
+    #[test]
+    fn build_request_include_usage_sets_stream_options() {
+        let request = super::build_request(
+            "MODEL",
+            &[],
+            &[],
+            None,
+            SamplingParams::default(),
+            None,
+            None,
+            true,
+        );
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            value["stream_options"]["include_usage"],
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
+    fn build_request_without_include_usage_omits_stream_options() {
+        let request = super::build_request(
+            "MODEL",
+            &[],
+            &[],
+            None,
+            SamplingParams::default(),
+            None,
+            None,
+            false,
+        );
+        let value = serde_json::to_value(&request).unwrap();
+        assert!(value.get("stream_options").is_none());
+    }
+
+    #[test]
+    fn custom_chunk_parses_trailing_usage() {
+        let json = r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":7}}}"#;
+        let chunk: super::CustomChunk = serde_json::from_str(json).unwrap();
+        let usage = chunk.usage.as_ref().map(super::TokenUsage::from).unwrap();
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 5);
+        assert_eq!(usage.total_tokens, 15);
+        assert_eq!(usage.cached_prompt_tokens, 7);
+    }
+
+    #[test]
+    fn custom_chunk_without_usage_defaults_to_none() {
+        let chunk: super::CustomChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#,
+        )
+        .unwrap();
+        assert!(chunk.usage.is_none());
     }
 }

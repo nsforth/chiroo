@@ -412,18 +412,22 @@ mod tests {
                     message: user.clone(),
                     sources: vec![],
                     hidden: false,
+                    usage: None,
                 },
                 Round {
                     message: first.clone(),
                     sources: vec![],
                     hidden: true,
+                    usage: None,
                 },
                 Round {
                     message: second.clone(),
                     sources: vec![],
                     hidden: false,
+                    usage: None,
                 },
             ],
+            usage: None,
             created_at: chrono::Utc::now().naive_utc(),
             updated_at: chrono::Utc::now().naive_utc(),
         };

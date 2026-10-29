@@ -14,6 +14,7 @@ use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::Message;
 use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatus};
 use crate::domain::models::source::Source;
+use crate::domain::models::token_usage::TokenUsage;
 use crate::infra::db::schema::{rounds, scenarios};
 use crate::infra::errors::{map_infra_error, InfraError};
 
@@ -25,6 +26,7 @@ pub struct ScenarioDb {
     pub chat_id: Uuid,
     pub name: String,
     pub status: String,
+    pub token_usage: Option<serde_json::Value>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -39,6 +41,7 @@ pub struct RoundDb {
     pub message: serde_json::Value,
     pub sources: serde_json::Value,
     pub hidden: bool,
+    pub token_usage: Option<serde_json::Value>,
     pub created_at: NaiveDateTime,
 }
 
@@ -49,6 +52,7 @@ pub struct NewScenarioDb {
     pub chat_id: Uuid,
     pub name: String,
     pub status: String,
+    pub token_usage: Option<serde_json::Value>,
 }
 
 #[derive(Insertable)]
@@ -60,6 +64,7 @@ pub struct NewRoundDb {
     pub message: serde_json::Value,
     pub sources: serde_json::Value,
     pub hidden: bool,
+    pub token_usage: Option<serde_json::Value>,
 }
 
 fn map_json_error(e: serde_json::Error) -> InfraError {
@@ -74,6 +79,14 @@ where
     serde_json::from_value(value).map_err(map_json_error)
 }
 
+fn option_usage_json(usage: &Option<TokenUsage>) -> Result<Option<serde_json::Value>, InfraError> {
+    usage
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(map_json_error)
+}
+
 fn round_to_db(scenario_id: Uuid, idx: i32, round: &Round) -> Result<NewRoundDb, InfraError> {
     Ok(NewRoundDb {
         id: round.message.id.0,
@@ -82,6 +95,7 @@ fn round_to_db(scenario_id: Uuid, idx: i32, round: &Round) -> Result<NewRoundDb,
         message: serde_json::to_value(&round.message).map_err(map_json_error)?,
         sources: serde_json::to_value(&round.sources).map_err(map_json_error)?,
         hidden: round.hidden,
+        token_usage: option_usage_json(&round.usage)?,
     })
 }
 
@@ -93,6 +107,13 @@ fn rounds_from_domain(scenario_id: Uuid, rounds: &[Round]) -> Result<Vec<NewRoun
         .collect()
 }
 
+fn parse_usage(value: &Option<serde_json::Value>) -> Result<Option<TokenUsage>, InfraError> {
+    value
+        .as_ref()
+        .map(|v| parse_json::<TokenUsage>(v.clone()))
+        .transpose()
+}
+
 fn scenario_from_db(scenario: ScenarioDb, rounds: Vec<RoundDb>) -> Result<Scenario, InfraError> {
     let rounds = rounds
         .into_iter()
@@ -101,6 +122,7 @@ fn scenario_from_db(scenario: ScenarioDb, rounds: Vec<RoundDb>) -> Result<Scenar
                 message: parse_json::<Message>(round.message)?,
                 sources: parse_json::<Vec<Source>>(round.sources)?,
                 hidden: round.hidden,
+                usage: parse_usage(&round.token_usage)?,
             })
         })
         .collect::<Result<Vec<Round>, InfraError>>()?;
@@ -110,6 +132,7 @@ fn scenario_from_db(scenario: ScenarioDb, rounds: Vec<RoundDb>) -> Result<Scenar
         chat_id: ChatId(scenario.chat_id),
         name: scenario.name,
         status: ScenarioStatus::from_str(&scenario.status),
+        usage: parse_usage(&scenario.token_usage)?,
         rounds,
         created_at: scenario.created_at,
         updated_at: scenario.updated_at,
@@ -215,6 +238,7 @@ pub async fn insert_scenario(
         chat_id: scenario.chat_id.0,
         name: scenario.name.clone(),
         status: scenario.status.as_str().to_string(),
+        token_usage: option_usage_json(&scenario.usage)?,
     };
     let new_rounds = rounds_from_domain(scenario.id.0, &scenario.rounds)?;
     let chat_id = scenario.chat_id;
@@ -256,6 +280,7 @@ pub async fn update_scenario(
     let id = scenario.id.0;
     let name = scenario.name.clone();
     let status = scenario.status.as_str().to_string();
+    let token_usage = option_usage_json(&scenario.usage)?;
     let chat_id = scenario.chat_id;
     let new_rounds = rounds_from_domain(id, &scenario.rounds)?;
 
@@ -267,6 +292,7 @@ pub async fn update_scenario(
                     .set((
                         scenarios::name.eq(name),
                         scenarios::status.eq(status),
+                        scenarios::token_usage.eq(token_usage),
                         scenarios::updated_at.eq(diesel::dsl::now),
                     ))
                     .execute(conn)

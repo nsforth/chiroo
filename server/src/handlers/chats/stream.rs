@@ -318,6 +318,7 @@ fn domain_to_sse_chunks(
         MessageStreamEvent::LlmCallFinish {
             finish_reason,
             message: _,
+            usage: _,
         } => match finish_reason {
             FinishReason::Stop => vec![
                 SseChunk::FinishStep,
