@@ -6,7 +6,6 @@ import { isPartStreaming, isToolStreaming } from '@nuxt/ui/utils/ai'
 import { useI18n } from 'vue-i18n'
 import ChatComark from '../ChatComark.vue'
 import ChatToolChart from '../tool/Chart.vue'
-import ChatToolWeather from '../tool/Weather.vue'
 import ChatToolSources from '../tool/Sources.vue'
 import ChatToolGeneric from '../tool/Generic.vue'
 import ChatToolSearchKnowledgeBase from '../tool/SearchKnowledgeBase.vue'
@@ -15,7 +14,6 @@ import ChatMessageSources from './ChatMessageSources.vue'
 import ChatMessageEdit from './MessageEdit.vue'
 import { getMessageSources, getRenderableParts } from '../../../utils/ai'
 import { formatToolInput, formatToolOutput, getSearchQuery, getSources, getSearchQueries, getSearchChunks, getExtractedDocument } from '../../../utils/tool'
-import type { WeatherUIToolInvocation } from '../../../tools/weather'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
 
 const { t } = useI18n()
@@ -72,10 +70,6 @@ const emit = defineEmits<{
       <ChatToolChart
         v-if="getToolName(part) === 'chart'"
         :invocation="{ ...(part as ChartUIToolInvocation) }"
-      />
-      <ChatToolWeather
-        v-else-if="getToolName(part) === 'weather'"
-        :invocation="{ ...(part as WeatherUIToolInvocation) }"
       />
       <UChatTool
         v-else-if="getToolName(part) === 'web_search' || getToolName(part) === 'google_search'"

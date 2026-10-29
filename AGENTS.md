@@ -185,23 +185,6 @@ ReadableStream → TextDecoderStream → EventSourceParserStream
 - Each tool component expects a specific output shape — mismatch causes
   `TypeError` during render, potentially freezing the UI.
 
-### Weather tool output shape
-
-```json
-{
-  "location": "string",
-  "temperature": 18,
-  "temperatureHigh": 22,
-  "temperatureLow": 12,
-  "condition": { "text": "Cloudy", "icon": "i-lucide-cloud" },
-  "humidity": 72,
-  "windSpeed": 15,
-  "dailyForecast": [
-    { "day": "Today", "high": 22, "low": 14, "condition": { "text": "...", "icon": "..." } }
-  ]
-}
-```
-
 ### Chart tool output shape (vue-chrts LineChart)
 
 ```json

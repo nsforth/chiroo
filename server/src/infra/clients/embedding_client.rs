@@ -152,7 +152,7 @@ mod tests {
 
     fn make_client() -> EmbeddingClient {
         let config = EmbeddingConfig {
-            base_url: "http://localhost:11434/v1".into(),
+            base_url: "http://127.0.0.1:8888/v1".into(),
             api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
             model: "EMBEDDINGS".into(),
             dimensions: 1024,
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local embedding model at http://localhost:11434/v1/embeddings"]
+    #[ignore = "requires local embedding model at http://127.0.0.1:8888/v1/embeddings"]
     async fn embed_against_local_model() {
         let client = make_client();
 
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local embedding model at http://localhost:11434/v1/embeddings"]
+    #[ignore = "requires local embedding model at http://127.0.0.1:8888/v1/embeddings"]
     async fn embed_map_against_local_model() {
         let client = make_client();
 
@@ -209,10 +209,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local embedding model at http://localhost:11434/v1/embeddings"]
+    #[ignore = "requires local embedding model at http://127.0.0.1:8888/v1/embeddings"]
     async fn embed_mismatched_dimension_errors() {
         let config = EmbeddingConfig {
-            base_url: "http://localhost:11434/v1".into(),
+            base_url: "http://127.0.0.1:8888/v1".into(),
             api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
             model: "EMBEDDINGS".into(),
             dimensions: 1,
@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local embedding model at http://localhost:11434/v1/embeddings"]
+    #[ignore = "requires local embedding model at http://127.0.0.1:8888/v1/embeddings"]
     async fn embed_matching_dimension_succeeds() {
         let discover = make_client();
         let vector = discover
@@ -239,7 +239,7 @@ mod tests {
             .expect("embed should succeed");
 
         let config = EmbeddingConfig {
-            base_url: "http://localhost:11434/v1".into(),
+            base_url: "http://127.0.0.1:8888/v1".into(),
             api_key: SecretString::new("not-needed".to_string().into_boxed_str()),
             model: "EMBEDDINGS".into(),
             dimensions: vector.len() as u32,

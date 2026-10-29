@@ -35,8 +35,6 @@ const text = computed(() => {
       return t('toolStatus.runningTool', { tool: status.tool })
     case 'generating-chart':
       return t('toolStatus.generatingChart')
-    case 'loading-weather':
-      return t('toolStatus.loadingWeather')
     default:
       return ''
   }

@@ -86,11 +86,10 @@ impl QdrantClient {
             })?;
 
         self.client
-            .create_field_index(CreateFieldIndexCollectionBuilder::new(
-                &name,
-                "document_id",
-                FieldType::Keyword,
-            ))
+            .create_field_index(
+                CreateFieldIndexCollectionBuilder::new(&name, "document_id", FieldType::Keyword)
+                    .wait(true),
+            )
             .await
             .map_err(|e| {
                 let msg = e.to_string();
@@ -150,7 +149,9 @@ impl QdrantClient {
             if needs_recreate {
                 if payload_schema.contains_key(key) {
                     self.client
-                        .delete_field_index(DeleteFieldIndexCollectionBuilder::new(&name, key))
+                        .delete_field_index(
+                            DeleteFieldIndexCollectionBuilder::new(&name, key).wait(true),
+                        )
                         .await
                         .map_err(|e| {
                             let msg = e.to_string();
@@ -159,11 +160,9 @@ impl QdrantClient {
                         })?;
                 }
                 self.client
-                    .create_field_index(CreateFieldIndexCollectionBuilder::new(
-                        &name,
-                        key,
-                        *field_type,
-                    ))
+                    .create_field_index(
+                        CreateFieldIndexCollectionBuilder::new(&name, key, *field_type).wait(true),
+                    )
                     .await
                     .map_err(|e| {
                         let msg = e.to_string();
@@ -176,7 +175,9 @@ impl QdrantClient {
         for key in payload_schema.keys() {
             if key.starts_with("metadata.") && !desired.contains_key(key) {
                 self.client
-                    .delete_field_index(DeleteFieldIndexCollectionBuilder::new(&name, key))
+                    .delete_field_index(
+                        DeleteFieldIndexCollectionBuilder::new(&name, key).wait(true),
+                    )
                     .await
                     .map_err(|e| {
                         let msg = e.to_string();
@@ -203,7 +204,7 @@ impl QdrantClient {
             .collect();
 
         self.client
-            .upsert_points(UpsertPointsBuilder::new(&name, points))
+            .upsert_points(UpsertPointsBuilder::new(&name, points).wait(true))
             .await
             .map_err(|e| {
                 let msg = e.to_string();
@@ -229,9 +230,11 @@ impl QdrantClient {
 
         self.client
             .delete_points(
-                DeletePointsBuilder::new(name).points(PointsSelectorOneOf::Points(PointsIdsList {
-                    ids: ids.clone(),
-                })),
+                DeletePointsBuilder::new(name)
+                    .points(PointsSelectorOneOf::Points(PointsIdsList {
+                        ids: ids.clone(),
+                    }))
+                    .wait(true),
             )
             .await
             .map_err(|e| {
@@ -267,7 +270,9 @@ impl QdrantClient {
 
         self.client
             .delete_points(
-                DeletePointsBuilder::new(name).points(PointsSelectorOneOf::Filter(filter)),
+                DeletePointsBuilder::new(name)
+                    .points(PointsSelectorOneOf::Filter(filter))
+                    .wait(true),
             )
             .await
             .map_err(|e| {
@@ -851,7 +856,7 @@ mod tests {
     use crate::domain::models::knowledge_base::KnowledgeBaseId;
     use crate::domain::models::search_filter::SearchFilter;
 
-    const QDRANT_URL: &str = "http://localhost:6334";
+    const QDRANT_URL: &str = "http://127.0.0.1:6334";
     const VECTOR_SIZE: u64 = 4;
 
     fn make_client(test_id: &str) -> QdrantClient {

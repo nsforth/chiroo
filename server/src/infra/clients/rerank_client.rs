@@ -181,7 +181,7 @@ mod tests {
 
     fn make_client() -> RerankClient {
         let config = RerankConfig {
-            base_url: "http://localhost:11434/v1".into(),
+            base_url: "http://127.0.0.1:8888/v1".into(),
             api_key: SecretString::new("".to_string().into_boxed_str()),
             model: "RERANKER".into(),
         };
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local rerank model at http://localhost:11434/v1/rerank"]
+    #[ignore = "requires local rerank model at http://127.0.0.1:8888/v1/rerank"]
     async fn rerank_against_local_model() {
         let client = make_client();
 
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local rerank model at http://localhost:11434/v1/rerank"]
+    #[ignore = "requires local rerank model at http://127.0.0.1:8888/v1/rerank"]
     async fn rerank_top_n() {
         let client = make_client();
 
@@ -225,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local rerank model at http://localhost:11434/v1/rerank"]
+    #[ignore = "requires local rerank model at http://127.0.0.1:8888/v1/rerank"]
     async fn rerank_map_against_local_model() {
         let client = make_client();
 

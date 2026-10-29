@@ -14,7 +14,6 @@ export type StreamingStatus =
   | { type: 'read-document'; title: string }
   | { type: 'running-tool'; tool: string }
   | { type: 'generating-chart' }
-  | { type: 'loading-weather' }
 
 export function isStreamingStatusVisible(status: string): boolean {
   return status === 'submitted' || status === 'streaming'
@@ -81,8 +80,6 @@ function resolveToolStreamingStatus(part: ToolPart): StreamingStatus {
       return { type: 'reading-document' }
     case 'chart':
       return { type: 'generating-chart' }
-    case 'weather':
-      return { type: 'loading-weather' }
     default:
       return { type: 'running-tool', tool: getToolName(part) }
   }

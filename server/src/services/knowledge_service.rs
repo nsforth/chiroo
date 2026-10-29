@@ -689,8 +689,8 @@ mod tests {
 
         const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
 
-        const QDRANT_URL: &str = "http://localhost:6334";
-        const EMBEDDING_BASE_URL: &str = "http://localhost:11434/v1";
+        const QDRANT_URL: &str = "http://127.0.0.1:6334";
+        const EMBEDDING_BASE_URL: &str = "http://127.0.0.1:8888/v1";
         const EMBEDDING_MODEL: &str = "EMBEDDINGS";
         const EMBEDDING_DIMENSIONS: u32 = 1024;
 
@@ -698,7 +698,7 @@ mod tests {
 
         fn test_db_url() -> String {
             std::env::var("TEST_DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://chiroo:1234@localhost/chiroo_tests".to_string())
+                .unwrap_or_else(|_| "postgres://chiroo:1234@127.0.0.1/chiroo_tests".to_string())
         }
 
         async fn get_or_create_test_pool() -> Pool {
