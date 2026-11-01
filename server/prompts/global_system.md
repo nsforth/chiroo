@@ -30,3 +30,8 @@ No knowledge bases are configured. If the user asks a question, tell them that n
 - Use a neutral, factual tone. No emojis, exclamation marks, or filler phrases ("Great question!", "I hope this helps!"). Answer directly, without praise, hedging, or conversational decoration.
 
 {% if user_name %}The user you are speaking with is {{ user_name }}.{% endif %}
+{% if client_system %}
+## Additional instructions from the API caller
+
+{{ client_system }}
+{% endif %}

@@ -6,8 +6,10 @@ use deadpool_diesel::postgres::Pool;
 use secrecy::{ExposeSecret, SecretBox};
 
 use crate::config::OidcConfig;
+use crate::domain::models::api_principal::ApiPrincipal;
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::session::ProviderSessionId;
+use crate::domain::models::user::User;
 use crate::errors::AppError;
 use crate::infra::clients::oidc_client::{AccessTokenClaims, OidcClient, TokenStatus};
 use crate::infra::repositories::session_repository::{self, SessionRepository};
@@ -87,29 +89,57 @@ impl AuthService {
     #[instrument(skip(self))]
     pub async fn verify_or_refresh(&self, access_token: &SecretBox<str>) -> AuthResult {
         let result = match self.verify_access_token(access_token).await {
-            TokenStatus::Valid(claims) => {
-                match self
-                    .session_repo
-                    .find_by_provider_sid(&self.pool, &ProviderSessionId(claims.sid.clone()))
+            TokenStatus::Valid(claims) => match claims.sid {
+                Some(sid) => {
+                    match self
+                        .session_repo
+                        .find_by_provider_sid(&self.pool, &ProviderSessionId(sid))
+                        .await
+                    {
+                        Ok(Some(session)) => AuthResult::Valid(AuthUser {
+                            user_id: session.user_id,
+                            session_id: session.id.0.to_string(),
+                        }),
+                        _ => AuthResult::Invalid,
+                    }
+                },
+                None => AuthResult::Invalid,
+            },
+            TokenStatus::Expired(claims) => match claims.sid {
+                Some(sid) => match self
+                    .refresh_session(ProviderSessionId(sid), access_token)
                     .await
                 {
-                    Ok(Some(session)) => AuthResult::Valid(AuthUser {
-                        user_id: session.user_id,
-                        session_id: session.id.0.to_string(),
-                    }),
-                    _ => AuthResult::Invalid,
-                }
-            },
-            TokenStatus::Expired(claims) => match self
-                .refresh_session(ProviderSessionId(claims.sid.clone()), access_token)
-                .await
-            {
-                Ok((new_token, auth_user)) => AuthResult::Refreshed(auth_user, new_token),
-                Err(_e) => AuthResult::Expired,
+                    Ok((new_token, auth_user)) => AuthResult::Refreshed(auth_user, new_token),
+                    Err(_e) => AuthResult::Expired,
+                },
+                None => AuthResult::Invalid,
             },
             TokenStatus::Invalid(_e) => AuthResult::Invalid,
         };
         info!(auth_result = %result, status = result.status());
+        result
+    }
+
+    /// Verify an OIDC access token presented as a Bearer credential for the
+    /// OpenAI-compatible API. Resolves the user strictly by `users.sso_id = sub`.
+    /// No session lookup, no refresh, no cookies.
+    #[instrument(skip(self, token))]
+    pub async fn verify_api_token(&self, token: &SecretBox<str>) -> Result<ApiPrincipal, AppError> {
+        let client = self.get_client().await?;
+        let claims = match client.verify_access_token(token).await {
+            TokenStatus::Valid(claims) => claims,
+            _ => return Err(AppError::Unauthorized),
+        };
+        let user: User = user_repository::find_by_sso_id(&self.pool, &claims.sub)
+            .await?
+            .map(Into::into)
+            .ok_or_else(|| AppError::Unauthorized)?;
+        let result = Ok(ApiPrincipal { user_id: user.id });
+        match &result {
+            Ok(_) => info!(status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
+        }
         result
     }
 
@@ -191,9 +221,12 @@ impl AuthService {
         let client = self.get_client().await?;
         let result = client.refresh_token(&session.refresh_token).await?;
 
-        let new_sid = match self.verify_access_token(&result.access_token).await {
-            TokenStatus::Valid(claims) => claims.sid,
+        let claims = match self.verify_access_token(&result.access_token).await {
+            TokenStatus::Valid(claims) => claims,
             _ => return Err(AppError::Unauthorized),
+        };
+        let Some(new_sid) = claims.sid else {
+            return Err(AppError::Unauthorized);
         };
 
         self.session_repo

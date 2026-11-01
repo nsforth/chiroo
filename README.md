@@ -122,6 +122,7 @@ the field, a single `_` stays inside a field), e.g. `CHIROO_OPENAI__BASE_URL`.
 | `CHIROO_OPENAI__API_KEY` | ✅ | — | API key |
 | `CHIROO_OPENAI__MODEL` | ✅ | — | Model name (e.g. `gpt-4o`) |
 | `CHIROO_OPENAI__INCLUDE_USAGE` | | `true` | Request token usage in streaming completion responses |
+| `CHIROO_OPENAI_API__ENABLED` | | `false` | Enable the OpenAI-compatible API at `/api/openai/v1` (see below) |
 | `CHIROO_EMBEDDING__BASE_URL` | ✅ | — | Embeddings API endpoint |
 | `CHIROO_EMBEDDING__API_KEY` | ✅ | — | Embeddings API key |
 | `CHIROO_EMBEDDING__MODEL` | ✅ | — | Embedding model name |
@@ -154,6 +155,102 @@ Product branding is configured through the `branding` section
 The frontend requires no environment variables. All API communication goes through the Vite proxy to the backend. The `.env.example` file is a legacy artifact and not needed for development.
 
 Product branding (name, label, tagline, colors, logos, fonts) is fetched from the backend (`GET /api/branding`) before the app is mounted; the frontend keeps no branding assets or defaults of its own.
+
+## OpenAI-compatible API
+
+Chiroo exposes a stateless OpenAI-compatible endpoint for scripts and
+integrations, so existing OpenAI SDKs and clients can call it without a custom
+protocol layer. It is disabled by default; enable it with
+`CHIROO_OPENAI_API__ENABLED=true` (or `openai_api.enabled: true` in a config
+file). When disabled the routes are not mounted and return 404.
+
+- **Base URL:** `/api/openai/v1`
+  - `GET /api/openai/v1/models` — lists the available models
+  - `GET /api/openai/v1/models/{model}` — fetch one model
+  - `POST /api/openai/v1/chat/completions` — run a scenario
+- **Models:** `simple` and `deep_research` (Chiroo's own scenario ids — no
+  `gpt-*` aliases, unknown models are rejected with 404).
+- **Stateless:** the caller sends the full `messages[]` history on every call;
+  Chiroo creates a new chat for the turn, runs one scenario through its normal
+  pipeline (search, hidden tool rounds, sources), persists it like a regular
+  UI chat, and returns a single non-streaming response.
+
+Authentication is an OIDC access token in the `Authorization` header — there
+are no `sk-` API keys. The token is verified against the OIDC provider's JWKS
+and the user is resolved strictly by `users.sso_id = <sub>`; a `sub` with no
+user row is rejected with 401.
+
+### Service users
+
+Service accounts never log in through the UI, so create them explicitly (the
+`sub` is the user's OIDC identity — the same `sso_id` Keycloak assigns at
+login, visible in Keycloak under the user's identity/credentials):
+
+```bash
+# via CLI (talks to the internal API)
+chiroo-cli user create \
+  --sso-id <oidc-sub> \
+  --sso-provider oidc \
+  --username service-user \
+  [--name "Service User"] [--email service@example.com]
+
+# or via the internal API
+curl -X POST http://127.0.0.1:3001/internal/api/users \
+  -H 'Content-Type: application/json' \
+  -d '{"ssoId": "<oidc-sub>", "ssoProvider": "oidc", "username": "service-user"}'
+```
+
+Users are always created as non-admins. Admin access is granted (or revoked)
+only through the separate admin call:
+
+```bash
+chiroo-cli user change --id <uuid> --admin yes
+```
+
+Delete a user (its API access is revoked immediately, since API auth resolves
+strictly by `sso_id`):
+
+```bash
+chiroo-cli user delete --id <uuid>          # deletes the user; keeps their chats
+chiroo-cli user delete --id <uuid> --purge-chats   # also deletes their chats
+```
+
+Deleting a user **keeps their chats by default** (valuable data);
+`--purge-chats` is the explicit destructive path.
+
+### Example
+
+```bash
+curl http://127.0.0.1:3000/api/openai/v1/chat/completions \
+  -H "Authorization: Bearer $OIDC_ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "simple",
+    "messages": [
+      {"role": "user", "content": "What does the onboarding policy say about remote work?"}
+    ]
+  }'
+```
+
+The response is a standard OpenAI `chat.completion` object with two
+documented extensions:
+
+- `sources` — the documents the answer is grounded in (collected from all
+  rounds, including hidden search rounds), always present as an array.
+- `chiroo` — `{ "chat_id", "scenario_id" }` for inspecting the persisted
+  chat/scenario.
+
+Caller `system`/`developer` messages are appended to Chiroo's global system
+prompt (they do not replace it).
+
+### Limitations
+
+- **Non-streaming only:** `stream: true` is rejected; so are client-side
+  tools (`tools`, `tool_choice`, `functions`) and `response_format`.
+  Harmless sampling fields (`temperature`, `top_p`, `max_tokens`, `stop`,
+  `seed`, `user`) are accepted and ignored.
+- **`deep_research` is long-running** (multiple LLM + search steps). There is
+  no server-side completion timeout — your HTTP client owns the timeout policy.
 
 ## License
 

@@ -142,7 +142,7 @@ impl IdTokenClaims {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
     pub sub: String,
-    pub sid: String,
+    pub sid: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -276,6 +276,11 @@ impl OidcClient {
         let sid = match verify_token::<AccessTokenClaims>(&access_token, &jwks, &self.issuer_url) {
             TokenStatus::Valid(claims) => claims.sid,
             _ => return Err(AppError::OidcError("Failed to verify access token".into())),
+        };
+        let Some(sid) = sid else {
+            return Err(AppError::OidcError(
+                "Access token is missing the sid claim".into(),
+            ));
         };
 
         let id_claims = IdTokenClaims::new(sub, sid, claims);
@@ -493,5 +498,19 @@ mod tests {
 
         let wrong_kid = jwks.find("does-not-exist");
         assert!(wrong_kid.is_none());
+    }
+
+    #[test]
+    fn token_without_sid_parses() {
+        let claims = serde_json::from_value::<AccessTokenClaims>(serde_json::json!({"sub": "x"}))
+            .expect("payload without sid must parse");
+        assert_eq!(claims.sub, "x");
+        assert!(claims.sid.is_none());
+    }
+
+    #[test]
+    fn missing_sub_fails_to_deserialize() {
+        let result = serde_json::from_value::<AccessTokenClaims>(serde_json::json!({"sid": "y"}));
+        assert!(result.is_err());
     }
 }

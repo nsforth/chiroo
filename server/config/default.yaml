@@ -24,6 +24,9 @@ internal_api:
 openai:
   include_usage: true
 
+openai_api:
+  enabled: true
+
 qdrant:
   url: "http://localhost:6334"
   collection_prefix: "chiroo"

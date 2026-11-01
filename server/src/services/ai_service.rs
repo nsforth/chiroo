@@ -5,7 +5,7 @@ use futures::StreamExt;
 use secrecy::ExposeSecret;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 use crate::config::OpenAiConfig;
 use crate::domain::models::auth_user::AuthUser;
@@ -16,8 +16,10 @@ use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatu
 use crate::domain::models::source::Source;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::domain::models::token_usage::TokenUsage;
+use crate::domain::models::user::UserId;
 use crate::errors::AppError;
 use crate::infra::clients::llm_client::LlmClient;
+use crate::operation_result::OperationResult;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::prompts::{KbContext, PromptRenderer, TemplateContext};
 use crate::services::scenario_service::ScenarioService;
@@ -196,54 +198,16 @@ impl AiService {
             ScenarioStatus::Running,
             user_message,
         );
-        let scenario_id = scenario.id;
         let assistant_message_id = MessageId::new();
-        let scenario_name = scenario.name.clone();
-
-        let llm_client = self.llm_client.clone();
-        let prompt_renderer = self.prompt_renderer.clone();
-        let scenario_service = self.scenario_service.clone();
-        let search_service = self.search_service.clone();
-        let knowledge_service = self.knowledge_service.clone();
-        let search_limit = self.search_limit;
-        let assistant_name = self.assistant_name.clone();
-        let model = model.to_string();
-
-        let (tx, rx) = mpsc::channel(64);
-        let error_tx = tx.clone();
-
-        tokio::spawn(async move {
-            if let Err(e) = run_scenario(
-                llm_client,
-                prompt_renderer,
-                scenario_service,
-                search_service,
-                knowledge_service,
-                search_limit,
-                assistant_name,
-                chat_id,
-                &model,
-                scenario,
-                assistant_message_id,
-                user_name,
-                true,
-                tx,
-            )
-            .await
-            {
-                let _ = error_tx
-                    .send(MessageStreamEvent::Error {
-                        error_text: e.to_string(),
-                    })
-                    .await;
-            }
-        });
-
-        (
-            scenario_id,
+        self.spawn_scenario(
+            chat_id,
+            model.to_string(),
+            scenario,
             assistant_message_id,
-            scenario_name,
-            Box::new(ReceiverStream::new(rx)),
+            user_name,
+            true,
+            None,
+            None,
         )
     }
 
@@ -264,12 +228,100 @@ impl AiService {
         String,
         Box<dyn futures::Stream<Item = MessageStreamEvent> + Send + Unpin>,
     ) {
-        let scenario_id = scenario.id;
         let assistant_message_id = scenario
             .rounds
             .get(1)
             .map(|r| r.message.id)
             .unwrap_or_else(MessageId::new);
+        let model = scenario.name.clone();
+        self.spawn_scenario(
+            chat_id,
+            model,
+            scenario,
+            assistant_message_id,
+            user_name,
+            false,
+            None,
+            None,
+        )
+    }
+
+    /// Run a scenario to completion and return the finished scenario. The caller must have
+    /// already created the chat (create_chat_shell); the scenario is inserted here.
+    #[instrument(skip(self, question, history, client_system), fields(chat_id = %chat_id.0))]
+    pub async fn complete(
+        &self,
+        chat_id: ChatId,
+        model: &str,
+        question: Message,
+        history: Vec<Message>,
+        client_system: Option<String>,
+        user_id: UserId,
+    ) -> Result<Scenario, AppError> {
+        let user = self.user_service.get_user(user_id).await?;
+        let user_name = user.name.clone().unwrap_or_else(|| user.username.clone());
+
+        let scenario = Scenario::new(
+            chat_id,
+            model.to_string(),
+            ScenarioStatus::Running,
+            question,
+        );
+        let scenario_id = scenario.id;
+        let assistant_message_id = MessageId::new();
+
+        let (_, _, _, mut stream) = self.spawn_scenario(
+            chat_id,
+            model.to_string(),
+            scenario,
+            assistant_message_id,
+            user_name,
+            true,
+            Some(history),
+            client_system,
+        );
+
+        while let Some(event) = stream.next().await {
+            if let MessageStreamEvent::Error { error_text } = event {
+                info!(scenario_id = %scenario_id.0, error = error_text);
+                return Err(AppError::InternalServerError);
+            }
+        }
+
+        let result = match self
+            .scenario_service
+            .get_scenario(chat_id, scenario_id)
+            .await?
+        {
+            Some(scenario) if scenario.status == ScenarioStatus::Completed => Ok(scenario),
+            Some(_) => Err(AppError::InternalServerError),
+            None => Err(AppError::NotFound("Scenario not found".into())),
+        };
+        match &result {
+            Ok(scenario) => info!(scenario_id = %scenario.id.0, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
+        }
+        result
+    }
+
+    fn spawn_scenario(
+        &self,
+        chat_id: ChatId,
+        model: String,
+        scenario: Scenario,
+        assistant_message_id: MessageId,
+        user_name: String,
+        is_new: bool,
+        provided_history: Option<Vec<Message>>,
+        client_system: Option<String>,
+    ) -> (
+        ScenarioId,
+        MessageId,
+        String,
+        Box<dyn futures::Stream<Item = MessageStreamEvent> + Send + Unpin>,
+    ) {
+        let scenario_id = scenario.id;
+        let scenario_name = scenario.name.clone();
 
         let llm_client = self.llm_client.clone();
         let prompt_renderer = self.prompt_renderer.clone();
@@ -278,8 +330,6 @@ impl AiService {
         let knowledge_service = self.knowledge_service.clone();
         let search_limit = self.search_limit;
         let assistant_name = self.assistant_name.clone();
-        let model = scenario.name.clone();
-        let scenario_name = model.clone();
 
         let (tx, rx) = mpsc::channel(64);
         let error_tx = tx.clone();
@@ -298,7 +348,9 @@ impl AiService {
                 scenario,
                 assistant_message_id,
                 user_name,
-                false,
+                is_new,
+                provided_history,
+                client_system,
                 tx,
             )
             .await
@@ -334,6 +386,8 @@ async fn run_scenario(
     assistant_message_id: MessageId,
     user_name: String,
     is_new: bool,
+    provided_history: Option<Vec<Message>>,
+    client_system: Option<String>,
     tx: mpsc::Sender<MessageStreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let definition = scenario_by_name(model).unwrap_or_else(simple);
@@ -355,6 +409,7 @@ async fn run_scenario(
         current_date: Utc::now().format("%Y-%m-%d").to_string(),
         question,
         knowledge_bases: kbs.iter().map(KbContext::from).collect(),
+        client_system,
     };
 
     let global_prompt = prompt_renderer
@@ -367,30 +422,41 @@ async fn run_scenario(
     scenario.name = definition.name.to_string();
     scenario.status = ScenarioStatus::Running;
 
-    // Dialog history. For a NEW scenario, load history BEFORE inserting so the
-    // just-inserted scenario is not double-counted (its question lives in the
-    // round prompts). For a continue, load it AFTER update so the current
-    // scenario's already-stored rounds are reflected in the history.
-    let mut history: Vec<Message> = if is_new {
-        let scenarios = scenario_service
-            .get_scenarios_for_chat(chat_id)
-            .await
-            .map_err(|e| format!("Failed to load chat history: {e}"))?;
-        scenario = scenario_service
-            .insert_scenario(&scenario)
-            .await
-            .map_err(|e| format!("Failed to save scenario: {e}"))?;
-        build_history(scenarios, None)
-    } else {
-        scenario = scenario_service
-            .update_scenario(&scenario)
-            .await
-            .map_err(|e| format!("Failed to update scenario: {e}"))?;
-        let scenarios = scenario_service
-            .get_scenarios_for_chat(chat_id)
-            .await
-            .map_err(|e| format!("Failed to load chat history: {e}"))?;
-        build_history(scenarios, Some(scenario.id))
+    // Dialog history. A provided history (OpenAI API) is used verbatim.
+    // For a NEW scenario, load history BEFORE inserting so the just-inserted
+    // scenario is not double-counted (its question lives in the round prompts).
+    // For a continue, load it AFTER update so the current scenario's
+    // already-stored rounds are reflected in the history.
+    let mut history: Vec<Message> = match provided_history {
+        Some(history) => {
+            scenario = scenario_service
+                .insert_scenario(&scenario)
+                .await
+                .map_err(|e| format!("Failed to save scenario: {e}"))?;
+            history
+        },
+        None if is_new => {
+            let scenarios = scenario_service
+                .get_scenarios_for_chat(chat_id)
+                .await
+                .map_err(|e| format!("Failed to load chat history: {e}"))?;
+            scenario = scenario_service
+                .insert_scenario(&scenario)
+                .await
+                .map_err(|e| format!("Failed to save scenario: {e}"))?;
+            build_history(scenarios, None)
+        },
+        None => {
+            scenario = scenario_service
+                .update_scenario(&scenario)
+                .await
+                .map_err(|e| format!("Failed to update scenario: {e}"))?;
+            let scenarios = scenario_service
+                .get_scenarios_for_chat(chat_id)
+                .await
+                .map_err(|e| format!("Failed to load chat history: {e}"))?;
+            build_history(scenarios, Some(scenario.id))
+        },
     };
 
     let next_round = scenario.rounds.len().saturating_sub(1); // assistant rounds already stored

@@ -75,10 +75,24 @@ pub(crate) struct ReindexResponse {
 #[derive(Debug, Deserialize)]
 pub(crate) struct User {
     pub(crate) id: String,
+    pub(crate) username: String,
     pub(crate) admin: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct UpdateUserRequest {
     pub(crate) admin: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CreateUserRequest {
+    #[serde(rename = "ssoId")]
+    pub(crate) sso_id: String,
+    #[serde(rename = "ssoProvider")]
+    pub(crate) sso_provider: String,
+    pub(crate) username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) email: Option<String>,
 }

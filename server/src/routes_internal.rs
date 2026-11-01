@@ -12,7 +12,9 @@ use crate::handlers::internal::documents::{
 use crate::handlers::internal::knowledge_bases::{
     create_kb, delete_kb, get_kb, list_kbs, update_kb,
 };
-use crate::handlers::internal::users::{get_user_by_username, update_user_admin};
+use crate::handlers::internal::users::{
+    create_user, delete_user, get_user_by_username, update_user_admin,
+};
 use crate::state::AppState;
 
 pub fn internal_api_router(state: AppState) -> Router {
@@ -36,7 +38,9 @@ pub fn internal_api_router(state: AppState) -> Router {
 
     let user_router = Router::new()
         .route("/", get(get_user_by_username))
-        .route("/{id}", patch(update_user_admin));
+        .route("/", post(create_user))
+        .route("/{id}", patch(update_user_admin))
+        .route("/{id}", delete(delete_user));
 
     Router::new()
         .nest("/internal/api/knowledge-bases", kb_router)

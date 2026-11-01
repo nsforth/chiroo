@@ -44,12 +44,22 @@ pub fn app_router(state: AppState) -> Router {
             auth_middleware,
         ));
 
+    let openai_router = if state.config.openai_api_enabled() {
+        crate::handlers::openai::openai_router().route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::openai_auth::openai_auth_middleware,
+        ))
+    } else {
+        Router::new()
+    };
+
     Router::new()
         .route("/", get(root))
         .nest("/api/auth", auth_router)
         .nest("/api/branding", branding_router)
         .route("/api/localizations", get(get_localizations))
         .merge(protected)
+        .nest("/api/openai/v1", openai_router)
         .fallback(handler_404)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

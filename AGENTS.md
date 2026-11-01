@@ -509,3 +509,34 @@ indexes truncate sub-seconds). Filters are applied to both hybrid-search prefetc
 The system prompt (`prompts/global_system.md`) lists each KB's "Filterable metadata
 fields".
 
+
+## OpenAI-compatible API (`/api/openai/v1`)
+
+A stateless, OpenAI-client-compatible surface for scripts and integrations.
+Disabled by default; mounted only when `openai_api.enabled` is true
+(`CHIROO_OPENAI_API__ENABLED`), otherwise the routes 404.
+
+- Auth: OIDC access token via `Authorization: Bearer` (dedicated middleware
+  `middleware/openai_auth.rs`, NOT the cookie/CSRF middleware). No `sk-`/static
+  keys. The token is verified against the JWKS (signature, issuer, `exp`) via
+  `OidcClient`, and the user is resolved strictly by `users.sso_id = sub`
+  (`AuthService::verify_api_token` → `ApiPrincipal` in request extensions).
+  No session lookup, no refresh, no cookies. Unknown `sub` → 401.
+- Wire format: OpenAI shapes, snake_case (no camelCase renames). Errors use the
+  OpenAI envelope `{"error": {message, type, param, code}}`; 401s carry
+  `WWW-Authenticate: Bearer`.
+- `POST /chat/completions` is stateless: the caller sends the full
+  `messages[]`; Chiroo creates a normal chat (`ChatService::create_chat_shell`,
+  no auto scenario) and runs one scenario via `AiService::complete` (synchronous
+  drain of the normal scenario pipeline; `system`/`developer` messages are
+  appended to the global prompt via `TemplateContext.client_system`, never
+  replacing it). The provided history is used for the LLM but not re-persisted.
+- Rejected explicitly: `stream: true`, client tools, `response_format`,
+  `n != 1`, `logprobs`; sampling fields are ignored. Model ids are native
+  (`simple`, `deep_research`) — no aliases.
+- Response extensions: `sources` (deduped across all rounds, incl. hidden) and
+  `chiroo` (`chat_id`, `scenario_id`).
+- Service users are created/deleted explicitly (internal API `POST/DELETE
+  /internal/api/users`, CLI `chiroo-cli user create/delete`); deletion keeps
+  chats by default, `?purgeChats=true` / `--purge-chats` deletes them in one
+  transaction.

@@ -256,6 +256,18 @@ impl OpenAiConfig {
     }
 }
 
+/// OpenAI-compatible external API (`/api/openai/v1`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenAiApiConfig {
+    enabled: bool,
+}
+
+impl OpenAiApiConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RerankConfig {
     pub base_url: String,
@@ -371,6 +383,7 @@ pub struct Config {
     pub internal_api: InternalApiConfig,
     pub db: DatabaseConfig,
     pub openai: OpenAiConfig,
+    pub openai_api: OpenAiApiConfig,
     pub embedding: EmbeddingConfig,
     pub oidc: OidcConfig,
     pub qdrant: QdrantConfig,
@@ -404,6 +417,10 @@ impl Config {
 
     pub fn internal_api_port(&self) -> u16 {
         self.internal_api.port()
+    }
+
+    pub fn openai_api_enabled(&self) -> bool {
+        self.openai_api.enabled()
     }
 
     pub fn oidc_config(&self) -> &OidcConfig {
@@ -647,6 +664,15 @@ mod tests {
         assert_eq!(cfg.branding.name, "ChiRoo");
         assert_eq!(cfg.branding.assistant_name, "ChiRoo");
         assert!(cfg.openai.include_usage());
+        assert!(cfg.openai_api_enabled());
+    }
+
+    #[test]
+    fn openai_api_can_be_enabled() {
+        let mut env = required_env();
+        env.insert("CHIROO_OPENAI_API__ENABLED".into(), "true".into());
+        let cfg = load(env);
+        assert!(cfg.openai_api_enabled());
     }
 
     #[test]

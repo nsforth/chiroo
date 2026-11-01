@@ -9,6 +9,7 @@ pub mod chats;
 pub mod internal;
 pub mod localization;
 pub mod models;
+pub mod openai;
 pub mod session;
 
 const ASSET_CACHE_CONTROL: &str = "public, max-age=86400";

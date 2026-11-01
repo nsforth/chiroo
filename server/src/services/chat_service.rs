@@ -88,6 +88,27 @@ impl ChatService {
         result
     }
 
+    /// Create a chat whose title derives from `first_message` but WITHOUT inserting a
+    /// scenario. The OpenAI-compatible API starts its own scenario via `AiService::complete`.
+    #[instrument(skip(self, first_message))]
+    pub async fn create_chat_shell(
+        &self,
+        first_message: String,
+        user_id: UserId,
+    ) -> Result<Chat, AppError> {
+        let title = Message::make_title(&first_message);
+        let new_chat = chat_repository::NewChatDb::new(user_id.0, Some(title.clone()));
+        let result: Result<Chat, AppError> = chat_repository::insert(&self.pool, new_chat)
+            .await
+            .map(Into::into)
+            .map_err(|_| AppError::InternalServerError);
+        match &result {
+            Ok(chat) => info!(title = ?chat.title, status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
+        }
+        result
+    }
+
     /// Delete a chat by ID (only owner can delete).
     #[instrument(skip(self))]
     pub async fn delete_chat(&self, chat_id: &ChatId, user_id: &UserId) -> Result<(), AppError> {

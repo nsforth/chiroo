@@ -2,8 +2,8 @@ use chrono::NaiveDateTime;
 use diesel::deserialize::Queryable;
 use diesel::upsert::excluded;
 use diesel::{
-    ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl, Selectable,
-    SelectableHelper,
+    Connection, ExpressionMethods, Insertable, OptionalExtension, QueryDsl, RunQueryDsl,
+    Selectable, SelectableHelper,
 };
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::domain::models::user::User;
 use crate::domain::models::user::UserId;
+use crate::infra::db::schema::chats;
 use crate::infra::db::schema::users;
 use crate::infra::errors::{map_infra_error, InfraError};
 
@@ -29,6 +30,10 @@ pub struct UserDb {
     pub created_at: NaiveDateTime,
 }
 
+/// The admin flag is intentionally not part of the upsert: new users are
+/// always created as non-admins (column default), and existing users' admin
+/// flag is never touched by login/profile updates. Admin access is granted
+/// exclusively through `set_admin`.
 #[derive(Deserialize, Insertable)]
 #[diesel(table_name = users)]
 struct UpsertUser {
@@ -173,6 +178,41 @@ pub async fn set_admin(
         .map_err(map_infra_error)?;
 
     Ok(res)
+}
+
+#[instrument(level = "debug", skip(pool))]
+pub async fn delete_user(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: Uuid,
+) -> Result<bool, InfraError> {
+    let conn = pool.get().await.map_err(map_infra_error)?;
+    let res = conn
+        .interact(move |conn| diesel::delete(users::table.filter(users::id.eq(id))).execute(conn))
+        .await
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
+
+    Ok(res > 0)
+}
+
+#[instrument(level = "debug", skip(pool))]
+pub async fn delete_user_with_chats(
+    pool: &deadpool_diesel::postgres::Pool,
+    id: Uuid,
+) -> Result<bool, InfraError> {
+    let conn = pool.get().await.map_err(map_infra_error)?;
+    let res = conn
+        .interact(move |conn| {
+            conn.transaction(|conn| {
+                diesel::delete(chats::table.filter(chats::owner.eq(id))).execute(conn)?;
+                diesel::delete(users::table.filter(users::id.eq(id))).execute(conn)
+            })
+        })
+        .await
+        .map_err(map_infra_error)?
+        .map_err(map_infra_error)?;
+
+    Ok(res > 0)
 }
 
 impl From<UserDb> for User {

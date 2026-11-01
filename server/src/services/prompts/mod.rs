@@ -38,6 +38,7 @@ pub struct TemplateContext {
     pub current_date: String,
     pub question: String,
     pub knowledge_bases: Vec<KbContext>,
+    pub client_system: Option<String>,
 }
 
 #[derive(Clone)]
@@ -59,6 +60,10 @@ impl PromptRenderer {
         ctx.insert("current_date", &context.current_date);
         ctx.insert("question", &context.question);
         ctx.insert("knowledge_bases", &context.knowledge_bases);
+        ctx.insert(
+            "client_system",
+            &context.client_system.clone().unwrap_or_default(),
+        );
         self.tera.render(template, &ctx)
     }
 
@@ -100,6 +105,7 @@ mod tests {
             current_date: "2026-07-27".into(),
             question: "What is Rust?".into(),
             knowledge_bases: vec![test_kb()],
+            client_system: None,
         }
     }
 
@@ -255,6 +261,25 @@ mod tests {
             .render("deep_research/answer.md", &test_context())
             .expect("Failed to render");
         assert!(result.contains("synthesize"));
+    }
+
+    #[test]
+    fn client_system_block_rendered_when_present() {
+        let mut ctx = test_context();
+        ctx.client_system = Some("Only use docs after 2020".into());
+        let result = renderer()
+            .render_global_system(&ctx)
+            .expect("Failed to render");
+        assert!(result.contains("## Additional instructions from the API caller"));
+        assert!(result.contains("Only use docs after 2020"));
+    }
+
+    #[test]
+    fn client_system_block_absent_when_none() {
+        let result = renderer()
+            .render_global_system(&test_context())
+            .expect("Failed to render");
+        assert!(!result.contains("## Additional instructions"));
     }
 
     #[test]

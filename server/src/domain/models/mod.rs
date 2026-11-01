@@ -1,3 +1,4 @@
+pub mod api_principal;
 pub mod auth_user;
 pub mod chat;
 pub mod document;
