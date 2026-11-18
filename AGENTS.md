@@ -4,7 +4,7 @@
 
 - Frontend: Vue 3 + Vite, Nuxt UI + Tailwind CSS, Vercel AI SDK, vue-i18n
 - Backend: Rust + Axum (Tokio), Diesel ORM, PostgreSQL
-- Vite dev proxy: `localhost:5143/api/*` → `localhost:3000`
+- Vite dev proxy: `localhost:5173/api/*` → `localhost:3000`
 
 ## API conventions
 

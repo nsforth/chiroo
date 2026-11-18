@@ -8,18 +8,24 @@ AI chatbot with a full-stack architecture: Vue 3 frontend + Rust backend.
 chiroo/
 ├── ui/              # Frontend (Vue 3 + Vite)
 │   └── src/
+│       ├── api/          # Fetch wrapper (apiFetch)
 │       ├── components/   # Vue components
 │       ├── composables/  # Reactive state & actions
+│       ├── layouts/      # Page layouts
+│       ├── locales/      # i18n translations (en, ru)
 │       ├── pages/        # Vue Router pages
-│       ├── tools/        # AI SDK tool implementations (weather, chart)
-│       └── types/        # TypeScript types
+│       ├── plugins/      # Nuxt-style plugins
+│       ├── tools/        # AI SDK tool implementations (chart)
+│       ├── types/        # TypeScript types
+│       └── utils/        # Shared helpers
 └── server/          # Backend (Rust + Axum)
     ├── src/         # Source code (DDD layout)
+    │   ├── bin/     # chiroo-cli (CLI tool)
     │   ├── domain/  # Pure domain models
     │   ├── handlers/# HTTP layer
     │   ├── services/# Business logic
     │   ├── infra/   # Diesel schema, repositories
-    │   ├── middleware/ # Auth & CSRF middleware
+    │   ├── middleware/ # Auth, CSRF & admin middleware
     │   └── utils/   # Shared utilities
     └── migrations/  # Diesel ORM migrations
 ```
@@ -48,7 +54,7 @@ chiroo/
 
 ### Prerequisites
 
-- Node.js 20+ and pnpm
+- Node.js 20.19+ (or 22.12+) and pnpm
 - Rust (latest stable)
 - PostgreSQL 15+
 - Qdrant (vector store for embeddings/search)
@@ -70,7 +76,7 @@ cargo build
 ### Run
 
 ```bash
-# Frontend dev server (http://localhost:5143)
+# Frontend dev server (http://localhost:5173)
 cd ui && pnpm dev
 
 # Backend dev server (http://127.0.0.1:3000)
@@ -117,12 +123,12 @@ the field, a single `_` stays inside a field), e.g. `CHIROO_OPENAI__BASE_URL`.
 | `CHIROO_INTERNAL_API__HOST` | | `127.0.0.1` | Internal API bind address |
 | `CHIROO_INTERNAL_API__PORT` | | `3001` | Internal API port |
 | `CHIROO_DB__URL` | ✅ | — | PostgreSQL connection string |
-| `CHIROO_DB__ENCRYPTION_KEY` | ✅ | — | 32-byte key for field-level encryption (e.g. `openssl rand 32 \| xxd -p -c 32`) |
+| `CHIROO_DB__ENCRYPTION_KEY` | ✅ | — | 32-byte key for field-level encryption (a 32-char string, e.g. `openssl rand -hex 16`) |
 | `CHIROO_OPENAI__BASE_URL` | ✅ | — | OpenAI-compatible API endpoint |
 | `CHIROO_OPENAI__API_KEY` | ✅ | — | API key |
 | `CHIROO_OPENAI__MODEL` | ✅ | — | Model name (e.g. `gpt-4o`) |
 | `CHIROO_OPENAI__INCLUDE_USAGE` | | `true` | Request token usage in streaming completion responses |
-| `CHIROO_OPENAI_API__ENABLED` | | `false` | Enable the OpenAI-compatible API at `/api/openai/v1` (see below) |
+| `CHIROO_OPENAI_API__ENABLED` | | `true` | Enable the OpenAI-compatible API at `/api/openai/v1` (see below) |
 | `CHIROO_EMBEDDING__BASE_URL` | ✅ | — | Embeddings API endpoint |
 | `CHIROO_EMBEDDING__API_KEY` | ✅ | — | Embeddings API key |
 | `CHIROO_EMBEDDING__MODEL` | ✅ | — | Embedding model name |
@@ -160,8 +166,8 @@ Product branding (name, label, tagline, colors, logos, fonts) is fetched from th
 
 Chiroo exposes a stateless OpenAI-compatible endpoint for scripts and
 integrations, so existing OpenAI SDKs and clients can call it without a custom
-protocol layer. It is disabled by default; enable it with
-`CHIROO_OPENAI_API__ENABLED=true` (or `openai_api.enabled: true` in a config
+protocol layer. It is enabled by default; disable it with
+`CHIROO_OPENAI_API__ENABLED=false` (or `openai_api.enabled: false` in a config
 file). When disabled the routes are not mounted and return 404.
 
 - **Base URL:** `/api/openai/v1`
