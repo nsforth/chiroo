@@ -3,20 +3,16 @@ import { computed, provide } from 'vue'
 import { isReasoningUIPart, isTextUIPart, isToolUIPart, getToolName } from 'ai'
 import type { UIMessage } from 'ai'
 import { isPartStreaming, isToolStreaming } from '@nuxt/ui/utils/ai'
-import { useI18n } from 'vue-i18n'
 import ChatComark from '../ChatComark.vue'
 import ChatToolChart from '../tool/Chart.vue'
-import ChatToolSources from '../tool/Sources.vue'
 import ChatToolGeneric from '../tool/Generic.vue'
 import ChatToolSearchKnowledgeBase from '../tool/SearchKnowledgeBase.vue'
 import ChatToolExtractDocument from '../tool/ExtractDocument.vue'
 import ChatMessageSources from './ChatMessageSources.vue'
 import ChatMessageEdit from './MessageEdit.vue'
 import { getMessageSources, getRenderableParts } from '../../../utils/ai'
-import { formatToolInput, formatToolOutput, getSearchQuery, getSources, getSearchQueries, getSearchChunks, getExtractedDocument } from '../../../utils/tool'
+import { formatToolInput, formatToolOutput, getSearchQueries, getSearchChunks, getExtractedDocument } from '../../../utils/tool'
 import type { ChartUIToolInvocation } from '../../../tools/chart'
-
-const { t } = useI18n()
 
 const props = defineProps<{
   message: UIMessage
@@ -71,16 +67,6 @@ const emit = defineEmits<{
         v-if="getToolName(part) === 'chart'"
         :invocation="{ ...(part as ChartUIToolInvocation) }"
       />
-      <UChatTool
-        v-else-if="getToolName(part) === 'web_search' || getToolName(part) === 'google_search'"
-        :text="isToolStreaming(part) ? t('toolStatus.searching') : t('toolStatus.searched')"
-        :suffix="getSearchQuery(part)"
-        :streaming="isToolStreaming(part)"
-        chevron="leading"
-      >
-        <ChatToolSources :sources="getSources(part)" />
-      </UChatTool>
-
       <ChatToolSearchKnowledgeBase
         v-else-if="getToolName(part) === 'search_in_all_kbs' || getToolName(part) === 'search_in_kb' || getToolName(part) === 'search_knowledge_base'"
         :streaming="isToolStreaming(part)"

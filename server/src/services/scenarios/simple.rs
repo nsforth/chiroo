@@ -1,4 +1,6 @@
-use async_openai::types::chat::{ChatCompletionToolChoiceOption, ToolChoiceOptions};
+use async_openai::types::chat::{
+    ChatCompletionToolChoiceOption, ReasoningEffort, ToolChoiceOptions,
+};
 
 use crate::domain::models::sampling::{SamplingParams, SamplingPreset};
 
@@ -13,7 +15,7 @@ pub fn simple() -> ScenarioDefinition {
                 prompt_template: "simple/search.md".into(),
                 tool_names: vec!["search_in_all_kbs".into()],
                 max_llm_calls: 1,
-                reasoning_effort: None,
+                reasoning_effort: Some(ReasoningEffort::None),
                 sampling: SamplingParams::default(),
                 extra_body: None,
                 tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
@@ -27,7 +29,7 @@ pub fn simple() -> ScenarioDefinition {
                 prompt_template: "simple/extract.md".into(),
                 tool_names: vec!["extract_document".into()],
                 max_llm_calls: 1,
-                reasoning_effort: None,
+                reasoning_effort: Some(ReasoningEffort::None),
                 sampling: SamplingParams::default(),
                 extra_body: None,
                 tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
@@ -41,7 +43,7 @@ pub fn simple() -> ScenarioDefinition {
                 prompt_template: "simple/answer.md".into(),
                 tool_names: vec![],
                 max_llm_calls: 1,
-                reasoning_effort: None,
+                reasoning_effort: Some(ReasoningEffort::None),
                 sampling: SamplingParams::default(),
                 extra_body: None,
                 tool_choice: Some(ChatCompletionToolChoiceOption::Mode(

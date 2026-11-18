@@ -1,6 +1,6 @@
 import { createSharedComposable } from '@vueuse/core'
 import { ref, computed } from 'vue'
-import type { UserSession } from '../types/session'
+import { userSessionSchema, type UserSession } from '../types/session'
 import { apiFetch } from '../api'
 
 export const useUserSession = createSharedComposable(() => {
@@ -13,7 +13,9 @@ export const useUserSession = createSharedComposable(() => {
 
   const fetchSession = async () => {
     loading.value = true
-    session.value = await apiFetch<UserSession>('/api/session').catch(() => null)
+    const data: unknown = await apiFetch('/api/session').catch(() => null)
+    const parsed = userSessionSchema.safeParse(data)
+    session.value = parsed.success ? parsed.data : null
     loading.value = false
   }
 

@@ -7,9 +7,15 @@ import { routes, handleHotUpdate } from 'vue-router/auto-routes'
 import { setupLayouts } from 'virtual:generated-layouts'
 import ui from '@nuxt/ui/vue-plugin'
 
+import { addCollection } from '@iconify/vue'
+import { icons as lucideIcons } from '@iconify-json/lucide'
+
 import App from './App.vue'
 import { i18n } from './plugins/i18n'
 import { head, runBoot } from './boot'
+
+// Bundle the lucide icon set locally so icons render without internet access
+addCollection(lucideIcons)
 
 function mountMainApp() {
   const router = createRouter({

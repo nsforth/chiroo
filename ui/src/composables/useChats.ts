@@ -1,19 +1,9 @@
-import { isToday, isYesterday, subMonths } from 'date-fns'
+import { isToday, isYesterday, subDays, subMonths } from 'date-fns'
 import { computed, ref } from 'vue'
 import { createSharedComposable } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { apiFetch } from '../api'
-
-interface ChatsResponse {
-  chats: ChatResponse[]
-}
-
-interface ChatResponse {
-  id: string,
-  title?: string,
-  userId: string,
-  createdAt: string
-}
+import { chatListResponseSchema } from '../types/chats'
 
 interface Chat {
   id: string
@@ -25,17 +15,22 @@ interface Chat {
 
 export const useChats = createSharedComposable(() => {
   const chats = ref<Chat[]>([])
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
 
- const fetchChats = async () => {
-    const data = await apiFetch('/api/chats') as ChatsResponse
-    chats.value = data.chats.map(chat => ({
+  const fetchChats = async () => {
+    const data: unknown = await apiFetch('/api/chats')
+    const parsed = chatListResponseSchema.safeParse(data)
+    if (!parsed.success) {
+      console.warn('Failed to parse chats response:', parsed.error)
+      return
+    }
+    chats.value = parsed.data.chats.map(chat => ({
       id: chat.id,
       label: chat.title ?? null,
       to: `/chat/${chat.id}`,
       icon: 'i-lucide-message-circle',
-      createdAt: String(chat.createdAt)
-    }) as Chat)
+      createdAt: chat.createdAt
+    }))
   }
 
   const updateChat = (id: string, partial: Partial<Chat>) => {
@@ -54,7 +49,7 @@ export const useChats = createSharedComposable(() => {
     const lastMonth: Chat[] = []
     const older: Record<string, Chat[]> = {}
 
-    const oneWeekAgo = subMonths(new Date(), 0.25) // ~7 days ago
+    const oneWeekAgo = subDays(new Date(), 7)
     const oneMonthAgo = subMonths(new Date(), 1)
 
     chats.value?.forEach((chat) => {
@@ -70,8 +65,7 @@ export const useChats = createSharedComposable(() => {
         lastMonth.push(chat)
       } else {
         // Format: "January 2023", "February 2023", etc.
-        const i18nLocale = ['ru', 'en'].includes(navigator.language.slice(0, 2)) ? navigator.language : 'en-US'
-        const monthYear = chatDate.toLocaleDateString(i18nLocale, {
+        const monthYear = chatDate.toLocaleDateString(locale.value, {
           month: 'long',
           year: 'numeric'
         })

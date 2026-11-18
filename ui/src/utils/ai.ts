@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai'
-import { isTextUIPart } from 'ai'
+import { isDataUIPart, isTextUIPart } from 'ai'
 
 export function getMergedParts(parts: UIMessage['parts']): UIMessage['parts'] {
   const result: UIMessage['parts'] = []
@@ -31,8 +31,8 @@ export function getRenderableParts(message: UIMessage, showHidden: boolean): UIM
     if (part.type === 'source-url' || part.type === 'step-start') {
       continue
     }
-    if (part.type === 'data-round') {
-      const data = (part as unknown as { data?: { hidden?: unknown } }).data
+    if (isDataUIPart(part) && part.type === 'data-round') {
+      const data = part.data as { hidden?: unknown } | undefined
       hidden = data?.hidden === true
       continue
     }

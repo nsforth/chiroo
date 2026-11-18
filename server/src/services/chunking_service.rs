@@ -24,6 +24,7 @@ impl ChunkingService {
         text: &str,
     ) -> Vec<DocumentChunk> {
         if text.is_empty() {
+            info!(status = "success");
             return Vec::new();
         }
 

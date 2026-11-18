@@ -108,7 +108,7 @@ impl AiService {
         let user = self.user_service.get_user(auth_user.user_id).await?;
         let user_name = user.name.clone().unwrap_or_else(|| user.username.clone());
 
-        match request {
+        let result = match request {
             StreamRequest::Submit {
                 user_message,
                 model,
@@ -152,7 +152,12 @@ impl AiService {
                     })?;
                 Ok(self.stream_continue(chat_id, scenario, user_name))
             },
+        };
+        match &result {
+            Ok(_) => info!(status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
+        result
     }
 
     async fn rerun_scenario(
@@ -199,7 +204,7 @@ impl AiService {
             user_message,
         );
         let assistant_message_id = MessageId::new();
-        self.spawn_scenario(
+        let result = self.spawn_scenario(
             chat_id,
             model.to_string(),
             scenario,
@@ -208,7 +213,8 @@ impl AiService {
             true,
             None,
             None,
-        )
+        );
+        result
     }
 
     #[instrument(skip(self, scenario), fields(
@@ -234,7 +240,7 @@ impl AiService {
             .map(|r| r.message.id)
             .unwrap_or_else(MessageId::new);
         let model = scenario.name.clone();
-        self.spawn_scenario(
+        let result = self.spawn_scenario(
             chat_id,
             model,
             scenario,
@@ -243,7 +249,8 @@ impl AiService {
             false,
             None,
             None,
-        )
+        );
+        result
     }
 
     /// Run a scenario to completion and return the finished scenario. The caller must have
@@ -283,7 +290,7 @@ impl AiService {
 
         while let Some(event) = stream.next().await {
             if let MessageStreamEvent::Error { error_text } = event {
-                info!(scenario_id = %scenario_id.0, error = error_text);
+                info!(scenario_id = %scenario_id.0, error = error_text, status = "failed");
                 return Err(AppError::InternalServerError);
             }
         }

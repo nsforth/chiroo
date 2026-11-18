@@ -3,12 +3,23 @@ use std::fs;
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use tracing::{info, instrument};
 
 /// Loads all localization bundles from `dir`. Each `*.json` file becomes an
 /// entry keyed by its language code (the file stem), holding the raw parsed
 /// content. The loader knows nothing about the inner structure — it serves the
 /// files as-is.
+#[instrument]
 pub fn load(dir: &str) -> Result<HashMap<String, Value>> {
+    let result = load_bundles(dir);
+    match &result {
+        Ok(by_lang) => info!(lang_count = by_lang.len(), status = "success"),
+        Err(e) => info!(error = e.to_string(), status = "failed"),
+    }
+    result
+}
+
+fn load_bundles(dir: &str) -> Result<HashMap<String, Value>> {
     let entries = fs::read_dir(dir).with_context(|| format!("failed to read {dir}"))?;
 
     let mut by_lang = HashMap::new();

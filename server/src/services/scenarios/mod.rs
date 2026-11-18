@@ -247,7 +247,7 @@ mod tests {
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "simple/search.md");
         assert!(r1.tool_names.contains(&"search_in_all_kbs".into()));
-        assert!(r1.reasoning_effort.is_none());
+        assert_eq!(r1.reasoning_effort, Some(ReasoningEffort::None));
         assert_eq!(r1.max_llm_calls, 1);
         assert!(r1.sampling.is_empty());
         assert!(!r1.enable_thinking);
@@ -269,6 +269,7 @@ mod tests {
         let r2 = &scenario.rounds[1];
         assert_eq!(r2.prompt_template, "simple/extract.md");
         assert!(r2.tool_names.contains(&"extract_document".into()));
+        assert_eq!(r2.reasoning_effort, Some(ReasoningEffort::None));
         assert_eq!(r2.max_llm_calls, 1);
         assert!(r2.hidden);
         assert_eq!(
@@ -287,6 +288,7 @@ mod tests {
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "simple/answer.md");
         assert!(r3.tool_names.is_empty());
+        assert_eq!(r3.reasoning_effort, Some(ReasoningEffort::None));
         assert!(!r3.hidden);
         assert_eq!(
             r3.tool_choice,

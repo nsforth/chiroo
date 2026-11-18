@@ -1,3 +1,4 @@
+use crate::handlers::admin::votes::list_votes;
 use crate::handlers::auth::{login, oidc_callback};
 use crate::handlers::branding::{get_branding, get_branding_asset};
 use crate::handlers::chats::{
@@ -7,6 +8,7 @@ use crate::handlers::chats::{
 use crate::handlers::localization::get_localizations;
 use crate::handlers::models::{get_scenario_icon, list_models};
 use crate::handlers::session::get_session;
+use crate::middleware::admin::admin_middleware;
 use crate::middleware::auth::auth_middleware;
 use crate::middleware::csrf::csrf_middleware;
 use crate::AppState;
@@ -30,11 +32,20 @@ pub fn app_router(state: AppState) -> Router {
 
     let chat_router = chat_router();
 
+    let admin_router =
+        Router::new()
+            .route("/votes", get(list_votes))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                admin_middleware,
+            ));
+
     let protected = Router::new()
         .route("/api/session", get(get_session))
         .route("/api/models", get(list_models))
         .route("/api/scenarios/{id}/icon", get(get_scenario_icon))
         .nest("/api/chats", chat_router)
+        .nest("/api/admin", admin_router)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             csrf_middleware,

@@ -16,13 +16,15 @@ const colorMode = useColorMode()
 const { user, clearSession } = useUserSession()
 const { t, locale } = useI18n()
 
+const isAdmin = computed(() => user.value?.admin ?? false)
+
 const items = computed<DropdownMenuItem[][]>(() => ([[{
   type: 'label',
-  label: user.value?.name,
-  avatar: {
-    src: user.value?.avatar,
-    alt: user.value?.name
-  }
+    label: user.value?.name,
+    avatar: {
+      src: user.value?.avatar || undefined,
+      alt: user.value?.name
+    }
 }], [{
   label: t('userMenu.language'),
   icon: 'i-lucide-languages',
@@ -62,14 +64,23 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
       e.preventDefault()
     }
   }]
-}], [{
-  label: t('userMenu.logout'),
-  icon: 'i-lucide-log-out',
-  onSelect() {
-    clearSession()
-    router.push('/')
+}], [
+  ...(isAdmin.value ? [{
+    label: t('userMenu.adminPanel'),
+    icon: 'i-lucide-shield-check',
+    onSelect() {
+      router.push('/admin')
+    }
+  }] : []),
+  {
+    label: t('userMenu.logout'),
+    icon: 'i-lucide-log-out',
+    onSelect() {
+      clearSession()
+      router.push('/')
+    }
   }
-}]]))
+]]))
 </script>
 
 <template>

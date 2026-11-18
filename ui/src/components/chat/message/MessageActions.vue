@@ -5,10 +5,9 @@ import { isFileUIPart } from 'ai'
 import { useClipboard } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getMessageText } from '../../../utils/ai'
-import { useModels } from '../../../composables/useModels'
+import { getMessageMetadata } from '../../../types/chats'
 
 const { t } = useI18n()
-const { models } = useModels()
 
 const props = defineProps<{
   message: UIMessage & { createdAt?: string | Date }
@@ -20,11 +19,8 @@ const props = defineProps<{
 }>()
 
 const scenarioName = computed(() => {
-  const metadata = props.message.metadata as { name?: string } | undefined
-  return metadata?.name ?? null
+  return getMessageMetadata(props.message)?.name ?? null
 })
-
-const scenario = computed(() => models.value.find((m) => m.value === scenarioName.value))
 
 const formattedDate = computed(() => {
   if (!props.message.createdAt) return null
@@ -62,25 +58,11 @@ function copy() {
 </script>
 
 <template>
-  <template v-if="message.role === 'assistant' && !streaming && scenarioName">
-    <span class="inline-flex items-center gap-1.5 text-xs text-muted mr-1.5 max-w-40">
-      <img
-        v-if="scenario?.iconUrl"
-        :src="scenario.iconUrl"
-        :alt="scenario.label"
-        class="size-4 rounded-sm object-contain"
-        loading="lazy"
-      >
-      <UIcon
-        v-else
-        :name="scenario?.icon ?? 'i-lucide-bot'"
-        class="size-4 shrink-0"
-      />
-      <UTooltip :text="scenario?.description">
-        <span class="truncate">{{ scenario?.label ?? scenarioName }}</span>
-      </UTooltip>
-    </span>
-  </template>
+  <ModelBadge
+    v-if="message.role === 'assistant' && !streaming && scenarioName"
+    :model="scenarioName"
+    class="text-xs text-muted mr-1.5 max-w-40"
+  />
 
   <template v-if="!streaming && !editing">
     <UTooltip :text="t('chatActions.copyResponse')">

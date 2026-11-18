@@ -15,7 +15,9 @@ import ChatVisibility from '../../components/chat/ChatVisibility.vue'
 import ChatTitle from '../../components/chat/ChatTitle.vue'
 import ChatStreamingStatus from '../../components/chat/StreamingStatus.vue'
 import Navbar from '../../components/Navbar.vue'
-import type { Vote } from '../../types/vote'
+import { voteSchema, type Vote } from '../../types/vote'
+import { chatDetailSchema, getMessageMetadata } from '../../types/chats'
+import { z } from 'zod'
 import { buildSendMessageBody } from '../../utils/chatTransport'
 import { isStreamingStatusVisible } from '../../utils/streamingStatus'
 
@@ -26,7 +28,9 @@ const { fetchChats, chats } = useChats()
 const { csrf, headerName } = useCsrf()
 const { user } = useUserSession()
 
-const data = await apiFetch(`/api/chats/${route.params.id}`).catch(() => null)
+const rawData: unknown = await apiFetch(`/api/chats/${route.params.id}`).catch(() => null)
+const parsedChat = chatDetailSchema.safeParse(rawData)
+const data = parsedChat.success ? parsedChat.data : null
 
 const model = ref<string>(data?.model ?? 'simple')
 
@@ -43,8 +47,11 @@ watch(() => chats.value.find(c => c.id === data?.id)?.label, (label) => {
 
 const votes = ref<Vote[]>([])
 if (isOwner.value) {
-  apiFetch(`/api/chats/votes/${route.params.id}`).then((v) => {
-    votes.value = v
+  apiFetch<unknown>(`/api/chats/votes/${route.params.id}`).then((v) => {
+    const parsed = z.array(voteSchema).safeParse(v)
+    if (parsed.success) {
+      votes.value = parsed.data
+    }
   }).catch(() => {})
 }
 
@@ -121,7 +128,7 @@ function cancelEdit() {
 }
 
 function getScenarioId(message?: UIMessage): string | undefined {
-  return (message?.metadata as { scenarioId?: string } | undefined)?.scenarioId
+  return getMessageMetadata(message)?.scenarioId
 }
 
 function getFollowingScenarioId(message: UIMessage): string | undefined {

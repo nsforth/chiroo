@@ -513,7 +513,7 @@ fields".
 ## OpenAI-compatible API (`/api/openai/v1`)
 
 A stateless, OpenAI-client-compatible surface for scripts and integrations.
-Disabled by default; mounted only when `openai_api.enabled` is true
+Enabled by default; mounted only when `openai_api.enabled` is true
 (`CHIROO_OPENAI_API__ENABLED`), otherwise the routes 404.
 
 - Auth: OIDC access token via `Authorization: Bearer` (dedicated middleware

@@ -153,9 +153,10 @@ All repository functions should accept and return domain models instead of `*Db`
 
 Example: `user_repository::upsert` takes individual fields instead of a `User` domain model.
 
-Affected:
+`session_repository` is already refactored (`SessionDb` private, public API on the `Session` domain model) — use it as the pattern.
+
+Remaining:
 - `chat_repository.rs` — `NewChatDb`, `ChatDb` exposed
-- `session_repository.rs` — `SessionDb` exposed
 - `vote_repository.rs` — `VoteDb`, `NewVoteDb` exposed
 - `user_repository.rs` — `UserDb` exposed, `upsert` takes individual fields
 
@@ -163,17 +164,13 @@ Affected:
 
 `domain_to_sse_chunks` — uses a mutable `started: &mut bool` flag. Replace with a proper state machine.
 
-### Extract vote converter from handler
-
-`votes.rs` — `VoteDb → VoteResponse` conversion done inline in `get_votes`. Move to a dedicated converter / `From` impl.
-
 ### ChatService: full review
 
 `ChatService` — review logic and error handling.
 
 ### OIDC metadata cache: refresh entire metadata
 
-`fetch_jwk_set` — when JWKS is refreshed, the whole discovery metadata (issuer, endpoints, JWK cache) must be refreshed too, otherwise keys and metadata become desynchronized.
+Discovery metadata (issuer, endpoints, `jwks_uri`) is fetched once in `OidcClient::new()` and never refreshed (the client lives in an `OnceCell` for the process lifetime). Only the JWKS has a cache: `#[cached(ttl = 3600)]` on `fetch_jwk_set`. On a JWKS refresh the whole discovery metadata must be refreshed too, otherwise keys and metadata become desynchronized (rotated JWKs vs. stale issuer/endpoints).
 
 ### Search round: kb_id hallucination has no self-correct path
 
@@ -209,7 +206,7 @@ the DB select only the last N scenarios (with their rounds) and fetch just those
 
 ### Markdown render: defensive fallback on parse failure
 
-Comark parses LLM/assistant and tool (search/extract) markdown without a `.catch` in its async `setup` (`ChatComark.vue`), so a parser crash blanks the whole part (no console error). Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and the tool content components (`SearchKnowledgeBase.vue`, `ExtractDocument.vue`).
+Comark parses LLM/assistant and tool (search/extract) markdown without a `try/catch` in its async watch (`ChatComark.vue`), so a parser crash blanks the whole part (no console error). Tool content is now parsed through the shared `ComarkTool.ts` (`defineMarkdownComponent` from `@comark/vue`, used by `SearchKnowledgeBase.vue` and `ExtractDocument.vue`), but the library has no error/fallback handling either. Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and `ComarkTool.ts`.
 
 ### Qdrant datetime granularity
 
@@ -222,6 +219,8 @@ on reindex — currently they can drift.
 ---
 
 ## Testing
+
+Note: there is no `server/tests/` directory — all tests are inline `#[cfg(test)]` modules in `src/`. Service-level integration tests against Postgres exist for `vote_service`, `scenario_service`, `search_service`, and `knowledge_service` (all `#[ignore] = "requires Postgres…"`); they do not cover the items below.
 
 ### AiService: end-to-end scenario orchestration test
 

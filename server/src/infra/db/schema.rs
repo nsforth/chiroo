@@ -40,6 +40,7 @@ diesel::table! {
         chat_id -> Uuid,
         scenario_id -> Uuid,
         is_upvoted -> Bool,
+        created_at -> Timestamptz,
     }
 }
 

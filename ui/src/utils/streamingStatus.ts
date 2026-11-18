@@ -2,7 +2,7 @@ import type { UIMessage } from 'ai'
 import { isReasoningUIPart, isTextUIPart, isToolUIPart, getToolName } from 'ai'
 import { isPartStreaming, isToolStreaming } from '@nuxt/ui/utils/ai'
 import { getMergedParts } from './ai'
-import { getSearchQuery, getSearchQueries, getExtractedDocument } from './tool'
+import { getSearchQueries, getExtractedDocument } from './tool'
 import type { ToolPart } from './tool'
 
 export type StreamingStatus =
@@ -73,9 +73,6 @@ function resolveToolStreamingStatus(part: ToolPart): StreamingStatus {
     case 'search_in_kb':
     case 'search_knowledge_base':
       return { type: 'searching', query: getSearchQueries(part).join(', ') }
-    case 'web_search':
-    case 'google_search':
-      return { type: 'searching', query: getSearchQuery(part) ?? '' }
     case 'extract_document':
       return { type: 'reading-document' }
     case 'chart':

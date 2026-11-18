@@ -19,7 +19,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, instrument, trace};
 use uuid::Uuid;
 
 use crate::domain::models::chat::ChatId;
@@ -155,7 +155,7 @@ impl LlmClient {
             if let Err(e) =
                 run_round(client, model, params, chat_id, include_usage, tx.clone()).await
             {
-                info!(
+                debug!(
                     chat_id = ?chat_id,
                     error = format_error_chain(&*e, ""),
                     status = "failed"
@@ -639,7 +639,7 @@ async fn run_round(
                     },
                 )
                 .await?;
-                info!(reason = "stop", status = "success");
+                debug!(reason = "stop", status = "success");
                 return Ok(());
             },
             Ok(StepResult::ToolCalls {
@@ -785,7 +785,7 @@ async fn run_round(
         },
     )
     .await?;
-    info!(reason = "max_llm_calls_with_results", status = "success");
+    debug!(reason = "max_llm_calls_with_results", status = "success");
 
     Ok(())
 }
@@ -1233,7 +1233,7 @@ mod tests {
     use async_openai::config::OpenAIConfig;
     use async_openai::types::chat::{
         ChatCompletionMessageToolCallChunk, ChatCompletionTool, ChatCompletionTools,
-        CreateChatCompletionRequest, FunctionCallStream, FunctionObject,
+        CreateChatCompletionRequest, FunctionCallStream, FunctionObject, ReasoningEffort,
     };
     use async_trait::async_trait;
     use serde_json::Value;
@@ -1474,6 +1474,95 @@ mod tests {
             let output = tc.output.as_ref().unwrap();
             assert!(output.get("value").is_some(), "Output should contain value");
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local LLM at http://127.0.0.1:11434/v1"]
+    async fn round_with_reasoning_effort_none_emits_no_reasoning() {
+        let config = OpenAIConfig::new()
+            .with_api_base("http://127.0.0.1:11434/v1")
+            .with_api_key("not-needed");
+
+        let client = LlmClient::new(
+            async_openai::Client::with_config(config),
+            "Qwen3.8-27B".into(),
+            true,
+        );
+
+        let chat_id = ChatId(Uuid::new_v4());
+
+        let mut user_msg = Message::new(chat_id, Role::User);
+        user_msg.parts.push(MessagePart::Text(TextBlock {
+            text: "Reply with only: OK".into(),
+        }));
+
+        let params = RunRoundParams {
+            system_prompt: String::new(),
+            history: vec![user_msg],
+            tools: vec![],
+            max_llm_calls: 1,
+            reasoning_effort: Some(ReasoningEffort::None),
+            sampling: SamplingParams::default(),
+            extra_body: None,
+            tool_choice: None,
+            preserve_thinking: false,
+            hidden: false,
+            message_id_override: None,
+        };
+
+        let events: Vec<MessageStreamEvent> = client.execute_round(chat_id, params).collect().await;
+
+        // Check first — any error makes further assertions meaningless
+        let error = events.iter().find_map(|e| match e {
+            MessageStreamEvent::Error { error_text } => Some(error_text.as_str()),
+            _ => None,
+        });
+        assert!(error.is_none(), "Unexpected error in stream: {error:?}");
+
+        // With reasoning_effort = "none" the server must not emit any reasoning chunks
+        let has_reasoning = events.iter().any(|e| {
+            matches!(
+                e,
+                MessageStreamEvent::ReasoningStart { .. }
+                    | MessageStreamEvent::ReasoningDelta { .. }
+                    | MessageStreamEvent::ReasoningEnd { .. }
+            )
+        });
+        assert!(
+            !has_reasoning,
+            "reasoning_effort=none must suppress reasoning chunks"
+        );
+
+        let final_message = events
+            .iter()
+            .find_map(|e| {
+                if let MessageStreamEvent::LlmCallFinish {
+                    finish_reason: crate::domain::models::stream_event::FinishReason::Stop,
+                    message,
+                    ..
+                } = e
+                {
+                    Some(message)
+                } else {
+                    None
+                }
+            })
+            .expect("Should have LlmCallFinish(Stop) with a message");
+
+        let has_reasoning_part = final_message
+            .parts
+            .iter()
+            .any(|p| matches!(p, MessagePart::Reasoning { .. }));
+        assert!(
+            !has_reasoning_part,
+            "Final message must not contain reasoning parts"
+        );
+
+        let has_text_part = final_message
+            .parts
+            .iter()
+            .any(|p| matches!(p, MessagePart::Text { .. }));
+        assert!(has_text_part, "Final message should contain text parts");
     }
 
     // ─── convert_history_to_openai_messages tests ───

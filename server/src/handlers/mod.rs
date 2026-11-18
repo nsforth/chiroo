@@ -3,6 +3,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::config::StaticAsset;
 
+pub mod admin;
 pub mod auth;
 pub mod branding;
 pub mod chats;
@@ -11,6 +12,7 @@ pub mod localization;
 pub mod models;
 pub mod openai;
 pub mod session;
+pub mod user;
 
 const ASSET_CACHE_CONTROL: &str = "public, max-age=86400";
 

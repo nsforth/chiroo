@@ -93,27 +93,47 @@ impl KnowledgeService {
             indexes,
         };
         let result = knowledge_base_repository::insert(&self.pool, &cmd).await;
-        match &result {
-            Ok(_) => info!(status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
+        if let Err(e) = &result {
+            info!(error = e.to_string(), status = "failed");
         }
         let kb = result?;
-        kb.render_description()
-            .map_err(|e| AppError::BodyParsingError(e.to_string()))?;
+        if let Err(e) = kb.render_description() {
+            info!(error = e.to_string(), status = "failed");
+            return Err(AppError::BodyParsingError(e.to_string()));
+        }
 
-        self.qdrant_client
+        if let Err(e) = self
+            .qdrant_client
             .create_collection(&kb.id, self.embedding_dimensions as u64)
-            .await?;
+            .await
+        {
+            info!(
+                kb_id = kb.id.0.to_string(),
+                error = e.to_string(),
+                status = "failed"
+            );
+            return Err(e);
+        }
         info!(
             kb_id = kb.id.0.to_string(),
             dimensions = self.embedding_dimensions,
             status = "collection_created"
         );
 
-        self.qdrant_client
+        if let Err(e) = self
+            .qdrant_client
             .sync_field_indexes(&kb.id, &parsed_indexes.unwrap_or_default())
-            .await?;
+            .await
+        {
+            info!(
+                kb_id = kb.id.0.to_string(),
+                error = e.to_string(),
+                status = "failed"
+            );
+            return Err(e);
+        }
 
+        info!(kb_id = kb.id.0.to_string(), status = "success");
         Ok(kb)
     }
 
@@ -168,16 +188,29 @@ impl KnowledgeService {
             .map_err(|e| AppError::BodyParsingError(e.to_string()))?;
 
         let result = knowledge_base_repository::update(&self.pool, &kb).await;
-        match &result {
-            Ok(_) => info!(status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
+        if let Err(e) = &result {
+            info!(
+                kb_id = kb.id.0.to_string(),
+                error = e.to_string(),
+                status = "failed"
+            );
         }
         let updated = result?;
 
-        self.qdrant_client
+        if let Err(e) = self
+            .qdrant_client
             .sync_field_indexes(&kb.id, &kb.indexes)
-            .await?;
+            .await
+        {
+            info!(
+                kb_id = kb.id.0.to_string(),
+                error = e.to_string(),
+                status = "failed"
+            );
+            return Err(e);
+        }
 
+        info!(kb_id = kb.id.0.to_string(), status = "success");
         Ok(updated)
     }
 
@@ -233,9 +266,8 @@ impl KnowledgeService {
             metadata,
         };
         let result = document_repository::insert(&self.pool, &cmd, &data).await;
-        match &result {
-            Ok(_) => info!(doc_id = id, status = "success"),
-            Err(e) => info!(doc_id = id, error = e.to_string(), status = "failed"),
+        if let Err(e) = &result {
+            info!(doc_id = id, error = e.to_string(), status = "failed");
         }
         let doc = result?;
 
@@ -247,6 +279,7 @@ impl KnowledgeService {
             return Err(e);
         }
 
+        info!(doc_id = id, status = "success");
         Ok(doc)
     }
 
@@ -353,9 +386,8 @@ impl KnowledgeService {
         let doc = existing.with_meta(title, url, version, mime_type, metadata);
 
         let result = document_repository::update(&self.pool, &doc, &data).await;
-        match &result {
-            Ok(_) => info!(status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
+        if let Err(e) = &result {
+            info!(error = e.to_string(), status = "failed");
         }
         let updated_doc = result?;
 
@@ -371,6 +403,7 @@ impl KnowledgeService {
             return Err(e);
         }
 
+        info!(doc_id = updated_doc.id.0, status = "success");
         Ok(updated_doc)
     }
 
@@ -389,16 +422,21 @@ impl KnowledgeService {
 
         let result =
             document_repository::update_metadata(&self.pool, id, &title, &url, &metadata).await;
-        match &result {
-            Ok(_) => info!(status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
+        if let Err(e) = &result {
+            info!(error = e.to_string(), status = "failed");
         }
         let updated_doc = result?;
 
-        self.qdrant_client
+        if let Err(e) = self
+            .qdrant_client
             .update_chunk_metadata(&doc.kb_id, id, &title, &url, &metadata)
-            .await?;
+            .await
+        {
+            info!(doc_id = id.0, error = e.to_string(), status = "failed");
+            return Err(e);
+        }
 
+        info!(doc_id = id.0, status = "success");
         Ok(updated_doc)
     }
 

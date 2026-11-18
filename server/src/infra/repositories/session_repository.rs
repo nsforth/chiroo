@@ -75,7 +75,7 @@ impl SessionRepository {
         })
     }
 
-    #[instrument(level = "debug", skip(self, pool))]
+    #[instrument(level = "debug", skip(self, pool, access_token, refresh_token))]
     pub async fn upsert(
         &self,
         pool: &deadpool_diesel::postgres::Pool,

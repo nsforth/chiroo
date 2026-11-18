@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio::sync::OnceCell;
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 use deadpool_diesel::postgres::Pool;
 use secrecy::{ExposeSecret, SecretBox};
@@ -71,7 +71,7 @@ impl AuthService {
             loop {
                 interval.tick().await;
                 if let Err(e) = self.cleanup_expired().await {
-                    tracing::error!("Session cleanup failed: {:?}", e);
+                    tracing::error!(error = e.to_string(), status = "cleanup_failed");
                 }
             }
         });
@@ -262,7 +262,7 @@ impl AuthService {
             .map_err(|_| AppError::InternalServerError);
         match &result {
             Ok(count) if *count > 0usize => info!(deleted = count, status = result.status()),
-            Ok(count) => debug!(deleted = count, status = result.status()),
+            Ok(count) => info!(deleted = count, status = result.status()),
             Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result

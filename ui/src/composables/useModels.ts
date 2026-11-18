@@ -1,14 +1,10 @@
 import { computed, ref } from 'vue'
 import { createSharedComposable } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { z } from 'zod'
 import { apiFetch } from '../api'
 import { iconByName, type ModelOption } from '../../shared/utils/models'
-
-interface ApiModel {
-  id: string
-  icon: string
-  iconUrl: string | null
-}
+import { modelSchema, type ApiModel } from '../types/models'
 
 export const useModels = createSharedComposable(() => {
   const { t, te } = useI18n()
@@ -16,7 +12,9 @@ export const useModels = createSharedComposable(() => {
 
   async function load() {
     try {
-      raw.value = await apiFetch<ApiModel[]>('/api/models')
+      const data: unknown = await apiFetch('/api/models')
+      const parsed = z.array(modelSchema).safeParse(data)
+      raw.value = parsed.success ? parsed.data : []
     } catch (error) {
       console.warn('Failed to load models:', error)
       raw.value = []

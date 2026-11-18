@@ -11,6 +11,7 @@ use crate::errors::AppError;
 use crate::infra::clients::embedding_client::EmbeddingClient;
 use crate::infra::clients::qdrant_client::QdrantClient;
 use crate::infra::clients::rerank_client::RerankClient;
+use crate::operation_result::OperationResult;
 use crate::utils::LogView;
 
 #[derive(Clone)]
@@ -49,8 +50,8 @@ impl SearchService {
     ) -> Result<Vec<SearchedChunk>, AppError> {
         let result = self.search_impl(queries, kbs, limit, Some(filters)).await;
         match &result {
-            Ok(chunks) => info!(chunks = chunks.len(), status = "success"),
-            Err(e) => info!(error = e.to_string(), status = "failed"),
+            Ok(chunks) => info!(chunks = chunks.len(), status = result.status()),
+            Err(e) => info!(error = e.to_string(), status = result.status()),
         }
         result
     }

@@ -1,6 +1,6 @@
 use crate::domain::models::chat::ChatId;
 use crate::domain::models::scenario::ScenarioId;
-use crate::domain::models::votes::Vote;
+use crate::domain::models::votes::{Vote, VoteWithChat};
 use crate::errors::AppError;
 use crate::infra::repositories::vote_repository::{self, NewVoteDb};
 use crate::operation_result::OperationResult;
@@ -39,6 +39,7 @@ impl VoteService {
                 chat_id: chat_id.0,
                 scenario_id: scenario_id.0,
                 is_upvoted: true,
+                created_at: chrono::Utc::now().naive_utc(),
             },
         )
         .await
@@ -63,6 +64,7 @@ impl VoteService {
                 chat_id: chat_id.0,
                 scenario_id: scenario_id.0,
                 is_upvoted: false,
+                created_at: chrono::Utc::now().naive_utc(),
             },
         )
         .await
@@ -86,6 +88,33 @@ impl VoteService {
         }
         result
     }
+
+    #[instrument(skip(self))]
+    pub async fn list_all(
+        &self,
+        page: u32,
+        page_size: u32,
+    ) -> Result<(Vec<VoteWithChat>, i64), AppError> {
+        let page_size = page_size.clamp(1, 100) as i64;
+        let offset = (page.saturating_sub(1) as i64) * page_size;
+        let result = vote_repository::list_all(&self.pool, page_size, offset)
+            .await
+            .map(|(rows, total)| {
+                let votes = rows
+                    .into_iter()
+                    .map(VoteWithChat::from)
+                    .collect::<Vec<VoteWithChat>>();
+                (votes, total)
+            })
+            .map_err(|_| AppError::InternalServerError);
+        match &result {
+            Ok((votes, total)) => {
+                info!(count = votes.len(), total = total, status = result.status())
+            },
+            Err(e) => info!(error = e.to_string(), status = result.status()),
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -101,6 +130,7 @@ mod integration {
     use crate::domain::models::scenario::{Scenario, ScenarioStatus};
     use crate::domain::models::votes::VoteType;
     use crate::infra::repositories::chat_repository::{self, NewChatDb};
+    use crate::infra::repositories::user_repository;
     use crate::services::scenario_service::ScenarioService;
 
     const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
@@ -261,5 +291,55 @@ mod integration {
             .expect("vote for scenario B");
         assert!(matches!(vote_a.vote_type, VoteType::Dislike));
         assert!(matches!(vote_b.vote_type, VoteType::Like));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn list_all_returns_votes_with_user_and_chat_context() {
+        let pool = get_or_create_test_pool().await;
+        let service = make_service(&pool);
+
+        let username = format!("alice-admin-{}", Uuid::new_v4());
+        let user = user_repository::upsert(
+            &pool,
+            &format!("admin-test-{}", Uuid::new_v4()),
+            "oidc",
+            Some("Alice Admin"),
+            &username,
+            Some("alice@example.com"),
+            None,
+        )
+        .await
+        .expect("upsert user");
+
+        let chat: crate::domain::models::chat::Chat =
+            chat_repository::insert(&pool, NewChatDb::new(user.id, None))
+                .await
+                .expect("insert chat")
+                .into();
+        let scenario = ScenarioService::new(pool.clone())
+            .insert_scenario(&Scenario::new(
+                chat.id,
+                "test-model".to_string(),
+                ScenarioStatus::Completed,
+                Message::user(chat.id, "question".to_string()),
+            ))
+            .await
+            .expect("insert scenario");
+
+        service.like(chat.id, scenario.id).await.expect("like");
+
+        let (votes, total) = service.list_all(1, 10).await.expect("list_all");
+        assert!(total >= 1, "total must count at least the new vote");
+        let vote = votes
+            .iter()
+            .find(|v| v.scenario_id.0 == scenario.id.0)
+            .expect("the new vote must appear in list_all");
+        assert_eq!(vote.chat_id.0, chat.id.0);
+        assert_eq!(vote.user.id.0, user.id);
+        assert_eq!(vote.user.username, username);
+        assert_eq!(vote.user.name.as_deref(), Some("Alice Admin"));
+        assert_eq!(vote.user.email.as_deref(), Some("alice@example.com"));
+        assert!(vote.is_upvoted);
     }
 }

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObject};
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -53,12 +54,13 @@ impl LLMTool for SearchAllKbsTool {
                  parameters: Some(serde_json::json!({
                      "type": "object",
                      "properties": {
-                         "queries": {
-                             "type": "array",
-                             "items": { "type": "string" },
-                             "description": "Array of natural language search queries (several distinct angles)"
-                         },
-                         "kb_ids": {
+                          "queries": {
+                              "type": "array",
+                              "items": { "type": "string" },
+                              "description": "Array of natural language search queries (several distinct angles). \
+                      Must be a JSON array of strings, e.g. [\"q1\", \"q2\"] — never a single string."
+                          },
+                          "kb_ids": {
                              "type": "array",
                              "items": { "type": "string" },
                              "description": "Knowledge base ids to search. Omit to search all knowledge bases."
@@ -142,7 +144,8 @@ impl LLMTool for SearchInKbTool {
                         "queries": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Array of natural language search queries (several distinct angles)"
+                            "description": "Array of natural language search queries (several distinct angles). \
+                    Must be a JSON array of strings, e.g. [\"q1\", \"q2\"] — never a single string."
                         },
                         "kb_id": {
                             "type": "string",
@@ -202,21 +205,22 @@ struct SearchInKbArgs {
     filters: SearchFilter,
 }
 
+#[derive(Debug, Deserialize)]
+struct QueryItem(String);
+
+#[derive(Debug, Deserialize)]
+struct KbId(Uuid);
+
 fn parse_queries(input: &Value) -> Result<Vec<String>, String> {
     let arr = input["queries"]
         .as_array()
-        .ok_or("Missing 'queries' array")?;
-    let mut queries = Vec::with_capacity(arr.len());
-    for item in arr {
-        let s = item
-            .as_str()
-            .ok_or_else(|| format!("Invalid queries: each item must be a string (got: {item})"))?;
-        queries.push(s.to_string());
-    }
-    if queries.is_empty() {
+        .ok_or_else(|| "Missing 'queries' array".to_string())?;
+    let items: Vec<QueryItem> = serde_json::from_value(Value::Array(arr.clone()))
+        .map_err(|e| format!("Invalid queries: {e}"))?;
+    if items.is_empty() {
         return Err("At least one query is required".into());
     }
-    Ok(queries)
+    Ok(items.into_iter().map(|QueryItem(query)| query).collect())
 }
 
 fn parse_filters(input: &Value) -> Result<SearchFilter, String> {
@@ -234,13 +238,11 @@ fn parse_search_all_args(arguments: &str) -> Result<SearchAllArgs, String> {
         None => None,
         Some(arr) if arr.is_empty() => None,
         Some(arr) => Some(
-            arr.iter()
-                .map(|v| {
-                    v.as_str()
-                        .and_then(|s| Uuid::parse_str(s).ok())
-                        .ok_or_else(|| format!("Invalid knowledge base id: {}", v))
-                })
-                .collect::<Result<HashSet<_>, _>>()?,
+            serde_json::from_value::<Vec<KbId>>(Value::Array(arr.clone()))
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|KbId(id)| id)
+                .collect(),
         ),
     };
 
@@ -400,21 +402,29 @@ struct ExtractArgs {
     size: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ExtractInput {
+    #[serde(default)]
+    offset: u64,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
 fn parse_extract_args(arguments: &str) -> Result<ExtractArgs, String> {
     let input: Value = serde_json::from_str(arguments).map_err(|e| format!("Invalid args: {e}"))?;
 
     let document_id = input["document_id"]
         .as_str()
-        .ok_or("Missing 'document_id'")?
+        .ok_or_else(|| "Missing 'document_id'".to_string())?
         .to_string();
 
-    let offset = input["offset"].as_u64().unwrap_or(0) as usize;
-    let size = input["size"].as_u64().map(|v| v as usize);
+    let ExtractInput { offset, size } =
+        serde_json::from_value(input).map_err(|e| format!("Invalid args: {e}"))?;
 
     Ok(ExtractArgs {
         document_id,
-        offset,
-        size,
+        offset: offset as usize,
+        size: size.map(|v| v as usize),
     })
 }
 

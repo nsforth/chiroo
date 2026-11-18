@@ -9,6 +9,7 @@ import { useCsrf } from '../composables/useCsrf'
 import { useUserSession } from '../composables/useUserSession'
 import Navbar from '../components/Navbar.vue'
 import { useBranding } from '../composables/useBranding'
+import { chatListItemSchema } from '../types/chats'
 
 const { branding } = useBranding()
 
@@ -37,14 +38,16 @@ async function createChat(prompt: string) {
   input.value = prompt
   loading.value = true
   try {
-    const chat = await apiFetch('/api/chats', {
+    const data: unknown = await apiFetch('/api/chats', {
       method: 'POST',
       headers: { [headerName]: csrf() },
       body: { firstMessage: prompt, model: model.value }
     })
+    const parsed = chatListItemSchema.safeParse(data)
+    if (!parsed.success) throw new Error('invalid response')
 
     await fetchChats()
-    router.push(`/chat/${chat?.id}`)
+    router.push(`/chat/${parsed.data.id}`)
   } catch {
     toast.add({
       description: t('errors.failedToCreateChat'),
@@ -59,8 +62,6 @@ async function createChat(prompt: string) {
 function onSubmit() {
   createChat(input.value)
 }
-
-const quickChats = ref<{ label: string; icon: string }[]>([])
 </script>
 
 <template>
@@ -107,20 +108,6 @@ const quickChats = ref<{ label: string; icon: string }[]>([])
             </div>
           </template>
         </UChatPrompt>
-
-        <div class="flex flex-wrap gap-2">
-          <UButton
-            v-for="quickChat in quickChats"
-            :key="quickChat.label"
-            :icon="quickChat.icon"
-            :label="quickChat.label"
-            size="sm"
-            color="neutral"
-            variant="outline"
-            class="rounded-full"
-            @click="createChat(quickChat.label)"
-          />
-        </div>
       </UContainer>
     </template>
   </UDashboardPanel>

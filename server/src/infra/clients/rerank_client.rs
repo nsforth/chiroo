@@ -102,10 +102,11 @@ impl RerankClient {
             )));
         }
 
-        let body: RerankResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::RerankError(e.to_string()))?;
+        let body: RerankResponse = response.json().await.map_err(|e| {
+            let msg = e.to_string();
+            debug!(error = msg, status = "failed");
+            AppError::RerankError(msg)
+        })?;
 
         let mut results = body.results;
         results.sort_by(|a, b| {

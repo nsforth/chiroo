@@ -12,19 +12,7 @@ const value = computed({
   set: (v) => emit('update:modelValue', v)
 })
 
-const selected = computed(() => models.value.find((m) => m.value === value.value))
-
-const items = computed(() => models.value.map((model) => ({
-  label: model.label,
-  value: model.value,
-  ...(model.iconUrl
-    ? { avatar: { src: model.iconUrl, alt: model.label } }
-    : { icon: model.icon })
-})))
-
-function descriptionOf(value: string): string | undefined {
-  return models.value.find((m) => m.value === value)?.description
-}
+const items = computed(() => models.value.map((model) => model.value))
 </script>
 
 <template>
@@ -33,38 +21,18 @@ function descriptionOf(value: string): string | undefined {
     :items="items"
     size="sm"
     variant="ghost"
-    value-key="value"
     :search-input="false"
     class="data-[state=open]:bg-elevated"
     :ui="{
       trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200'
     }"
   >
-    <template #leading>
-      <img
-        v-if="selected?.iconUrl"
-        :src="selected.iconUrl"
-        :alt="selected.label"
-        class="size-4 rounded-sm object-contain"
-        loading="lazy"
-      >
-      <UIcon
-        v-else
-        :name="selected?.icon ?? 'i-lucide-bot'"
-        class="size-4 shrink-0"
-      />
-    </template>
-
     <template #default>
-      <UTooltip :text="selected?.description">
-        <span class="truncate">{{ selected?.label ?? modelValue }}</span>
-      </UTooltip>
+      <ModelBadge :model="modelValue" />
     </template>
 
     <template #item-label="{ item }">
-      <UTooltip :text="descriptionOf(item.value)">
-        <span class="truncate">{{ item.label }}</span>
-      </UTooltip>
+      <ModelBadge :model="item" />
     </template>
   </USelectMenu>
 </template>

@@ -163,7 +163,11 @@ impl ChatService {
         };
         match &result {
             Ok(()) => info!(is_owner = true, status = result.status()),
-            Err(_e) => info!(is_owner = false, status = result.status()),
+            Err(e) => info!(
+                error = e.to_string(),
+                is_owner = false,
+                status = result.status()
+            ),
         }
         result
     }

@@ -102,6 +102,26 @@
     "appearance": "Appearance",
     "light": "Light",
     "dark": "Dark",
+    "adminPanel": "Admin panel",
     "logout": "Log out"
+  },
+  "admin": {
+    "title": "Admin panel",
+    "nav": {
+      "votes": "Votes"
+    },
+    "votes": {
+      "colUser": "User",
+      "colDate": "Date",
+      "colChat": "Chat",
+      "colModel": "Model",
+      "colVote": "Vote",
+      "like": "Good",
+      "dislike": "Bad",
+      "untitled": "Untitled",
+      "empty": "No votes yet",
+      "loadError": "Failed to load votes",
+      "forbidden": "You don't have permission to view this page."
+    }
   }
 }

@@ -12,6 +12,7 @@ impl fmt::Display for UserId {
     }
 }
 
+#[derive(Debug)]
 pub struct User {
     pub id: UserId,
     pub sso_id: String,

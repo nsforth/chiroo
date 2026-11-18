@@ -77,7 +77,11 @@ async fn fetch_jwk_set(jwks_uri: String) -> Result<JwkSet, AppError> {
         })?
         .json()
         .await
-        .map_err(|e| AppError::OidcError(format!("Failed to parse JWK set: {e}")))?;
+        .map_err(|e| {
+            let msg = format!("Failed to parse JWK set: {e}");
+            debug!(error = msg, status = "failed");
+            AppError::OidcError(msg)
+        })?;
     Ok(jwks)
 }
 

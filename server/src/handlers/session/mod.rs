@@ -1,4 +1,7 @@
 use serde::Serialize;
+
+use crate::handlers::user::PublicUserResponse;
+
 mod get_session;
 
 pub use get_session::get_session;
@@ -7,16 +10,7 @@ pub use get_session::get_session;
 pub struct SessionResponse {
     pub id: String,
     #[serde(rename = "createdAt")]
-    pub created_at: i64,
+    pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<UserResponse>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct UserResponse {
-    pub id: String,
-    pub name: String,
-    pub avatar: Option<String>,
-    pub username: String,
-    pub admin: bool,
+    pub user: Option<PublicUserResponse>,
 }
