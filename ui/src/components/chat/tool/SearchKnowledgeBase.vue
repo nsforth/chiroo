@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ComarkTool from '../ComarkTool'
+import ChatComark from '../ChatComark.vue'
 import { getDomain, getFaviconUrl } from '../../../utils/url'
 import type { SearchChunk } from '../../../utils/tool'
 
@@ -86,7 +86,10 @@ const suffix = computed(() => props.queries.join(', '))
           </template>
           <template #content>
             <div class="max-h-64 overflow-auto">
-              <ComarkTool :value="chunk.content" />
+              <ChatComark
+                :value="chunk.content"
+                class="text-xs text-muted"
+              />
             </div>
           </template>
         </UCollapsible>

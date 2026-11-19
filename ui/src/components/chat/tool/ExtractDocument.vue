@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ComarkTool from '../ComarkTool'
+import ChatComark from '../ChatComark.vue'
 import { getDomain, getFaviconUrl } from '../../../utils/url'
 import type { ExtractedDocument } from '../../../utils/tool'
 
@@ -62,7 +62,10 @@ const suffix = computed(() => props.document?.title ?? '')
         >{{ getDomain(document.url) }}</span>
       </ULink>
 
-      <ComarkTool :value="document.content" />
+      <ChatComark
+        :value="document.content"
+        class="text-xs text-muted"
+      />
     </div>
   </UChatTool>
 </template>

@@ -204,10 +204,6 @@ recur regularly.
 (every round + JSON payload) to throw most of it away. Add a repository method that lets
 the DB select only the last N scenarios (with their rounds) and fetch just those.
 
-### Markdown render: defensive fallback on parse failure
-
-Comark parses LLM/assistant and tool (search/extract) markdown without a `try/catch` in its async watch (`ChatComark.vue`), so a parser crash blanks the whole part (no console error). Tool content is now parsed through the shared `ComarkTool.ts` (`defineMarkdownComponent` from `@comark/vue`, used by `SearchKnowledgeBase.vue` and `ExtractDocument.vue`), but the library has no error/fallback handling either. Add a safe fallback (pre-parse in try/catch → render plain escaped text on failure) in `ChatComark.vue` and `ComarkTool.ts`.
-
 ### Qdrant datetime granularity
 
 Qdrant datetime indexes have second granularity: sub-seconds in document metadata values and
