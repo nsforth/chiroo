@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, watch } from 'vue'
+import { onErrorCaptured, ref, shallowRef, watch } from 'vue'
 import { MarkdownDocument } from '@comark/vue'
 import { createSerializedMarkdownParser } from '@comark/vue/parse'
 import shiki from '@comark/vue/plugins/shiki'
@@ -56,6 +56,14 @@ watch(
   },
   { immediate: true }
 )
+
+onErrorCaptured((err, instance) => {
+  const name = instance?.$?.type?.name || 'unknown'
+  console.warn('[comark] markdown render failed, fallback to plain text', err, name, props.value.slice(0, 200))
+  parsed.value = undefined
+  failed.value = true
+  return false
+})
 
 const components = { a: ChatMarkdownLink }
 </script>
