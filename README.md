@@ -158,7 +158,7 @@ Product branding is configured through the `branding` section
 
 ### Frontend (`ui/`)
 
-The frontend requires no environment variables. All API communication goes through the Vite proxy to the backend. The `.env.example` file is a legacy artifact and not needed for development.
+The frontend requires no environment variables. All API communication goes through the Vite proxy to the backend.
 
 Product branding (name, label, tagline, colors, logos, fonts) is fetched from the backend (`GET /api/branding`) before the app is mounted; the frontend keeps no branding assets or defaults of its own.
 
