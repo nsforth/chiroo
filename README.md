@@ -45,7 +45,7 @@ chiroo/
 - **Framework:** Axum (Tokio)
 - **ORM:** Diesel
 - **Database:** PostgreSQL
-- **Vector store:** Qdrant (embeddings + reranking)
+- **Vector store:** Qdrant (embeddings + BM-25)
 - **Auth:** OIDC / Keycloak (confidential client, auth code flow)
 - **AI Client:** async-openai (streaming + tool calls)
 - **Architecture:** Domain-Driven Design
@@ -59,6 +59,7 @@ chiroo/
 - PostgreSQL 15+
 - Qdrant (vector store for embeddings/search)
 - Keycloak (or any OIDC-compatible provider)
+- External openai api compatible LLM, embeddings and reranker
 
 ### Setup
 
@@ -69,7 +70,7 @@ pnpm install
 
 # Backend
 cd server
-cp .env.example .env
+cp .env.example .env # Write your own secrets, urls, etc...
 cargo build
 ```
 
