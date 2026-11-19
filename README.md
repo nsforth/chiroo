@@ -1,6 +1,6 @@
 # Chiroo
 
-AI chatbot with a full-stack architecture: Vue 3 frontend + Rust backend.
+AI chat webapp focused on agentic RAG that is really works.
 
 ## Architecture
 
