@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-const MAX_TITLE_CHARS: usize = 15;
+const MAX_TITLE_CHARS: usize = 50;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MessageId(pub Uuid);
@@ -127,16 +127,16 @@ mod tests {
     }
 
     #[test]
-    fn make_title_exactly_15_chars_unchanged() {
-        let text: String = std::iter::repeat('a').take(15).collect();
+    fn make_title_exactly_50_chars_unchanged() {
+        let text: String = std::iter::repeat('a').take(50).collect();
         assert_eq!(Message::make_title(&text), text);
     }
 
     #[test]
-    fn make_title_truncates_at_15_chars_with_ellipsis() {
-        let text: String = std::iter::repeat('a').take(16).collect();
+    fn make_title_truncates_at_50_chars_with_ellipsis() {
+        let text: String = std::iter::repeat('a').take(51).collect();
         let title = Message::make_title(&text);
-        assert_eq!(title.chars().count(), 18);
+        assert_eq!(title.chars().count(), 53);
         assert!(title.ends_with("..."));
     }
 
@@ -147,9 +147,9 @@ mod tests {
 
     #[test]
     fn make_title_multibyte_chars_are_not_mangled() {
-        let text = "Привет, мир! Это заголовок длиннее пятнадцати символов";
+        let text = "Привет, мир! Это заголовок длиннее пятидесяти символов в чате";
         let title = Message::make_title(text);
-        assert_eq!(title.chars().count(), 18);
+        assert_eq!(title.chars().count(), 53);
         assert!(title.ends_with("..."));
     }
 
