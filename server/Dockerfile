@@ -3,7 +3,6 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     libssl-dev pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-RUN cargo fetch
 COPY src ./src
 COPY migrations ./migrations
 COPY config ./config
