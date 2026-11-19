@@ -7,6 +7,7 @@ import type { UIMessage } from 'ai'
 import { useI18n } from 'vue-i18n'
 import { useChats } from '../../composables/useChats'
 import { useCsrf } from '../../composables/useCsrf'
+import { useNotifications } from '../../composables/useNotifications'
 import { useUserSession } from '../../composables/useUserSession'
 import { useRoute } from 'vue-router'
 import ChatMessageContent from '../../components/chat/message/MessageContent.vue'
@@ -27,6 +28,7 @@ const { t } = useI18n()
 const { fetchChats, chats } = useChats()
 const { csrf, headerName } = useCsrf()
 const { user } = useUserSession()
+const { notifyChatFinished } = useNotifications()
 
 const rawData: unknown = await apiFetch(`/api/chats/${route.params.id}`).catch(() => null)
 const parsedChat = chatDetailSchema.safeParse(rawData)
@@ -78,6 +80,10 @@ const chat = new Chat({
     if (dataPart.type === 'data-chat-title') {
       fetchChats().catch(() => {})
     }
+  },
+  onFinish: () => {
+    if (!data?.id) return
+    notifyChatFinished({ chatId: data.id, title: title.value })
   },
   onError(error) {
     if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {

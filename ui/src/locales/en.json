@@ -90,6 +90,11 @@
     "chatDeleted": "Chat deleted",
     "chatDeletedDesc": "Your chat has been deleted"
   },
+  "notifications": {
+    "bell": "Enable answer notifications",
+    "answerReady": "The answer is ready",
+    "denied": "Browser blocked notifications"
+  },
   "modal": {
     "deleteTitle": "Delete chat",
     "deleteDesc": "Are you sure you want to delete this chat? This cannot be undone.",

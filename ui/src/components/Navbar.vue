@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { useNotifications } from '../composables/useNotifications'
 
 const { t } = useI18n()
+const { isSupported, isGranted, request } = useNotifications()
 </script>
 
 <template>
@@ -15,6 +17,19 @@ const { t } = useI18n()
 
     <template #right>
       <slot />
+
+      <UTooltip
+        v-if="isSupported && !isGranted"
+        :text="t('notifications.bell')"
+      >
+        <UButton
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-bell-off"
+          :aria-label="t('notifications.bell')"
+          @click="request()"
+        />
+      </UTooltip>
 
       <UColorModeButton />
 
