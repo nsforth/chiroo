@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use tracing_subscriber::prelude::*;
 
 use chiroo_server::config::{load_config, Config};
+use chiroo_server::domain::models::search_params::SearchParams;
 use chiroo_server::errors::AppError;
 use chiroo_server::infra::clients::embedding_client::EmbeddingClient;
 use chiroo_server::infra::clients::qdrant_client::QdrantClient;
@@ -144,12 +145,18 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         embedding_dimensions,
     );
 
+    let search_params = SearchParams::try_new(
+        app_config.search.limit,
+        app_config.search.candidate_limit,
+        app_config.search.reranker_limit,
+        app_config.search.score_threshold,
+    )
+    .expect("valid search configuration");
+
     let search_service = SearchService::new(
         embedding_client.clone(),
         qdrant_client.clone(),
         rerank_client.clone(),
-        app_config.search.score_threshold,
-        app_config.search.candidate_limit,
     );
 
     let user_service = UserService::new(pool.clone());
@@ -161,7 +168,7 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         search_service.clone(),
         knowledge_service.clone(),
         user_service.clone(),
-        app_config.search.limit,
+        search_params,
         app_config.branding.assistant_name.clone(),
     );
 

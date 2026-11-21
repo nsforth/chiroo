@@ -13,6 +13,7 @@ use crate::domain::models::chat::ChatId;
 use crate::domain::models::messages::{Message, MessageId, MessagePart};
 use crate::domain::models::sampling::preset_by_name;
 use crate::domain::models::scenario::{Round, Scenario, ScenarioId, ScenarioStatus};
+use crate::domain::models::search_params::SearchParams;
 use crate::domain::models::source::Source;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::domain::models::token_usage::TokenUsage;
@@ -53,7 +54,7 @@ pub struct AiService {
     search_service: SearchService,
     knowledge_service: KnowledgeService,
     user_service: UserService,
-    search_limit: usize,
+    search_params: SearchParams,
     assistant_name: String,
 }
 
@@ -65,7 +66,7 @@ impl AiService {
         search_service: SearchService,
         knowledge_service: KnowledgeService,
         user_service: UserService,
-        search_limit: usize,
+        search_params: SearchParams,
         assistant_name: String,
     ) -> Self {
         let openai_config = OpenAIConfig::new()
@@ -85,7 +86,7 @@ impl AiService {
             search_service,
             knowledge_service,
             user_service,
-            search_limit,
+            search_params,
             assistant_name,
         }
     }
@@ -335,7 +336,7 @@ impl AiService {
         let scenario_service = self.scenario_service.clone();
         let search_service = self.search_service.clone();
         let knowledge_service = self.knowledge_service.clone();
-        let search_limit = self.search_limit;
+        let search_params = self.search_params;
         let assistant_name = self.assistant_name.clone();
 
         let (tx, rx) = mpsc::channel(64);
@@ -348,7 +349,7 @@ impl AiService {
                 scenario_service,
                 search_service,
                 knowledge_service,
-                search_limit,
+                search_params,
                 assistant_name,
                 chat_id,
                 &model,
@@ -385,7 +386,7 @@ async fn run_scenario(
     scenario_service: ScenarioService,
     search_service: SearchService,
     knowledge_service: KnowledgeService,
-    search_limit: usize,
+    search_params: SearchParams,
     assistant_name: String,
     chat_id: ChatId,
     model: &str,
@@ -495,7 +496,7 @@ async fn run_scenario(
             &round_def.tool_names,
             &search_service,
             &knowledge_service,
-            search_limit,
+            search_params,
         );
 
         let params = round_def.to_run_params(

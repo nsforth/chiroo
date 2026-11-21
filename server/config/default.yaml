@@ -41,9 +41,10 @@ chunking:
   max_chunk_size: 512
 
 search:
-  limit: 10
+  limit: 15
   score_threshold: 0.5
-  candidate_limit: 30
+  candidate_limit: 20
+  reranker_limit: 7
 
 branding:
   name: "ChiRoo"

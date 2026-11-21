@@ -9,6 +9,7 @@ pub mod messages;
 pub mod sampling;
 pub mod scenario;
 pub mod search_filter;
+pub mod search_params;
 pub mod session;
 pub mod source;
 pub mod stream_event;

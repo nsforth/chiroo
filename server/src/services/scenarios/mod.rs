@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::config::{load_static_asset, StaticAsset};
 use crate::domain::models::messages::{Message, MessageId};
 use crate::domain::models::sampling::SamplingParams;
+use crate::domain::models::search_params::SearchParams;
 use crate::domain::models::tool::LLMTool;
 use crate::infra::clients::llm_client::RunRoundParams;
 use crate::services::knowledge_service::KnowledgeService;
@@ -122,11 +123,11 @@ pub fn create_tools(
     names: &[String],
     search_service: &SearchService,
     knowledge_service: &KnowledgeService,
-    limit: usize,
+    params: SearchParams,
 ) -> Vec<Box<dyn LLMTool>> {
     names
         .iter()
-        .filter_map(|name| create_tool(name, search_service, knowledge_service, limit))
+        .filter_map(|name| create_tool(name, search_service, knowledge_service, params))
         .collect()
 }
 
@@ -134,18 +135,18 @@ fn create_tool(
     name: &str,
     search_service: &SearchService,
     knowledge_service: &KnowledgeService,
-    limit: usize,
+    params: SearchParams,
 ) -> Option<Box<dyn LLMTool>> {
     match name {
         "search_in_all_kbs" => Some(Box::new(SearchAllKbsTool::new(
             search_service.clone(),
             knowledge_service.clone(),
-            limit,
+            params,
         ))),
         "search_in_kb" => Some(Box::new(SearchInKbTool::new(
             search_service.clone(),
             knowledge_service.clone(),
-            limit,
+            params,
         ))),
         "extract_document" => Some(Box::new(ExtractDocumentTool::new(
             knowledge_service.clone(),
@@ -425,7 +426,7 @@ mod tests {
             ],
             &search,
             &knowledge,
-            10,
+            test_search_params(),
         );
         assert_eq!(tools.len(), 3);
     }
@@ -438,7 +439,7 @@ mod tests {
             &["search_in_kb".into(), "nonexistent".into()],
             &search,
             &knowledge,
-            10,
+            test_search_params(),
         );
         assert_eq!(tools.len(), 1);
     }
@@ -447,7 +448,7 @@ mod tests {
     fn create_tools_empty() {
         let search = make_search_service();
         let knowledge = make_knowledge_service();
-        let tools = create_tools(&[], &search, &knowledge, 10);
+        let tools = create_tools(&[], &search, &knowledge, test_search_params());
         assert!(tools.is_empty());
     }
 
@@ -500,8 +501,10 @@ mod tests {
                 model: "RERANKER".into(),
             })
             .expect("failed to create Rerank client"),
-            0.5,
-            30,
         )
+    }
+
+    fn test_search_params() -> SearchParams {
+        SearchParams::try_new(10, 30, 7, 0.5).expect("valid test params")
     }
 }

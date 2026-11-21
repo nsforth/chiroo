@@ -327,6 +327,7 @@ pub struct SearchConfig {
     pub limit: usize,
     pub score_threshold: f32,
     pub candidate_limit: u64,
+    pub reranker_limit: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -658,9 +659,10 @@ mod tests {
             Duration::from_secs(300)
         );
         assert_eq!(cfg.chunking.max_chunk_size, 512);
-        assert_eq!(cfg.search.limit, 10);
+        assert_eq!(cfg.search.limit, 15);
         assert_eq!(cfg.search.score_threshold, 0.5);
-        assert_eq!(cfg.search.candidate_limit, 30);
+        assert_eq!(cfg.search.candidate_limit, 20);
+        assert_eq!(cfg.search.reranker_limit, 7);
         assert_eq!(cfg.branding.name, "ChiRoo");
         assert_eq!(cfg.branding.assistant_name, "ChiRoo");
         assert!(cfg.openai.include_usage());

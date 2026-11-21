@@ -10,6 +10,7 @@ use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::SearchedChunk;
 use crate::domain::models::knowledge_base::{KnowledgeBase, KnowledgeBaseId};
 use crate::domain::models::search_filter::SearchFilter;
+use crate::domain::models::search_params::SearchParams;
 use crate::domain::models::source::Source;
 use crate::domain::models::tool::{LLMTool, ToolExecution};
 use crate::services::knowledge_service::KnowledgeService;
@@ -20,19 +21,19 @@ use crate::services::search_service::SearchService;
 pub struct SearchAllKbsTool {
     search_service: SearchService,
     knowledge_service: KnowledgeService,
-    limit: usize,
+    params: SearchParams,
 }
 
 impl SearchAllKbsTool {
     pub fn new(
         search_service: SearchService,
         knowledge_service: KnowledgeService,
-        limit: usize,
+        params: SearchParams,
     ) -> Self {
         Self {
             search_service,
             knowledge_service,
-            limit,
+            params,
         }
     }
 }
@@ -89,7 +90,7 @@ impl LLMTool for SearchAllKbsTool {
 
         let chunks = self
             .search_service
-            .search_all(args.queries, &kbs, self.limit, &SearchFilter::default())
+            .search_all(args.queries, &kbs, &SearchFilter::default(), &self.params)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -106,19 +107,19 @@ impl LLMTool for SearchAllKbsTool {
 pub struct SearchInKbTool {
     search_service: SearchService,
     knowledge_service: KnowledgeService,
-    limit: usize,
+    params: SearchParams,
 }
 
 impl SearchInKbTool {
     pub fn new(
         search_service: SearchService,
         knowledge_service: KnowledgeService,
-        limit: usize,
+        params: SearchParams,
     ) -> Self {
         Self {
             search_service,
             knowledge_service,
-            limit,
+            params,
         }
     }
 }
@@ -180,7 +181,7 @@ impl LLMTool for SearchInKbTool {
 
         let chunks = self
             .search_service
-            .search_in_kb(args.queries, &kb, self.limit, &filters)
+            .search_in_kb(args.queries, &kb, &filters, &self.params)
             .await
             .map_err(|e| e.to_string())?;
 

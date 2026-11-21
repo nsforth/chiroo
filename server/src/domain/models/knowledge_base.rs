@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::domain::models::kb_index::KbIndexes;
 use crate::errors::AppError;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash)]
 pub struct KnowledgeBaseId(pub Uuid);
 
 #[derive(Debug)]
