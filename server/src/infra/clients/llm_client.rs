@@ -700,13 +700,14 @@ async fn run_round(
                         match tool.execute(&tc.function.arguments).await {
                             Ok(execution) => {
                                 let ToolExecution { output, sources } = execution;
+                                let llm_view = tool.llm_output(&output);
                                 update_tool_output(
                                     &mut round_message,
                                     &tc.id,
                                     Some(output.clone()),
                                     None,
                                 );
-                                messages.push(tool_result_message(&tc.id, &output));
+                                messages.push(tool_result_message(&tc.id, &llm_view));
 
                                 for source in sources {
                                     send_or_bail(&tx, MessageStreamEvent::SourceUrl(source))

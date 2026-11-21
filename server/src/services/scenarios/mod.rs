@@ -131,6 +131,23 @@ pub fn create_tools(
         .collect()
 }
 
+/// One instance per known tool name, used to project stored tool outputs for the LLM.
+pub fn create_tool_projectors(
+    search_service: &SearchService,
+    knowledge_service: &KnowledgeService,
+    params: SearchParams,
+) -> HashMap<String, Box<dyn LLMTool>> {
+    TOOL_PROJECTOR_NAMES
+        .iter()
+        .filter_map(|name| {
+            create_tool(name, search_service, knowledge_service, params)
+                .map(|tool| (name.to_string(), tool))
+        })
+        .collect()
+}
+
+const TOOL_PROJECTOR_NAMES: &[&str] = &["search_in_all_kbs", "search_in_kb", "extract_document"];
+
 fn create_tool(
     name: &str,
     search_service: &SearchService,

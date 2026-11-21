@@ -44,14 +44,14 @@ impl LLMTool for SearchAllKbsTool {
         ChatCompletionTools::Function(ChatCompletionTool {
             function: FunctionObject {
                  name: "search_in_all_kbs".into(),
-                 description: Some(
-                     "Search across all knowledge bases (or a subset via `kb_ids`) for relevant document chunks. \
-                      Use this as the first search when you do not know which knowledge base holds the answer. \
-                      For targeted filtering by specific metadata fields, use `search_in_kb` with a particular \
-                      base's id. Output: matching chunks with `document_id`, `kb_id`, `kb_name`, `title`, `url`, \
-                      `content`, chunk position and `score`."
-                         .into(),
-                 ),
+                  description: Some(
+                      "Search across all knowledge bases (or a subset via `kb_ids`) for relevant document chunks. \
+                       Use this as the first search when you do not know which knowledge base holds the answer. \
+                       For targeted filtering by specific metadata fields, use `search_in_kb` with a particular \
+                       base's id. Output: matching chunks with `document_id`, `kb_id`, `kb_name`, `title`, `url`, \
+                       `content`, chunk position."
+                          .into(),
+                  ),
                  parameters: Some(serde_json::json!({
                      "type": "object",
                      "properties": {
@@ -99,6 +99,10 @@ impl LLMTool for SearchAllKbsTool {
             output: serde_json::json!({ "chunks": search_chunks_to_json(&chunks, &kb_names) }),
             sources,
         })
+    }
+
+    fn llm_output(&self, output: &Value) -> Value {
+        project_search_output(output)
     }
 }
 
@@ -190,6 +194,10 @@ impl LLMTool for SearchInKbTool {
             output: serde_json::json!({ "chunks": search_chunks_to_json(&chunks, &kb_names) }),
             sources,
         })
+    }
+
+    fn llm_output(&self, output: &Value) -> Value {
+        project_search_output(output)
     }
 }
 
@@ -303,11 +311,36 @@ fn search_chunks_to_json(chunks: &[SearchedChunk], kb_names: &HashMap<Uuid, Stri
                 "chunk_length": chunk.chunk_length,
                 "document_total_length": chunk.document_total_length,
                 "metadata": chunk.metadata,
+                "query": chunk.query,
                 "score": chunk.score,
             })
         })
         .collect();
     Value::Array(items)
+}
+
+fn project_search_output(output: &Value) -> Value {
+    let Some(fields) = output.as_object() else {
+        return output.clone();
+    };
+    let Some(Value::Array(chunks)) = fields.get("chunks") else {
+        return output.clone();
+    };
+    let mut fields = fields.clone();
+    fields["chunks"] = Value::Array(
+        chunks
+            .iter()
+            .map(|chunk| {
+                let Some(mut fields) = chunk.as_object().cloned() else {
+                    return chunk.clone();
+                };
+                fields.remove("query");
+                fields.remove("score");
+                Value::Object(fields)
+            })
+            .collect(),
+    );
+    Value::Object(fields)
 }
 
 // ─── ExtractDocumentTool ───
@@ -492,6 +525,7 @@ mod tests {
             title: "Title".to_string(),
             url: "https://example.com".to_string(),
             metadata: serde_json::json!({}),
+            query: "test query".to_string(),
             score,
         }
     }
@@ -514,6 +548,7 @@ mod tests {
         assert_eq!(first["chunk_offset"], 10);
         assert_eq!(first["chunk_length"], 5);
         assert_eq!(first["document_total_length"], 100);
+        assert_eq!(first["query"], "test query");
         assert_eq!(first["score"].as_f64().unwrap() as f32, 0.9f32);
     }
 
@@ -526,6 +561,32 @@ mod tests {
         let first = &json[0];
         assert_eq!(first["kb_id"], kb_id.to_string());
         assert_eq!(first["kb_name"], "");
+    }
+
+    #[test]
+    fn project_search_output_drops_query_and_score() {
+        let chunk = make_chunk("doc-1", 10, 5, "hello", 0.9);
+        let kb_id = chunk.kb_id.0;
+        let kb_names: HashMap<Uuid, String> =
+            [(kb_id, "Company Docs".to_string())].into_iter().collect();
+        let rich = serde_json::json!({ "chunks": search_chunks_to_json(&[chunk], &kb_names) });
+
+        let projected = project_search_output(&rich);
+
+        let first = &projected["chunks"][0];
+        assert!(first.get("query").is_none(), "query must be dropped");
+        assert!(first.get("score").is_none(), "score must be dropped");
+        assert_eq!(first["document_id"], "doc-1");
+        assert_eq!(first["kb_name"], "Company Docs");
+        assert_eq!(first["content"], "hello");
+    }
+
+    #[test]
+    fn project_search_output_returns_unexpected_shapes_unchanged() {
+        let object = serde_json::json!({ "document_id": "doc-1", "content": "x" });
+        assert_eq!(project_search_output(&object), object);
+        let array = serde_json::json!([1, 2]);
+        assert_eq!(project_search_output(&array), array);
     }
 
     #[test]

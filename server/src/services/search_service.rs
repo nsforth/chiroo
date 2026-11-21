@@ -284,6 +284,7 @@ mod tests {
             title: "title".to_string(),
             url: "url".to_string(),
             metadata: serde_json::json!({}),
+            query: String::new(),
             score: 0.0,
         }
     }
@@ -311,6 +312,31 @@ mod tests {
         let shared_in = merged.iter().find(|c| c.content == "shared").unwrap();
         assert_eq!(shared_in.score, 0.9, "the higher score must win");
         assert!(merged.iter().any(|c| c.content == "other"));
+    }
+
+    #[test]
+    fn merge_top_keeps_query_of_higher_scoring_duplicate() {
+        let kb = KnowledgeBaseId(Uuid::from_bytes([1; 16]));
+        let base = make_chunk_in_kb("dup", kb);
+        let high = SearchedChunk {
+            query: "high query".to_string(),
+            ..base.clone()
+        }
+        .with_score(0.9);
+        let low = SearchedChunk {
+            query: "low query".to_string(),
+            ..base
+        }
+        .with_score(0.4);
+
+        let merged = merge_top(vec![low, high], 10);
+
+        assert_eq!(merged.len(), 1, "duplicate chunk must appear exactly once");
+        assert_eq!(merged[0].score, 0.9, "the higher score must win");
+        assert_eq!(
+            merged[0].query, "high query",
+            "the winner's query must survive the merge"
+        );
     }
 
     #[test]

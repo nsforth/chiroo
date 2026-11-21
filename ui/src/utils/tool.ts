@@ -31,6 +31,7 @@ const searchChunkSchema = z.object({
   chunk_length: z.number(),
   document_total_length: z.number(),
   score: z.number(),
+  query: z.string().optional(),
 })
 
 const searchOutputSchema = z.object({ chunks: z.array(searchChunkSchema) })
@@ -44,6 +45,7 @@ export interface SearchChunk {
   chunkLength: number
   documentTotalLength: number
   score: number
+  query?: string
 }
 
 export function getSearchChunks(part: ToolPart): SearchChunk[] {
@@ -58,6 +60,7 @@ export function getSearchChunks(part: ToolPart): SearchChunk[] {
     chunkLength: c.chunk_length,
     documentTotalLength: c.document_total_length,
     score: c.score,
+    query: c.query,
   }))
 }
 

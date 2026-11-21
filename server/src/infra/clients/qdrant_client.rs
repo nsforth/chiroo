@@ -506,7 +506,7 @@ impl QdrantClient {
         let results = response
             .result
             .into_iter()
-            .filter_map(|point| searched_chunk_from_scored_point(point, *kb_id).ok())
+            .filter_map(|point| searched_chunk_from_scored_point(point, *kb_id, query_text).ok())
             .collect();
 
         Ok(results)
@@ -790,6 +790,7 @@ impl ChunkPayload {
         id: DocumentChunkId,
         kb_id: KnowledgeBaseId,
         score: f32,
+        query: String,
     ) -> Result<SearchedChunk, AppError> {
         let metadata = self.metadata;
         Ok(SearchedChunk {
@@ -806,6 +807,7 @@ impl ChunkPayload {
             title: self.title,
             url: self.url,
             metadata,
+            query,
             score,
         })
     }
@@ -814,6 +816,7 @@ impl ChunkPayload {
 fn searched_chunk_from_scored_point(
     point: ScoredPoint,
     kb_id: KnowledgeBaseId,
+    query_text: &str,
 ) -> Result<SearchedChunk, AppError> {
     let id = point
         .id
@@ -834,6 +837,7 @@ fn searched_chunk_from_scored_point(
         })?),
         kb_id,
         point.score,
+        query_text.to_string(),
     )
 }
 #[cfg(test)]

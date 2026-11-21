@@ -61,6 +61,8 @@ pub struct SearchedChunk {
     pub title: String,
     pub url: String,
     pub metadata: Value,
+    /// The search query this result was retrieved and reranked against.
+    pub query: String,
     pub score: f32,
 }
 

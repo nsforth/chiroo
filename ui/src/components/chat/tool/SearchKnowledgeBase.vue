@@ -64,13 +64,21 @@ const suffix = computed(() => props.queries.join(', '))
             >
             <span class="truncate">{{ chunk.title || getDomain(chunk.url) }}</span>
           </ULink>
-          <UBadge
-            :label="chunk.score.toFixed(2)"
-            color="neutral"
-            variant="subtle"
-            size="sm"
-            class="ms-auto shrink-0"
-          />
+          <div class="ms-auto flex min-w-0 items-center gap-2">
+            <span
+              v-if="chunk.query"
+              class="min-w-0 truncate text-xs text-muted"
+            >
+              {{ chunk.query }}
+            </span>
+            <UBadge
+              :label="chunk.score.toFixed(2)"
+              color="neutral"
+              variant="subtle"
+              size="sm"
+              class="shrink-0"
+            />
+          </div>
         </div>
 
         <UCollapsible>

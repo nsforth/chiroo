@@ -24,4 +24,10 @@ impl ToolExecution {
 pub trait LLMTool: Send {
     fn definition(&self) -> ChatCompletionTools;
     async fn execute(&mut self, arguments: &str) -> Result<ToolExecution, String>;
+
+    /// LLM-facing projection of the stored tool output (e.g. trimmed of fields
+    /// the model does not need). Default: the output unchanged.
+    fn llm_output(&self, output: &Value) -> Value {
+        output.clone()
+    }
 }

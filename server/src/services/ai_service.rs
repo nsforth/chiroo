@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_openai::config::OpenAIConfig;
 use async_openai::Client;
 use chrono::Utc;
@@ -17,6 +19,7 @@ use crate::domain::models::search_params::SearchParams;
 use crate::domain::models::source::Source;
 use crate::domain::models::stream_event::{FinishReason, MessageStreamEvent};
 use crate::domain::models::token_usage::TokenUsage;
+use crate::domain::models::tool::LLMTool;
 use crate::domain::models::user::UserId;
 use crate::errors::AppError;
 use crate::infra::clients::llm_client::LlmClient;
@@ -24,7 +27,7 @@ use crate::operation_result::OperationResult;
 use crate::services::knowledge_service::KnowledgeService;
 use crate::services::prompts::{KbContext, PromptRenderer, TemplateContext};
 use crate::services::scenario_service::ScenarioService;
-use crate::services::scenarios::{create_tools, scenario_by_name, simple};
+use crate::services::scenarios::{create_tool_projectors, create_tools, scenario_by_name, simple};
 use crate::services::search_service::SearchService;
 use crate::services::user_service::UserService;
 
@@ -467,6 +470,10 @@ async fn run_scenario(
         },
     };
 
+    let tool_projectors =
+        create_tool_projectors(&search_service, &knowledge_service, search_params);
+    project_history_tools(&mut history, &tool_projectors);
+
     let next_round = scenario.rounds.len().saturating_sub(1); // assistant rounds already stored
 
     for round_index in next_round..definition.rounds.len() {
@@ -535,7 +542,7 @@ async fn run_scenario(
             }
         }
 
-        let Some(msg) = round_message else {
+        let Some(mut msg) = round_message else {
             scenario.status = ScenarioStatus::Failed;
             let _ = scenario_service.update_scenario(&scenario).await;
             return Ok(());
@@ -572,6 +579,7 @@ async fn run_scenario(
             }
         }
         scenario.rounds.push(round);
+        project_history_tools(std::slice::from_mut(&mut msg), &tool_projectors);
         history.push(msg);
     }
 
@@ -638,12 +646,31 @@ fn text_only_message(message: &Message) -> Message {
     }
 }
 
+/// Replace stored tool outputs with their LLM-facing projection so the model
+/// sees the same view as during live execution. Unknown tools are left as-is.
+fn project_history_tools(history: &mut [Message], projectors: &HashMap<String, Box<dyn LLMTool>>) {
+    for message in history.iter_mut() {
+        for part in message.parts.iter_mut() {
+            if let MessagePart::ToolCall(tc) = part {
+                if let (Some(output), Some(tool)) =
+                    (tc.output.clone(), projectors.get(&tc.tool_name))
+                {
+                    tc.output = Some(tool.llm_output(&output));
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::models::chat::ChatId;
     use crate::domain::models::messages::{Role, TextBlock, ToolCallBlock, ToolCallState};
-    use serde_json::json;
+    use crate::domain::models::tool::{LLMTool, ToolExecution};
+    use async_openai::types::chat::ChatCompletionTools;
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
 
     fn chat_id() -> ChatId {
         ChatId(uuid::Uuid::new_v4())
@@ -770,5 +797,64 @@ mod tests {
     #[test]
     fn empty_history() {
         assert!(build_history(Vec::new(), None).is_empty());
+    }
+
+    struct ProjectingTool;
+
+    #[async_trait]
+    impl LLMTool for ProjectingTool {
+        fn definition(&self) -> ChatCompletionTools {
+            unreachable!()
+        }
+
+        async fn execute(&mut self, _arguments: &str) -> Result<ToolExecution, String> {
+            unreachable!()
+        }
+
+        fn llm_output(&self, output: &Value) -> Value {
+            let mut projected = output.clone();
+            projected["projected"] = json!(true);
+            projected
+        }
+    }
+
+    fn assistant_msg_with_tool(tool_name: &str, output: Value) -> Message {
+        let mut msg = Message::new(chat_id(), Role::Assistant);
+        msg.parts.push(MessagePart::ToolCall(ToolCallBlock {
+            tool_call_id: "call_1".to_string(),
+            tool_name: tool_name.to_string(),
+            input: json!({}),
+            output: Some(output),
+            error: None,
+            state: ToolCallState::Done,
+        }));
+        msg
+    }
+
+    fn tool_call_of(message: &Message) -> &ToolCallBlock {
+        match &message.parts[0] {
+            MessagePart::ToolCall(tc) => tc,
+            _ => panic!("expected a tool call part"),
+        }
+    }
+
+    #[test]
+    fn project_history_tools_projects_known_tools_only() {
+        let mut history = vec![
+            assistant_msg_with_tool("search_in_all_kbs", json!({ "a": 1 })),
+            assistant_msg_with_tool("unknown_tool", json!({ "a": 1 })),
+        ];
+
+        let mut projectors: HashMap<String, Box<dyn LLMTool>> = HashMap::new();
+        projectors.insert("search_in_all_kbs".to_string(), Box::new(ProjectingTool));
+        project_history_tools(&mut history, &projectors);
+
+        let known = tool_call_of(&history[0]);
+        assert_eq!(known.output.as_ref().unwrap()["a"], json!(1));
+        assert_eq!(known.output.as_ref().unwrap()["projected"], json!(true));
+
+        let unknown = tool_call_of(&history[1]);
+        assert_eq!(unknown.output.as_ref().unwrap(), &json!({ "a": 1 }));
+        assert!(unknown.output.as_ref().unwrap().get("projected").is_none());
     }
 }
