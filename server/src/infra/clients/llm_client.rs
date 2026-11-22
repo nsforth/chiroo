@@ -100,6 +100,7 @@ impl From<&CompletionUsage> for TokenUsage {
                 .as_ref()
                 .and_then(|d| d.cached_tokens)
                 .unwrap_or(0),
+            max_prompt_tokens: u.prompt_tokens,
         }
     }
 }

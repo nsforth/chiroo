@@ -220,6 +220,7 @@ mod tests {
             completion_tokens: 50,
             total_tokens: 150,
             cached_prompt_tokens: 40,
+            max_prompt_tokens: 100,
         }));
         let response = ChatCompletionResponse::from_scenario(&scenario).expect("convert");
         let value = value(&response);
@@ -236,6 +237,7 @@ mod tests {
             completion_tokens: 2,
             total_tokens: 3,
             cached_prompt_tokens: 0,
+            max_prompt_tokens: 1,
         }));
         let response = ChatCompletionResponse::from_scenario(&scenario).expect("convert");
         let value = value(&response);

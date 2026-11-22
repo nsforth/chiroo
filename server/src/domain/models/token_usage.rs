@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// `cached_prompt_tokens` is the part of the prompt served from the provider's
 /// prompt cache; it is 0 when the provider does not report it.
+///
+/// The sum fields accumulate across all calls in the set; `max_prompt_tokens`
+/// tracks the single largest call prompt instead, i.e. the peak context the
+/// model saw in one invocation (an estimate of the model window in use).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsage {
@@ -15,6 +19,8 @@ pub struct TokenUsage {
     pub total_tokens: u32,
     #[serde(default)]
     pub cached_prompt_tokens: u32,
+    #[serde(default)]
+    pub max_prompt_tokens: u32,
 }
 
 impl TokenUsage {
@@ -23,6 +29,7 @@ impl TokenUsage {
         self.completion_tokens += other.completion_tokens;
         self.total_tokens += other.total_tokens;
         self.cached_prompt_tokens += other.cached_prompt_tokens;
+        self.max_prompt_tokens = self.max_prompt_tokens.max(other.max_prompt_tokens);
     }
 }
 
@@ -30,34 +37,37 @@ impl TokenUsage {
 mod tests {
     use super::*;
 
-    fn usage(prompt: u32, completion: u32, total: u32, cached: u32) -> TokenUsage {
+    fn usage(prompt: u32, completion: u32, total: u32, cached: u32, max_prompt: u32) -> TokenUsage {
         TokenUsage {
             prompt_tokens: prompt,
             completion_tokens: completion,
             total_tokens: total,
             cached_prompt_tokens: cached,
+            max_prompt_tokens: max_prompt,
         }
     }
 
     #[test]
-    fn add_sums_all_counters() {
-        let mut a = usage(10, 5, 15, 8);
-        a.add(&usage(3, 2, 5, 1));
-        assert_eq!(a, usage(13, 7, 20, 9));
+    fn add_sums_counters_and_maxes_prompt_peak() {
+        let mut a = usage(10, 5, 15, 8, 10);
+        a.add(&usage(3, 2, 5, 1, 3));
+        assert_eq!(a, usage(13, 7, 20, 9, 10));
+        a.add(&usage(1, 1, 2, 0, 42));
+        assert_eq!(a.max_prompt_tokens, 42);
     }
 
     #[test]
     fn serde_is_camel_case() {
-        let json = serde_json::to_string(&usage(1, 2, 3, 4)).unwrap();
+        let json = serde_json::to_string(&usage(1, 2, 3, 4, 1)).unwrap();
         assert_eq!(
             json,
-            "{\"promptTokens\":1,\"completionTokens\":2,\"totalTokens\":3,\"cachedPromptTokens\":4}"
+            "{\"promptTokens\":1,\"completionTokens\":2,\"totalTokens\":3,\"cachedPromptTokens\":4,\"maxPromptTokens\":1}"
         );
     }
 
     #[test]
     fn serde_round_trips() {
-        let u = usage(1, 2, 3, 4);
+        let u = usage(1, 2, 3, 4, 1);
         let json = serde_json::to_string(&u).unwrap();
         assert_eq!(serde_json::from_str::<TokenUsage>(&json).unwrap(), u);
     }
