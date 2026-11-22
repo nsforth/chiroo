@@ -1,0 +1,818 @@
+openapi: 3.0.3
+info:
+  title: Chiroo Internal API
+  version: 1.0.0
+  description: |
+    Internal API served on a separate local server (default
+    `http://localhost:3001`, `internal_api.host`/`internal_api.port`).
+
+    No authentication — the port is intended to be bound to the loopback
+    interface and used by operators and `chiroo-cli` (knowledge base and
+    document management, service users).
+
+    Conventions: mixed casing (camelCase in most response fields, snake_case
+    in document query params/form fields), dates are RFC 3339 strings,
+    error body is `{"message": "..."}` (a few handler-level 400/404
+    responses return a plain-text body instead — marked in the responses).
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:3001
+
+tags:
+  - name: knowledge-bases
+    description: KB management
+  - name: documents
+    description: Document management and reindexing
+  - name: users
+    description: Service user management
+
+paths:
+  /internal/api/knowledge-bases:
+    get:
+      tags: [knowledge-bases]
+      operationId: listKbs
+      summary: List knowledge bases
+      responses:
+        "200":
+          description: Knowledge bases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KbResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [knowledge-bases]
+      operationId: createKb
+      summary: Create a knowledge base
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKbRequest"
+      responses:
+        "201":
+          description: Created KB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KbResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/knowledge-bases/{id}:
+    get:
+      tags: [knowledge-bases]
+      operationId: getKb
+      summary: Get a knowledge base
+      parameters:
+        - $ref: "#/components/parameters/KbId"
+      responses:
+        "200":
+          description: Knowledge base
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KbResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [knowledge-bases]
+      operationId: updateKb
+      summary: Update a knowledge base (full replace)
+      description: >
+        Full replace semantics: omitting `indexes` resets it to null, which
+        removes the KB's Qdrant `metadata.*` field indexes on the following
+        sync.
+      parameters:
+        - $ref: "#/components/parameters/KbId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKbRequest"
+      responses:
+        "200":
+          description: Updated KB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KbResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [knowledge-bases]
+      operationId: deleteKb
+      summary: Delete a knowledge base
+      parameters:
+        - $ref: "#/components/parameters/KbId"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/documents:
+    get:
+      tags: [documents]
+      operationId: listDocuments
+      summary: List documents of a KB (cursor-paged)
+      parameters:
+        - name: kb_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: filter
+          in: query
+          schema:
+            type: string
+          description: Substring filter on title/url
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int64
+            default: 1000
+      responses:
+        "200":
+          description: Page of documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PagedDocListItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [documents]
+      operationId: createDocument
+      summary: Create a document
+      description: >
+        Multipart upload of the document content. `metadata` is a JSON-encoded
+        string (empty string = empty object).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [id, kb_id, version, data]
+              properties:
+                id:
+                  type: string
+                  description: External document id (client-defined)
+                kb_id:
+                  type: string
+                  format: uuid
+                version:
+                  type: string
+                title:
+                  type: string
+                  default: ""
+                url:
+                  type: string
+                  default: ""
+                mime_type:
+                  type: string
+                  default: ""
+                  description: Currently only `text/plain`
+                metadata:
+                  type: string
+                  default: ""
+                  description: JSON string with the document metadata
+                data:
+                  type: string
+                  format: binary
+                  description: Raw document bytes
+      responses:
+        "201":
+          description: Created document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocListItem"
+        "400":
+          description: "Bad request (invalid kb_id/mime_type/metadata — plain text; other validation errors — JSON)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+            text/plain:
+              schema:
+                type: string
+              example: "Unsupported mime type: application/pdf"
+        "404":
+          description: The KB does not exist (JSON envelope)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          examples:
+            application/json:
+              value:
+                message: "KB not found"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/documents/versions:
+    get:
+      tags: [documents]
+      operationId: listDocumentVersions
+      summary: List (documentId, version) pairs of a KB (cursor-paged)
+      parameters:
+        - name: kb_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int64
+            default: 1000
+      responses:
+        "200":
+          description: Page of version entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PagedVersionListItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/documents/{id}:
+    get:
+      tags: [documents]
+      operationId: getDocument
+      summary: Get a document
+      parameters:
+        - $ref: "#/components/parameters/DocId"
+      responses:
+        "200":
+          description: Document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocListItem"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [documents]
+      operationId: updateDocument
+      summary: Replace a document (content + metadata)
+      description: >
+        Multipart upload that fully replaces the document content, version,
+        title, URL, mime type and metadata.
+      parameters:
+        - $ref: "#/components/parameters/DocId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [version, title, url, mime_type, metadata, data]
+              properties:
+                version:
+                  type: string
+                title:
+                  type: string
+                url:
+                  type: string
+                mime_type:
+                  type: string
+                  description: Currently only `text/plain`
+                metadata:
+                  type: string
+                  description: JSON string with the document metadata
+                data:
+                  type: string
+                  format: binary
+                  description: Raw document bytes
+      responses:
+        "200":
+          description: Updated document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocListItem"
+        "400":
+          $ref: "#/components/responses/TextPlainBadRequest"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [documents]
+      operationId: updateDocumentMetadata
+      summary: Update a document's title/URL/metadata (no rechunk)
+      parameters:
+        - $ref: "#/components/parameters/DocId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, url, metadata]
+              properties:
+                title:
+                  type: string
+                url:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        "200":
+          description: Updated document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocListItem"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [documents]
+      operationId: deleteDocument
+      summary: Delete a document
+      parameters:
+        - $ref: "#/components/parameters/DocId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/documents/{id}/data:
+    get:
+      tags: [documents]
+      operationId: getDocumentData
+      summary: Get the raw document bytes
+      description: >
+        Returns the stored content with the document's own Content-Type
+        (e.g. `text/plain`).
+      parameters:
+        - $ref: "#/components/parameters/DocId"
+      responses:
+        "200":
+          description: Raw document bytes
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/documents/{id}/reindex:
+    post:
+      tags: [documents]
+      operationId: reindexDocument
+      summary: Reindex a document
+      description: |
+        - `compare` (default): re-chunk and re-embed only when the content
+          changed.
+        - `force`: re-chunk and re-embed even if the content is unchanged.
+        - `full`: drop all existing chunks first, then re-chunk and re-embed
+          (use after a string→object chunk payload format change to backfill
+          filterable metadata).
+      parameters:
+        - $ref: "#/components/parameters/DocId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [compare, force, full]
+                  default: compare
+              description: A body is required (an empty object `{}` reindexes with the default mode)
+      responses:
+        "200":
+          description: Reindex outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReindexDocResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/users:
+    get:
+      tags: [users]
+      operationId: getUserByUsername
+      summary: Look up a user by username
+      parameters:
+        - name: username
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Create a service user
+      description: >
+        Creates a user linked to an SSO identity (`ssoId` must match the
+        `sub` claim the IdP issues). Used to provision users that have not
+        logged in via the UI yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "200":
+          description: Created user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/api/users/{id}:
+    patch:
+      tags: [users]
+      operationId: updateUserAdmin
+      summary: Grant or revoke the admin flag
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [admin]
+              properties:
+                admin:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Delete a user
+      description: >
+        The user's chats are kept by default; `purgeChats=true` deletes them
+        in the same transaction.
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - name: purgeChats
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    KbId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DocId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: External document id (client-defined, not a UUID)
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Conflict (e.g. username already exists)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TextPlainNotFound:
+      description: Not found (plain-text body, not the JSON error envelope)
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "KB not found"
+    TextPlainBadRequest:
+      description: Bad request (plain-text body, not the JSON error envelope)
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "Unsupported mime type: application/pdf"
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    # ── Knowledge bases ───────────────────────────────────────────────────
+    CreateKbRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          default: ""
+          description: Tera template; may reference branding variables
+        public:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+          default: {}
+        language:
+          type: string
+          description: Document language hint
+        indexes:
+          type: object
+          nullable: true
+          description: |
+            Declares which top-level document-metadata fields are
+            indexable/filterable:
+            `{"<field>": {"type": "<type>", "description": "<text>"}}`
+            where type is one of `keyword`, `integer`, `float`, `bool`,
+            `datetime`, `uuid`. Field names may not contain `.`. Validated
+            at write time (400 on bad input).
+          example:
+            department:
+              type: keyword
+              description: Document department
+            salary:
+              type: integer
+              description: Annual salary
+    UpdateKbRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          default: ""
+        public:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+          default: {}
+        indexes:
+          type: object
+          nullable: true
+          description: Same shape as in create; `null` clears the indexes.
+    KbResponse:
+      type: object
+      required: [id, name, description, public, metadata, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        public:
+          type: boolean
+        metadata:
+          type: object
+        language:
+          type: string
+          nullable: true
+        indexes:
+          type: object
+          nullable: true
+          description: Indexable metadata fields (null when none)
+        createdAt:
+          type: string
+          description: RFC 3339
+        updatedAt:
+          type: string
+          description: RFC 3339
+
+    # ── Documents ─────────────────────────────────────────────────────────
+    DocListItem:
+      type: object
+      required: [id, kbId, title, url, version, mimeType, metadata, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: External document id (client-defined)
+        kbId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        url:
+          type: string
+        version:
+          type: string
+        mimeType:
+          type: string
+          example: text/plain
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          description: RFC 3339
+        updatedAt:
+          type: string
+          description: RFC 3339
+    PagedDocListItem:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocListItem"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Pass as `cursor` to fetch the next page; explicit `null` on the last page
+    VersionListItem:
+      type: object
+      required: [id, version]
+      properties:
+        id:
+          type: string
+          description: External document id
+        version:
+          type: string
+    PagedVersionListItem:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VersionListItem"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Pass as `cursor` to fetch the next page; explicit `null` on the last page
+    ReindexDocResponse:
+      type: object
+      required: [reindexed, chunks]
+      properties:
+        reindexed:
+          type: boolean
+          description: Whether the document was actually reindexed (compare mode)
+        chunks:
+          type: integer
+          description: Number of chunks in the document after reindexing
+
+    # ── Users ─────────────────────────────────────────────────────────────
+    CreateUserRequest:
+      type: object
+      required: [ssoId, ssoProvider, username]
+      properties:
+        ssoId:
+          type: string
+          description: The `sub` claim the IdP issues for this user
+        ssoProvider:
+          type: string
+          description: SSO provider name (required; 400 when missing)
+        username:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+    UserResponse:
+      type: object
+      required: [id, username, admin, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        username:
+          type: string
+        email:
+          type: string
+          nullable: true
+        admin:
+          type: boolean
+        createdAt:
+          type: string
+          description: RFC 3339

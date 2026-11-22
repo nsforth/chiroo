@@ -11,6 +11,28 @@
 - JSON camelCase: `userId`, `createdAt`, `firstMessage`, `messageId`, `toolCallId`, `scenarioId`
 - All dates are RFC 3339 strings
 
+## OpenAPI spec
+
+The API surface is documented in two OpenAPI 3.0 files, split strictly by
+server (port):
+
+- `openapi/public.yaml` — main server (`server.port`, default 3000): `GET /`
+  and everything under `/api/*`, including the admin API
+  (`/api/admin/*`) and the OpenAI-compatible API (`/api/openai/v1/*`).
+- `openapi/internal.yaml` — internal API server
+  (`internal_api.port`, default 3001): `/internal/api/*`.
+
+**Mandatory requirement:** any change in a handler — new/removed/renamed
+routes, HTTP methods, request/response schemas, query/path params, status
+codes, or error shapes — MUST be accompanied by a synchronized update of the
+corresponding OpenAPI file in the same change. Never ship a handler change
+without updating `openapi/public.yaml` or `openapi/internal.yaml`.
+
+Validate the specs with `npx @redocly/cli lint --config openapi/redocly.yaml
+openapi/public.yaml openapi/internal.yaml` (lint config: `openapi/redocly.yaml`,
+which disables rules that do not apply — e.g. `security-defined` for the
+intentionally unauthenticated public/internal endpoints).
+
 ## Backend architecture (DDD)
 
 ```

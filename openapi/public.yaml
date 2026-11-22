@@ -1,0 +1,1967 @@
+openapi: 3.0.3
+info:
+  title: Chiroo Public API
+  version: 1.0.0
+  description: |
+    Public API served by the main server (default `http://localhost:3000`).
+
+    Authentication:
+
+    - **Session (cookie)** — the browser flow: `POST /api/auth/login` → redirect to
+      the OIDC provider → `GET /api/auth/oidc/callback` sets the `access_token`
+      cookie (HttpOnly, `path=/api`). Protected routes accept the cookie. Mutating
+      requests (POST/PUT/PATCH/DELETE) made with the session cookie must also send
+      the `x-csrf-token` header (read from the non-HttpOnly `csrf-token` cookie).
+    - **Bearer** — the OpenAI-compatible API (`/api/openai/v1/*`) authenticates
+      statelessly with `Authorization: Bearer <OIDC access token>`. No session,
+      no refresh, no cookies.
+
+    Conventions: JSON bodies are camelCase, all dates are RFC 3339 strings,
+    ids are UUIDs (unless noted). Standard error body is `{"message": "..."}`
+    (a few handler-level 400/404 responses use a plain-text body instead —
+    marked in the responses).
+
+    Bearer tokens are accepted on all protected `/api/*` routes (the OpenAI
+    compatible API only supports Bearer).
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:3000
+  - url: http://localhost:5173
+
+tags:
+  - name: health
+    description: Root health endpoint
+  - name: auth
+    description: OIDC login flow (public)
+  - name: branding
+    description: Branding configuration and assets (public)
+  - name: localization
+    description: UI localization strings (public)
+  - name: session
+    description: Current session info
+  - name: models
+    description: Available models (scenarios) and their icons
+  - name: chats
+    description: Chats, messages, streaming, votes
+  - name: knowledge-bases
+    description: Public KB browsing and search
+  - name: admin
+    description: Admin-only endpoints
+  - name: openai
+    description: OpenAI-compatible API (Bearer auth, snake_case)
+
+paths:
+  /:
+    get:
+      tags: [health]
+      operationId: getRoot
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Start the OIDC login flow
+      description: >
+        Builds the signed OIDC authorization URL for the given post-login
+        `redirect` path and returns it to the client, which then redirects to
+        the provider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/oidc/callback:
+    get:
+      tags: [auth]
+      operationId: oidcCallback
+      summary: OIDC authorization-code callback
+      description: >
+        Completed by the IdP after the user authenticates. On success it
+        creates/updates the session and responds with a 307 redirect to the
+        post-login path, setting two cookies: `access_token` (HttpOnly,
+        path=/api) and `csrf-token` (non-HttpOnly, path=/). On failure it
+        responds with 307 to `/auth/error`.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Authorization code from the IdP
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Signed state token
+      responses:
+        "307":
+          description: >
+            Redirect to the post-login path on success (cookies set), or to
+            `/auth/error` on failure.
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /
+            Set-Cookie:
+              schema:
+                type: array
+                items:
+                  type: string
+              description: access_token (HttpOnly, path=/api) + csrf-token (path=/)
+
+  /api/branding:
+    get:
+      tags: [branding]
+      operationId: getBranding
+      summary: Get branding configuration
+      responses:
+        "200":
+          description: Branding configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandingResponse"
+
+  /api/branding/assets/{kind}:
+    get:
+      tags: [branding]
+      operationId: getBrandingAsset
+      summary: Get a branding asset
+      description: Returns the raw asset bytes with the appropriate Content-Type.
+      parameters:
+        - $ref: "#/components/parameters/BrandingAssetKind"
+      responses:
+        "200":
+          description: >
+            Binary asset; the Content-Type is the real mime type of the file
+            (fallback `application/octet-stream`).
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+            image/x-icon:
+              schema:
+                type: string
+                format: binary
+            font/woff:
+              schema:
+                type: string
+                format: binary
+            font/woff2:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown or unconfigured asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/localizations:
+    get:
+      tags: [localization]
+      operationId: getLocalizations
+      summary: Get localization strings
+      description: Map of locale code to a localization object.
+      responses:
+        "200":
+          description: Localizations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                example:
+                  en:
+                    appName: Chiroo
+
+  /api/session:
+    get:
+      tags: [session]
+      operationId: getSession
+      summary: Get current session info
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: The user row for the authenticated identity is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/models:
+    get:
+      tags: [models]
+      operationId: listModels
+      summary: List available models (scenarios)
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/scenarios/{id}/icon:
+    get:
+      tags: [models]
+      operationId: getScenarioIcon
+      summary: Get a scenario icon
+      description: Returns the icon image bytes for the given scenario id.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Scenario id (model name)
+      responses:
+        "200":
+          description: Icon image (real mime type of the file, e.g. `image/png` or `image/svg+xml`)
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Icon is not configured for this scenario
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/chats:
+    get:
+      tags: [chats]
+      operationId: getChats
+      summary: List the user's chats
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Chats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [chats]
+      operationId: createChat
+      summary: Create a chat (optionally with a first message)
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      description: >
+        Creates a new chat. When `firstMessage` is provided an initial scenario
+        is started with the given model and the response is returned immediately
+        (generation continues server-side; fetch `POST /api/chats/{id}` with
+        trigger `continue` or reload to follow it).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChatRequest"
+      responses:
+        "200":
+          description: Created chat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/chats/{id}:
+    get:
+      tags: [chats]
+      operationId: getChat
+      summary: Get a chat with messages
+      description: >
+        Returns the chat and its messages. Scenarios are rendered as one user
+        `UIMessage` + one assistant `UIMessage` per scenario.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: Chat with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: The chat has no scenarios (can happen for a chat created without `firstMessage`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags: [chats]
+      operationId: sendMessage
+      summary: Send a message / regenerate / continue
+      description: |
+        Runs (or resumes) a scenario and streams progress as Server-Sent Events.
+
+        **Request semantics** (by `trigger`):
+
+        - `submit-message` — new turn (requires `model` + `text`) or an edit
+          when `messageId` is set (in which case `scenarioId` is also required;
+          the target scenario and everything after it are deleted and rerun).
+        - `regenerate-message` — delete the scenario identified by `scenarioId`
+          (and later ones) and rerun it with its stored user message.
+        - `continue` — resume the chat's pending scenario.
+
+        **Wire format**: `Content-Type: text/event-stream`; every `data:` line
+        contains one JSON chunk (see `SseChunk`). The stream ends when the
+        HTTP response body closes.
+
+        Mutating requests authenticated via the session cookie must send the
+        `x-csrf-token` header.
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: SSE stream of AI SDK message-stream chunks
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/SseChunk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [chats]
+      operationId: deleteChat
+      summary: Delete a chat
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+
+  /api/chats/title/{id}:
+    patch:
+      tags: [chats]
+      operationId: updateTitle
+      summary: Update the chat title
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+      responses:
+        "200":
+          description: Updated chat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/chats/visibility/{id}:
+    patch:
+      tags: [chats]
+      operationId: updateVisibility
+      summary: Update the chat visibility
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility:
+                  type: string
+                  enum: [public, private]
+      responses:
+        "200":
+          description: Updated chat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/chats/votes/{id}:
+    get:
+      tags: [chats]
+      operationId: getVotes
+      summary: List votes for a chat (owner only)
+      description: One entry per voted scenario.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: Votes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VoteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [chats]
+      operationId: vote
+      summary: Vote on a scenario (owner only)
+      description: |
+        `isUpvoted: true` → like, `isUpvoted: false` → dislike. When `isUpvoted`
+        is omitted the vote is removed.
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoteRequest"
+      responses:
+        "200":
+          description: Vote stored (empty body)
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/kb/list:
+    get:
+      tags: [knowledge-bases]
+      operationId: listKbs
+      summary: List knowledge bases
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Knowledge bases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KbListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/kb/{id}:
+    get:
+      tags: [knowledge-bases]
+      operationId: getKb
+      summary: Get a knowledge base
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/KbId"
+      responses:
+        "200":
+          description: Knowledge base
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KbDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/kb/search:
+    post:
+      tags: [knowledge-bases]
+      operationId: searchAllKbs
+      summary: Search across all knowledge bases
+      description: >
+        Searches all KBs (or the `kbIds` subset; an unknown id is a 400).
+        No filters are supported here — use `POST /api/kb/search/{kbId}` for
+        filtered single-KB search.
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchAllRequest"
+      responses:
+        "200":
+          description: Matching chunks, sorted by score descending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/kb/search/{kbId}:
+    post:
+      tags: [knowledge-bases]
+      operationId: searchInKb
+      summary: Search a single knowledge base
+      description: >
+        Searches one KB with optional `filters` (validated strictly against the
+        KB's indexable metadata fields; 400 on invalid input).
+      security:
+        - cookieAuth: []
+          csrfToken: []
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/KbSearchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchInKbRequest"
+      responses:
+        "200":
+          description: Matching chunks, sorted by score descending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/TextPlainNotFound"
+
+  /api/admin/votes:
+    get:
+      tags: [admin]
+      operationId: listAllVotes
+      summary: List all votes (admin only)
+      description: |
+        Paginated list of all votes with user, chat and model context.
+        Returns 403 for non-admin users.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 25
+          description: Page size; values above 100 are silently clamped to 100
+      responses:
+        "200":
+          description: Page of votes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VotePageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/openai/v1/models:
+    get:
+      tags: [openai]
+      operationId: openaiListModels
+      summary: List models (OpenAI-compatible)
+      description: Stateless Bearer auth; snake_case wire format.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Model list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAiModelListResponse"
+        "401":
+          $ref: "#/components/responses/OpenAiError"
+        "500":
+          $ref: "#/components/responses/OpenAiError"
+
+  /api/openai/v1/models/{model}:
+    get:
+      tags: [openai]
+      operationId: openaiGetModel
+      summary: Get a model (OpenAI-compatible)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: model
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Native model id (e.g. `simple`, `deep_research`)
+      responses:
+        "200":
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAiModelObject"
+        "401":
+          $ref: "#/components/responses/OpenAiError"
+        "404":
+          $ref: "#/components/responses/OpenAiError"
+
+  /api/openai/v1/chat/completions:
+    post:
+      tags: [openai]
+      operationId: openaiChatCompletions
+      summary: Create a chat completion (OpenAI-compatible)
+      description: |
+        Stateless: the caller sends the full `messages[]`. Chiroo creates a
+        normal chat, runs one scenario to completion and returns the final
+        visible answer. `system`/`developer` messages are appended to the
+        global system prompt (they never replace it); the rest of the history
+        is used for the LLM but not re-persisted.
+
+        Rejected with 400: `stream: true`, client tools (`tools`,
+        `tool_choice`, `functions`, `function_call`), `response_format`,
+        `logprobs`/`top_logprobs`, `n != 1`. Sampling fields are ignored.
+        The last message must be from the `user`.
+
+        Response extensions beyond OpenAI: `sources` (deduped across all
+        rounds, including hidden) and `chiroo` (`chat_id`, `scenario_id`).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenAiChatCompletionRequest"
+      responses:
+        "200":
+          description: Chat completion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAiChatCompletionResponse"
+        "400":
+          $ref: "#/components/responses/OpenAiError"
+        "401":
+          $ref: "#/components/responses/OpenAiError"
+        "404":
+          $ref: "#/components/responses/OpenAiError"
+        "500":
+          $ref: "#/components/responses/OpenAiError"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: OIDC access token cookie (HttpOnly, path=/api), set by the OIDC callback.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+      description: >
+        Required on mutating requests (POST/PUT/PATCH/DELETE) when authenticated via
+        the session cookie. Value is read from the `csrf-token` cookie (non-HttpOnly).
+        Stateless Bearer requests do not need it.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: OIDC access token
+      description: >
+        OIDC access token, verified against the IdP JWKS (signature, issuer, exp).
+        Used by the OpenAI-compatible API.
+
+  parameters:
+    ChatId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    KbId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Knowledge base id
+    KbSearchId:
+      name: kbId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Knowledge base id
+    BrandingAssetKind:
+      name: kind
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [logo, favicon, assistant, font, font-italic, font-mono]
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Forbidden (not an admin)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TextPlainNotFound:
+      description: Not found (plain-text body, not the JSON error envelope)
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "Knowledge base not found"
+    OpenAiError:
+      description: Error in the OpenAI envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OpenAiErrorEnvelope"
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: "Not found: Chat not found"
+
+    # ── Auth ──────────────────────────────────────────────────────────────
+    LoginRequest:
+      type: object
+      required: [redirect]
+      properties:
+        redirect:
+          type: string
+          description: In-app path to redirect to after a successful login
+          example: /
+    LoginResponse:
+      type: object
+      required: [loginUrl]
+      properties:
+        loginUrl:
+          type: string
+          description: Full URL of the OIDC authorization endpoint
+
+    # ── Branding ──────────────────────────────────────────────────────────
+    BrandingFontResponse:
+      type: object
+      required: [family, url]
+      properties:
+        family:
+          type: string
+        url:
+          type: string
+        format:
+          type: string
+          description: Font format (e.g. `woff2`), when known
+    BrandingPaletteResponse:
+      type: object
+      required: [primary, neutral, primaryDark, neutralDark]
+      properties:
+        primary:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+        neutral:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+        primaryDark:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+        neutralDark:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+    BrandingResponse:
+      type: object
+      required: [name, assistantName, logoUrl, faviconUrl, assistantUrl, fontNormal, fontMono]
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+          nullable: true
+        tagline:
+          type: string
+          nullable: true
+        assistantName:
+          type: string
+        colors:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/BrandingPaletteResponse"
+        logoUrl:
+          type: string
+        faviconUrl:
+          type: string
+        assistantUrl:
+          type: string
+        fontNormal:
+          $ref: "#/components/schemas/BrandingFontResponse"
+        fontItalic:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/BrandingFontResponse"
+        fontMono:
+          $ref: "#/components/schemas/BrandingFontResponse"
+
+    # ── Session / users ───────────────────────────────────────────────────
+    PublicUserResponse:
+      type: object
+      required: [id, name, username, admin]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Display name (empty string when not set)
+        username:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+        admin:
+          type: boolean
+    SessionResponse:
+      type: object
+      required: [id, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The user id of the current session
+        createdAt:
+          type: string
+          description: RFC 3339
+        user:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PublicUserResponse"
+
+    # ── Models ────────────────────────────────────────────────────────────
+    ModelResponse:
+      type: object
+      required: [id, icon]
+      properties:
+        id:
+          type: string
+          description: Native model/scenario id (e.g. `simple`, `deep_research`)
+        icon:
+          type: string
+          description: Inline SVG markup
+        iconUrl:
+          type: string
+          description: URL of the served icon, when configured
+          example: /api/scenarios/simple/icon?v=1
+
+    # ── Chats ─────────────────────────────────────────────────────────────
+    ChatResponse:
+      type: object
+      required: [id, userId, visibility, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        userId:
+          type: string
+          format: uuid
+        visibility:
+          type: string
+          enum: [public, private]
+        createdAt:
+          type: string
+          description: RFC 3339
+    ChatsResponse:
+      type: object
+      required: [chats]
+      properties:
+        chats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatResponse"
+    CreateChatRequest:
+      type: object
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: Native model/scenario id
+          example: simple
+        firstMessage:
+          type: string
+          description: Initial user message; starts the first scenario when set
+    ChatDetailResponse:
+      type: object
+      required: [id, userId, visibility, createdAt, model, messages, isOwner]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [public, private]
+        createdAt:
+          type: string
+          description: RFC 3339
+        model:
+          type: string
+          description: Model of the last scenario
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/UIMessage"
+        isOwner:
+          type: boolean
+          description: Whether the requesting user owns this chat
+
+    # ── UI messages (Vercel AI SDK wire format) ───────────────────────────
+    UIMessage:
+      type: object
+      required: [id, role, parts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [system, user, assistant]
+        metadata:
+          type: object
+          description: >
+            Carries `scenarioId` (on both user and assistant messages of a
+            scenario) and, on assistant messages, `name` (the scenario/model
+            id).
+        parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/UIMessagePart"
+    UIMessagePart:
+      description: >
+        A message part, discriminated by `type`. Tool parts use dynamic type
+        values `tool-<toolName>` (see `ToolUIPart`).
+      oneOf:
+        - $ref: "#/components/schemas/TextUIPart"
+        - $ref: "#/components/schemas/ReasoningUIPart"
+        - $ref: "#/components/schemas/SourceUrlUIPart"
+        - $ref: "#/components/schemas/SourceDocumentUIPart"
+        - $ref: "#/components/schemas/FileUIPart"
+        - $ref: "#/components/schemas/ToolUIPart"
+        - $ref: "#/components/schemas/DataChatTitleUIPart"
+        - $ref: "#/components/schemas/DataRoundUIPart"
+    TextUIPart:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          enum: [text]
+        text:
+          type: string
+        state:
+          type: string
+          enum: [Streaming, Done]
+    ReasoningUIPart:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          enum: [reasoning]
+        text:
+          type: string
+        state:
+          type: string
+          enum: [Streaming, Done]
+    SourceUrlUIPart:
+      type: object
+      required: [type, sourceId, url]
+      properties:
+        type:
+          type: string
+          enum: [source-url]
+        sourceId:
+          type: string
+        url:
+          type: string
+        title:
+          type: string
+        providerMetadata:
+          type: object
+          description: May contain `chiroo.score`
+    SourceDocumentUIPart:
+      type: object
+      required: [type, sourceId, mediaType, title]
+      properties:
+        type:
+          type: string
+          enum: [source-document]
+        sourceId:
+          type: string
+        mediaType:
+          type: string
+        title:
+          type: string
+        filename:
+          type: string
+    FileUIPart:
+      type: object
+      required: [type, mediaType, url]
+      properties:
+        type:
+          type: string
+          enum: [file]
+        mediaType:
+          type: string
+        filename:
+          type: string
+        url:
+          type: string
+    ToolUIPart:
+      type: object
+      description: >
+        A tool call. `type` is the dynamic value `tool-<toolName>`
+        (e.g. `tool-search_in_all_kbs`); the canonical tool name is also
+        available in `toolName`.
+      required: [type, toolCallId, toolName, state]
+      properties:
+        type:
+          type: string
+          pattern: "^tool-\\S+$"
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        title:
+          type: string
+        toolMetadata:
+          type: object
+        providerExecuted:
+          type: boolean
+          description: Always true (tools run server-side)
+        state:
+          type: string
+          enum:
+            - input-streaming
+            - input-available
+            - approval-requested
+            - approval-responded
+            - output-available
+            - output-error
+            - output-denied
+        input:
+          type: object
+        output:
+          type: object
+        errorText:
+          type: string
+    DataChatTitleUIPart:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          enum: [data-chat-title]
+        data:
+          type: object
+    DataRoundUIPart:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          enum: [data-round]
+        data:
+          type: object
+          required: [hidden]
+          properties:
+            hidden:
+              type: boolean
+              description: Whether this assistant round is hidden from non-admins
+
+    # ── SSE chunks (Vercel AI SDK message-stream protocol) ────────────────
+    SseChunk:
+      description: |
+        One `data:` line of the `text/event-stream` response of
+        `POST /api/chats/{id}`. The `type` field discriminates the chunk.
+      oneOf:
+        - $ref: "#/components/schemas/SseStart"
+        - $ref: "#/components/schemas/SseStartStep"
+        - $ref: "#/components/schemas/SseFinishStep"
+        - $ref: "#/components/schemas/SseTextStart"
+        - $ref: "#/components/schemas/SseTextDelta"
+        - $ref: "#/components/schemas/SseTextEnd"
+        - $ref: "#/components/schemas/SseReasoningStart"
+        - $ref: "#/components/schemas/SseReasoningDelta"
+        - $ref: "#/components/schemas/SseReasoningEnd"
+        - $ref: "#/components/schemas/SseToolInputStart"
+        - $ref: "#/components/schemas/SseToolInputDelta"
+        - $ref: "#/components/schemas/SseToolInputAvailable"
+        - $ref: "#/components/schemas/SseToolOutputAvailable"
+        - $ref: "#/components/schemas/SseToolOutputError"
+        - $ref: "#/components/schemas/SseSourceUrl"
+        - $ref: "#/components/schemas/SseFinish"
+        - $ref: "#/components/schemas/SseDataRound"
+        - $ref: "#/components/schemas/SseError"
+    SseStart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [start]
+        messageId:
+          type: string
+          format: uuid
+          description: First assistant round message id
+        messageMetadata:
+          type: object
+          description: Carries `scenarioId` and `name` (the model id)
+    SseStartStep:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [start-step]
+    SseFinishStep:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [finish-step]
+    SseTextStart:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [text-start]
+        id:
+          type: string
+    SseTextDelta:
+      type: object
+      required: [type, id, delta]
+      properties:
+        type:
+          type: string
+          enum: [text-delta]
+        id:
+          type: string
+        delta:
+          type: string
+    SseTextEnd:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [text-end]
+        id:
+          type: string
+    SseReasoningStart:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [reasoning-start]
+        id:
+          type: string
+    SseReasoningDelta:
+      type: object
+      required: [type, id, delta]
+      properties:
+        type:
+          type: string
+          enum: [reasoning-delta]
+        id:
+          type: string
+        delta:
+          type: string
+    SseReasoningEnd:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [reasoning-end]
+        id:
+          type: string
+    SseToolInputStart:
+      type: object
+      required: [type, toolCallId, toolName, providerExecuted]
+      properties:
+        type:
+          type: string
+          enum: [tool-input-start]
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        title:
+          type: string
+        providerExecuted:
+          type: boolean
+          enum: [true]
+    SseToolInputDelta:
+      type: object
+      required: [type, toolCallId, inputTextDelta]
+      properties:
+        type:
+          type: string
+          enum: [tool-input-delta]
+        toolCallId:
+          type: string
+        inputTextDelta:
+          type: string
+          description: Incremental JSON text of the tool input
+    SseToolInputAvailable:
+      type: object
+      required: [type, toolCallId, toolName, input, providerExecuted]
+      properties:
+        type:
+          type: string
+          enum: [tool-input-available]
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        input:
+          type: object
+        providerExecuted:
+          type: boolean
+          enum: [true]
+    SseToolOutputAvailable:
+      type: object
+      required: [type, toolCallId, output, providerExecuted]
+      properties:
+        type:
+          type: string
+          enum: [tool-output-available]
+        toolCallId:
+          type: string
+        output:
+          type: object
+        providerExecuted:
+          type: boolean
+          enum: [true]
+    SseToolOutputError:
+      type: object
+      required: [type, toolCallId, errorText, providerExecuted]
+      properties:
+        type:
+          type: string
+          enum: [tool-output-error]
+        toolCallId:
+          type: string
+        errorText:
+          type: string
+        providerExecuted:
+          type: boolean
+          enum: [true]
+    SseSourceUrl:
+      type: object
+      required: [type, sourceId, url]
+      properties:
+        type:
+          type: string
+          enum: [source-url]
+        sourceId:
+          type: string
+        url:
+          type: string
+        title:
+          type: string
+        providerMetadata:
+          type: object
+          description: May contain `chiroo.score`
+    SseFinish:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [finish]
+        finishReason:
+          type: string
+          enum: [stop, length, content-filter, tool-calls, error, other]
+    SseDataRound:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          enum: [data-round]
+        data:
+          type: object
+          required: [hidden]
+          properties:
+            hidden:
+              type: boolean
+    SseError:
+      type: object
+      required: [type, errorText]
+      properties:
+        type:
+          type: string
+          enum: [error]
+        errorText:
+          type: string
+
+    SendMessageRequest:
+      type: object
+      required: [trigger]
+      properties:
+        trigger:
+          type: string
+          enum: [submit-message, regenerate-message, continue]
+        text:
+          type: string
+          default: ""
+          description: User message text (submit-message)
+        model:
+          type: string
+          description: Model id; required for `submit-message`
+        messageId:
+          type: string
+          format: uuid
+          description: >
+            With `submit-message`: makes the request an edit of the scenario
+            containing that message (requires `scenarioId`).
+        userMessageId:
+          type: string
+          format: uuid
+          description: >
+            With `submit-message`: reuse a pre-generated user message id
+            (otherwise a new one is generated).
+        scenarioId:
+          type: string
+          format: uuid
+          description: >
+            Required for `submit-message` edits and `regenerate-message`.
+
+    # ── Votes ─────────────────────────────────────────────────────────────
+    VoteRequest:
+      type: object
+      required: [scenarioId]
+      properties:
+        scenarioId:
+          type: string
+          format: uuid
+        isUpvoted:
+          type: boolean
+          description: >
+            true → like, false → dislike; omit to remove the vote.
+    VoteResponse:
+      type: object
+      required: [chatId, scenarioId, isUpvoted]
+      properties:
+        chatId:
+          type: string
+          format: uuid
+        scenarioId:
+          type: string
+          format: uuid
+        isUpvoted:
+          type: boolean
+          description: true = like, false = dislike
+    VotePageResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VoteAdminResponse"
+        total:
+          type: integer
+          format: int64
+    VoteAdminResponse:
+      type: object
+      required: [user, chatId, scenarioId, votedAt, chatCreatedAt, model, isUpvoted]
+      properties:
+        user:
+          $ref: "#/components/schemas/PublicUserResponse"
+        chatId:
+          type: string
+          format: uuid
+        scenarioId:
+          type: string
+          format: uuid
+        chatTitle:
+          type: string
+          nullable: true
+        votedAt:
+          type: string
+          description: RFC 3339
+        chatCreatedAt:
+          type: string
+          description: RFC 3339
+        model:
+          type: string
+        isUpvoted:
+          type: boolean
+          description: true = like, false = dislike
+
+    # ── Knowledge bases (public) ──────────────────────────────────────────
+    KbListResponse:
+      type: object
+      required: [kbs]
+      properties:
+        kbs:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+    KbDetailResponse:
+      type: object
+      required:
+        [id, name, description, renderedDescription, public, metadata, indexes, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          description: Raw description template
+        renderedDescription:
+          type: string
+          description: Description rendered with the current branding variables
+        public:
+          type: boolean
+        metadata:
+          type: object
+        language:
+          type: string
+          nullable: true
+        indexes:
+          type: object
+          description: >
+            Indexable metadata fields: `{"<field>": {"type": "<type>", "description": "<text>"}}`
+            where type is one of `keyword`, `integer`, `float`, `bool`,
+            `datetime`, `uuid`. Empty object when the KB has no indexes.
+        createdAt:
+          type: string
+          description: RFC 3339
+        updatedAt:
+          type: string
+          description: RFC 3339
+    SearchAllRequest:
+      type: object
+      required: [queries]
+      properties:
+        queries:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        kbIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: "Search only this subset of KBs (default: all)"
+        limit:
+          type: integer
+          description: Max chunks per KB (default from server config)
+        candidateLimit:
+          type: integer
+          description: Max hybrid-search candidates (default from server config)
+        rerankerLimit:
+          type: integer
+          description: Max candidates passed to the reranker (default from server config)
+        rerankerThreshold:
+          type: number
+          description: Minimum reranker score to keep a chunk (default from server config)
+        rerank:
+          type: boolean
+          default: true
+          description: >
+            When false the reranker is skipped: chunks keep their hybrid
+            (RRF) score, `rerankerThreshold` is ignored and the cross-query
+            merge degrades to dedup.
+    SearchInKbRequest:
+      type: object
+      required: [queries]
+      properties:
+        queries:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        filters:
+          $ref: "#/components/schemas/SearchFilters"
+        limit:
+          type: integer
+          description: Max chunks (default from server config)
+        candidateLimit:
+          type: integer
+          description: Max hybrid-search candidates (default from server config)
+        rerankerLimit:
+          type: integer
+          description: Max candidates passed to the reranker (default from server config)
+        rerankerThreshold:
+          type: number
+          description: Minimum reranker score to keep a chunk (default from server config)
+        rerank:
+          type: boolean
+          default: true
+          description: >
+            When false the reranker is skipped: chunks keep their hybrid
+            (RRF) score, `rerankerThreshold` is ignored and the cross-query
+            merge degrades to dedup.
+    SearchFilters:
+      type: object
+      description: |
+        Filters on the KB's indexable top-level document-metadata fields
+        (declared in the KB's `indexes`). Conditions are combined with AND,
+        no nesting. A bare scalar value is an equality condition; a range is
+        an object with any of `eq`/`gt`/`gte`/`lt`/`lte`. Ranges are only
+        valid for `integer`, `float` and `datetime` fields; datetime values
+        are RFC 3339 strings (second granularity).
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: number
+          - type: boolean
+          - type: array
+          - type: object
+            description: Range object
+            properties:
+              eq: {}
+              gt:
+                oneOf:
+                  - type: number
+                  - type: string
+              gte:
+                oneOf:
+                  - type: number
+                  - type: string
+              lt:
+                oneOf:
+                  - type: number
+                  - type: string
+              lte:
+                oneOf:
+                  - type: number
+                  - type: string
+      example:
+        department: engineering
+        salary:
+          gte: 50000
+        updatedAt:
+          lt: "2025-01-01T00:00:00Z"
+    SearchResponse:
+      type: object
+      required: [chunks]
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchedChunkResponse"
+    SearchedChunkResponse:
+      type: object
+      required:
+        [id, kbId, kbName, documentId, title, url, content, score, metadata, chunkIndex, chunkTotal, query]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kbId:
+          type: string
+          format: uuid
+        kbName:
+          type: string
+        documentId:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        content:
+          type: string
+        score:
+          type: number
+          description: "Reranker score (or hybrid score when `rerank: false`)"
+        metadata:
+          type: object
+        chunkIndex:
+          type: integer
+        chunkTotal:
+          type: integer
+        query:
+          type: string
+          description: The query that yielded this chunk's max score
+
+    # ── OpenAI-compatible ─────────────────────────────────────────────────
+    OpenAiModelObject:
+      type: object
+      required: [id, object, created, owned_by]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          enum: [model]
+        created:
+          type: integer
+          format: int64
+        owned_by:
+          type: string
+          enum: [chiroo]
+    OpenAiModelListResponse:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          enum: [list]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenAiModelObject"
+    OpenAiMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          description: >
+            Supported: `system`, `developer`, `user`, `assistant`. The last
+            message must be from the `user`.
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+                required: [type, text]
+                properties:
+                  type:
+                    type: string
+                    enum: [text]
+                  text:
+                    type: string
+    OpenAiChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+          description: Native model id (e.g. `simple`, `deep_research`)
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenAiMessage"
+          minItems: 1
+      additionalProperties: true
+      description: |
+        Unknown fields (sampling params, `user`, ...) are ignored. The
+        following are rejected with 400: `stream: true`, `tools`,
+        `tool_choice`, `functions`, `function_call`, `response_format`,
+        `logprobs`, `top_logprobs`, `n != 1`.
+    OpenAiChatCompletionResponse:
+      type: object
+      required: [id, object, created, model, choices, usage, sources, chiroo]
+      properties:
+        id:
+          type: string
+          example: chatcmpl-1e7a2b3c-0000-0000-0000-000000000000
+        object:
+          type: string
+          enum: [chat.completion]
+        created:
+          type: integer
+          format: int64
+          description: Unix timestamp
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            required: [index, message, finish_reason]
+            properties:
+              index:
+                type: integer
+              message:
+                type: object
+                required: [role, content]
+                properties:
+                  role:
+                    type: string
+                    enum: [assistant]
+                  content:
+                    type: string
+                    description: The final visible answer text
+              logprobs:
+                type: object
+                nullable: true
+              finish_reason:
+                type: string
+                enum: [stop]
+        usage:
+          type: object
+          required: [prompt_tokens, completion_tokens, total_tokens]
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+            prompt_tokens_details:
+              type: object
+              properties:
+                cached_tokens:
+                  type: integer
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/Source"
+          description: Sources deduped across all rounds (including hidden)
+        chiroo:
+          type: object
+          required: [chat_id, scenario_id]
+          properties:
+            chat_id:
+              type: string
+            scenario_id:
+              type: string
+    Source:
+      type: object
+      required: [source_id, url]
+      properties:
+        source_id:
+          type: string
+        url:
+          type: string
+        title:
+          type: string
+        score:
+          type: number
+    OpenAiErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, type]
+          properties:
+            message:
+              type: string
+            type:
+              type: string
+              enum: [invalid_request_error, server_error]
+            param:
+              type: string
+              nullable: true
+            code:
+              type: string
+              nullable: true
