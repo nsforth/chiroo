@@ -113,8 +113,9 @@ impl SearchService {
     }
 }
 
-/// Hybrid search + rerank + threshold filter, applied independently per
-/// knowledge base, then combined with a per-KB `params.limit` cap.
+/// Hybrid search (+ rerank + threshold filter unless `params.rerank` is off),
+/// applied independently per knowledge base, then combined with a per-KB
+/// `params.limit` cap.
 async fn search_one_query(
     qdrant_client: &QdrantClient,
     rerank_client: &RerankClient,
@@ -145,20 +146,23 @@ async fn search_one_query(
             // The dense and BM25 prefetches can both return the same point.
             let chunks = dedup_chunks(chunks);
 
-            let contents: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-            let reranked = rerank_client
-                .rerank(&query, &contents, Some(params.reranker_limit), None)
-                .await?;
-            let scores: Vec<(usize, f32)> = reranked
-                .into_iter()
-                .map(|r| (r.index as usize, r.relevance_score))
-                .collect();
+            let reranked = if params.rerank {
+                let contents: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
+                let reranked = rerank_client
+                    .rerank(&query, &contents, Some(params.reranker_limit), None)
+                    .await?;
+                let scores: Vec<(usize, f32)> = reranked
+                    .into_iter()
+                    .map(|r| (r.index as usize, r.relevance_score))
+                    .collect();
 
-            Ok::<Vec<SearchedChunk>, AppError>(filter_chunks(
-                chunks,
-                scores,
-                params.reranker_threshold,
-            ))
+                filter_chunks(chunks, scores, params.reranker_threshold)
+            } else {
+                // No reranker: keep the hybrid (RRF) score, skip the threshold.
+                chunks
+            };
+
+            Ok::<Vec<SearchedChunk>, AppError>(reranked)
         }
     });
 
@@ -537,7 +541,7 @@ mod tests {
             );
 
             let search_service = SearchService::new(embedding, qdrant.clone(), rerank);
-            let params = SearchParams::try_new(10, 30, 30, 0.5).expect("valid params");
+            let params = SearchParams::try_new(10, 30, 30, 0.5, true).expect("valid params");
 
             let kb = knowledge_service
                 .create_kb(
@@ -588,6 +592,85 @@ mod tests {
             assert!(
                 chunks.iter().all(|c| c.score >= 0.5),
                 "all chunks should pass the reranker threshold"
+            );
+
+            knowledge_service.delete_kb(kb.id).await.expect("delete_kb");
+        }
+
+        /// `rerank: false` skips the reranker entirely: the rerank client points at an
+        /// unreachable endpoint (any call would fail the search), chunks keep their
+        /// hybrid (RRF) score, and the reranker threshold must not hide them.
+        #[tokio::test]
+        #[ignore = "requires Postgres, Qdrant, and embedding service"]
+        async fn search_no_rerank_skips_reranker() {
+            let pool = get_or_create_test_pool().await;
+            let qdrant = make_qdrant_client("no_rerank");
+            let embedding = make_embedding_client();
+            let rerank = RerankClient::new(&RerankConfig {
+                base_url: "http://127.0.0.1:9/v1".to_string(),
+                api_key: SecretString::new("".to_string().into_boxed_str()),
+                model: RERANK_MODEL.to_string(),
+            })
+            .expect("Failed to create Rerank client");
+            let chunking = make_chunking_service();
+
+            let knowledge_service = KnowledgeService::new(
+                pool.clone(),
+                chunking.clone(),
+                qdrant.clone(),
+                embedding.clone(),
+                EMBEDDING_DIMENSIONS,
+            );
+
+            let search_service = SearchService::new(embedding, qdrant.clone(), rerank);
+            // A threshold that would hide any reranker-scale score: must be ignored.
+            let params = SearchParams::try_new(10, 30, 30, 0.5, false).expect("valid params");
+
+            let kb = knowledge_service
+                .create_kb(
+                    "test".into(),
+                    "desc".into(),
+                    false,
+                    serde_json::json!({}),
+                    None,
+                    None,
+                )
+                .await
+                .expect("create_kb");
+
+            let doc_id = Uuid::new_v4().to_string();
+            let text = "The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars \
+                        in Paris, France. Paris is the capital city of France and is known for its \
+                        art, fashion, gastronomy and culture. The city has a population of over \
+                        two million people.";
+            knowledge_service
+                .create_document(
+                    doc_id,
+                    kb.id,
+                    "Paris Facts".into(),
+                    "https://example.com/paris".into(),
+                    "v1".into(),
+                    MimeType::TextPlain,
+                    serde_json::json!({}),
+                    text.as_bytes().to_vec(),
+                )
+                .await
+                .expect("create_document");
+
+            let chunks = search_service
+                .search_all(
+                    vec!["What is the capital of France?".to_string()],
+                    &[kb.clone()],
+                    &SearchFilter::default(),
+                    &params,
+                )
+                .await
+                .expect("search");
+
+            assert!(!chunks.is_empty(), "search should return chunks");
+            assert!(
+                chunks.iter().all(|c| c.score > 0.0),
+                "chunks should carry their hybrid (RRF) score"
             );
 
             knowledge_service.delete_kb(kb.id).await.expect("delete_kb");
@@ -671,7 +754,7 @@ mod tests {
             filters: serde_json::Value,
         ) -> Vec<SearchedChunk> {
             let filter = SearchFilter::from_json_value(&filters).expect("valid filter value");
-            let params = SearchParams::try_new(30, 30, 30, 0.0).expect("valid params");
+            let params = SearchParams::try_new(30, 30, 30, 0.0, true).expect("valid params");
             search
                 .search_in_kb(
                     vec!["quarterly planning and budget review".to_string()],
@@ -841,7 +924,7 @@ mod tests {
                 EMBEDDING_DIMENSIONS,
             );
             let search_service = SearchService::new(embedding, qdrant, rerank);
-            let params = SearchParams::try_new(30, 30, 30, 0.0).expect("valid params");
+            let params = SearchParams::try_new(30, 30, 30, 0.0, true).expect("valid params");
 
             let kb_a = knowledge_service
                 .create_kb(

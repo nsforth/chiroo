@@ -539,14 +539,20 @@ layers, no separate router).
   `public, metadata, language, indexes, createdAt, updatedAt`. 404 if absent; a
   description render error is 500.
 - `POST /api/kb/search` — `{ queries, kbIds?, limit?, candidateLimit?, rerankerLimit?,
-  rerankerThreshold? }` → search all KBs (or the `kbIds` subset; unknown id → 400).
+  rerankerThreshold?, rerank? }` → search all KBs (or the `kbIds` subset; unknown id → 400).
 - `POST /api/kb/search/{kbId}` — `{ queries, filters?, + the same limits }`; `filters`
   are validated against the KB's indexes (400 with field-specific messages). 404 if
   absent.
+- `rerank` (default `true`) skips the reranker when `false` (it takes ~95% of search
+  time): chunks keep their hybrid (RRF) score, `rerankerThreshold` is ignored, and the
+  cross-query merge degrades to dedup — the per-KB `limit` cap still applies, but the
+  result order (by hybrid score) is only deterministic, not a quality ranking. LLM
+  tools never use this mode (`SearchParams` built with `rerank: true` in `main.rs`).
 - Search responses: flat `chunks[]` globally sorted by score desc, per-KB `limit` cap
   (response size up to `limit × N_KB`); chunk fields: `id, kbId, kbName, documentId,
   title, url, content, score, metadata, chunkIndex, chunkTotal, query` (`query` = the
-  query that yielded the chunk's max rerank score). Optional params fall back to the
+  query that yielded the chunk's max rerank score; with `rerank: false`, the query that
+  kept the chunk through dedup). Optional params fall back to the
   `search.*` config defaults via `SearchParams::try_new`.
 - Handlers in `handlers/kb/` (`kb.rs` — list/get, `search.rs` — search) with their own
   DTOs, not shared with the internal API.

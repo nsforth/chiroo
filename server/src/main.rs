@@ -145,11 +145,13 @@ fn build_state(app_config: &'static Config, pool: Pool) -> AppState {
         embedding_dimensions,
     );
 
+    // LLM tools always rerank — the no-rerank mode is an API-only option.
     let search_params = SearchParams::try_new(
         app_config.search.limit,
         app_config.search.candidate_limit,
         app_config.search.reranker_limit,
         app_config.search.score_threshold,
+        true,
     )
     .expect("valid search configuration");
 

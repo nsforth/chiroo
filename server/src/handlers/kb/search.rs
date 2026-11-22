@@ -30,6 +30,9 @@ pub struct SearchAllRequest {
     pub reranker_limit: Option<u32>,
     #[serde(rename = "rerankerThreshold")]
     pub reranker_threshold: Option<f32>,
+    /// Run the reranker (default `true`). `false` skips it: results keep the
+    /// hybrid score and are merged by dedup only.
+    pub rerank: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +46,9 @@ pub struct SearchInKbRequest {
     pub reranker_limit: Option<u32>,
     #[serde(rename = "rerankerThreshold")]
     pub reranker_threshold: Option<f32>,
+    /// Run the reranker (default `true`). `false` skips it: results keep the
+    /// hybrid score and are merged by dedup only.
+    pub rerank: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +107,7 @@ pub async fn search_all(
         body.candidate_limit,
         body.reranker_limit,
         body.reranker_threshold,
+        body.rerank.unwrap_or(true),
     )?;
 
     let kb_ids = body
@@ -127,6 +134,7 @@ pub async fn search_in_kb(
         body.candidate_limit,
         body.reranker_limit,
         body.reranker_threshold,
+        body.rerank.unwrap_or(true),
     )?;
 
     let kb = state
@@ -165,12 +173,14 @@ fn search_params_from_request(
     candidate_limit: Option<u64>,
     reranker_limit: Option<u32>,
     reranker_threshold: Option<f32>,
+    rerank: bool,
 ) -> Result<SearchParams, AppError> {
     SearchParams::try_new(
         limit.unwrap_or(config.search.limit),
         candidate_limit.unwrap_or(config.search.candidate_limit),
         reranker_limit.unwrap_or(config.search.reranker_limit),
         reranker_threshold.unwrap_or(config.search.score_threshold),
+        rerank,
     )
 }
 

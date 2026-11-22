@@ -522,6 +522,6 @@ mod tests {
     }
 
     fn test_search_params() -> SearchParams {
-        SearchParams::try_new(10, 30, 7, 0.5).expect("valid test params")
+        SearchParams::try_new(10, 30, 7, 0.5, true).expect("valid test params")
     }
 }
