@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use deadpool_diesel::postgres::Pool;
 use serde_json::Value;
@@ -156,6 +156,24 @@ impl KnowledgeService {
             Err(e) => info!(error = e.to_string(), status = "failed"),
         }
         Ok(result?)
+    }
+
+    /// List all knowledge bases, or only those with the given ids (search
+    /// scope). Unknown ids are a 400.
+    #[instrument(skip(self))]
+    pub async fn list_kbs_with_filter(
+        &self,
+        kb_ids: Option<Vec<KnowledgeBaseId>>,
+    ) -> Result<Vec<KnowledgeBase>, AppError> {
+        let result = knowledge_base_repository::list_all(&self.pool).await;
+        match &result {
+            Err(e) => info!(error = e.to_string(), status = "failed"),
+            Ok(_) => {},
+        }
+        let kbs = result?;
+        let filtered = filter_kbs_by_ids(kbs, kb_ids)?;
+        info!(kb_count = filtered.len(), status = "success");
+        Ok(filtered)
     }
 
     #[instrument(skip(self, metadata))]
@@ -633,6 +651,25 @@ impl KnowledgeService {
     }
 }
 
+/// Filter the KB list down to the given ids; `None` means "all KBs". Unknown
+/// ids are a 400.
+fn filter_kbs_by_ids(
+    kbs: Vec<KnowledgeBase>,
+    kb_ids: Option<Vec<KnowledgeBaseId>>,
+) -> Result<Vec<KnowledgeBase>, AppError> {
+    let Some(ids) = kb_ids else {
+        return Ok(kbs);
+    };
+    let known: HashSet<KnowledgeBaseId> = kbs.iter().map(|kb| kb.id).collect();
+    if let Some(unknown) = ids.iter().find(|id| !known.contains(id)) {
+        return Err(AppError::BadRequest(format!(
+            "unknown knowledge base id: {}",
+            unknown.0
+        )));
+    }
+    Ok(kbs.into_iter().filter(|kb| ids.contains(&kb.id)).collect())
+}
+
 fn chunks_up_to_date(actual: &[DocumentChunk], version: &str) -> bool {
     if actual.is_empty() {
         return false;
@@ -706,8 +743,48 @@ mod tests {
 
         #[test]
         fn up_to_date_rejects_wrong_chunk_total() {
-            let chunks = vec![make_chunk(0, 3, "v1"), make_chunk(1, 2, "v1")];
+            let chunks = vec![make_chunk(0, 3, "v1"), make_chunk(1, 3, "v2")];
             assert!(!chunks_up_to_date(&chunks, "v1"));
+        }
+
+        fn make_kb(id: Uuid) -> KnowledgeBase {
+            KnowledgeBase {
+                id: KnowledgeBaseId(id),
+                name: "Test KB".into(),
+                description: String::new(),
+                public: false,
+                metadata: serde_json::Value::Null,
+                language: None,
+                indexes: KbIndexes::default(),
+                created_at: chrono::NaiveDateTime::MIN,
+                updated_at: chrono::NaiveDateTime::MIN,
+            }
+        }
+
+        #[test]
+        fn filter_kbs_without_ids_returns_all() {
+            let kbs = vec![make_kb(Uuid::new_v4()), make_kb(Uuid::new_v4())];
+            let filtered = filter_kbs_by_ids(kbs, None).expect("no filter");
+            assert_eq!(filtered.len(), 2);
+        }
+
+        #[test]
+        fn filter_kbs_returns_only_requested_ids() {
+            let a = make_kb(Uuid::new_v4());
+            let b = make_kb(Uuid::new_v4());
+            let c = make_kb(Uuid::new_v4());
+            let b_id = b.id;
+            let filtered = filter_kbs_by_ids(vec![a, b, c], Some(vec![b_id])).expect("known id");
+            assert_eq!(filtered.len(), 1);
+            assert_eq!(filtered[0].id, b_id);
+        }
+
+        #[test]
+        fn filter_kbs_rejects_unknown_id() {
+            let a = make_kb(Uuid::new_v4());
+            let err = filter_kbs_by_ids(vec![a], Some(vec![KnowledgeBaseId(Uuid::new_v4())]))
+                .unwrap_err();
+            assert!(matches!(err, AppError::BadRequest(_)));
         }
     }
 

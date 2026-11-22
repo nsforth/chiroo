@@ -35,7 +35,11 @@ pub async fn oidc_callback(
                 .to_string();
 
             let csrf_secret = state.config.oidc_config().state_secret().expose_secret();
-            let csrf_jwt = create_csrf_token(csrf_secret, &auth_user.session_id)
+            let session_id = auth_user
+                .session_id
+                .as_deref()
+                .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+            let csrf_jwt = create_csrf_token(csrf_secret, session_id)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let csrf_cookie = Cookie::build(("csrf-token", csrf_jwt))
                 .http_only(false)

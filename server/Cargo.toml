@@ -30,6 +30,7 @@ appconfig = { package = "config", version = "0.15" }
 async-openai = { version = "0.40", features = ["chat-completion", "byot", "embedding"] }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros", "tokio", "multipart"] }
+axum-extra = { version = "0.12", features = ["cookie", "typed-header"] }
 axum-macros = "0.5"
 axum_typed_multipart = "0.16"
 cached = { version = "1", features = ["async", "proc_macro"] }

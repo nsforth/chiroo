@@ -3,7 +3,7 @@ use axum::Json;
 use serde::Serialize;
 
 use super::error::OpenAiApiError;
-use crate::domain::models::api_principal::ApiPrincipal;
+use crate::domain::models::auth_user::AuthUser;
 use crate::services::scenarios::{list_scenarios, scenario_by_name};
 
 #[derive(Debug, Serialize)]
@@ -29,7 +29,7 @@ fn model_object(id: &str) -> ModelObject {
     }
 }
 
-pub async fn list_models(_principal: ApiPrincipal) -> Json<ModelListResponse> {
+pub async fn list_models(_auth_user: AuthUser) -> Json<ModelListResponse> {
     let data = list_scenarios()
         .iter()
         .map(|info| model_object(info.id))
@@ -41,7 +41,7 @@ pub async fn list_models(_principal: ApiPrincipal) -> Json<ModelListResponse> {
 }
 
 pub async fn get_model(
-    _principal: ApiPrincipal,
+    _auth_user: AuthUser,
     Path(model): Path<String>,
 ) -> Result<Json<ModelObject>, OpenAiApiError> {
     let _definition =
@@ -57,9 +57,10 @@ mod tests {
     use super::*;
     use crate::domain::models::user::UserId;
 
-    fn principal() -> ApiPrincipal {
-        ApiPrincipal {
+    fn principal() -> AuthUser {
+        AuthUser {
             user_id: UserId(Uuid::new_v4()),
+            session_id: None,
         }
     }
 

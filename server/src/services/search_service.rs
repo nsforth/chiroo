@@ -670,7 +670,7 @@ mod tests {
             kb: &KnowledgeBase,
             filters: serde_json::Value,
         ) -> Vec<SearchedChunk> {
-            let filter = SearchFilter::from_llm_value(&filters).expect("valid filter value");
+            let filter = SearchFilter::from_json_value(&filters).expect("valid filter value");
             let params = SearchParams::try_new(30, 30, 30, 0.0).expect("valid params");
             search
                 .search_in_kb(

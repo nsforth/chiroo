@@ -3,14 +3,14 @@ use axum::extract::State;
 use super::error::OpenAiApiError;
 use super::messages::ChatCompletionRequest;
 use super::response::ChatCompletionResponse;
-use crate::domain::models::api_principal::ApiPrincipal;
+use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::messages::{Message, MessagePart, TextBlock};
 use crate::services::scenarios::scenario_by_name;
 use crate::state::AppState;
 
 pub async fn create_chat_completion(
     State(state): State<AppState>,
-    principal: ApiPrincipal,
+    auth_user: AuthUser,
     json: Result<axum::Json<ChatCompletionRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<axum::Json<ChatCompletionResponse>, OpenAiApiError> {
     let request = json.map_err(|_| OpenAiApiError::bad_request("Invalid JSON body"))?;
@@ -20,7 +20,7 @@ pub async fn create_chat_completion(
 
     let chat = state
         .chat_service
-        .create_chat_shell(converted.question.clone(), principal.user_id)
+        .create_chat_shell(converted.question.clone(), auth_user.user_id)
         .await
         .map_err(OpenAiApiError::from)?;
 
@@ -43,7 +43,7 @@ pub async fn create_chat_completion(
             question,
             history,
             converted.client_system,
-            principal.user_id,
+            auth_user.user_id,
         )
         .await
     {
@@ -61,7 +61,7 @@ pub async fn create_chat_completion(
             if !has_scenario {
                 let _ = state
                     .chat_service
-                    .delete_chat(&chat.id, &principal.user_id)
+                    .delete_chat(&chat.id, &auth_user.user_id)
                     .await;
             }
             return Err(OpenAiApiError::from(error));

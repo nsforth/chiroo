@@ -18,7 +18,7 @@ handlers/  → HTTP layer, converts domain ↔ requests/responses/DTOs
 services/  → business logic, orchestrates repositories
 infra/     → Diesel schema, repositories (SQL queries)
 domain/    → pure data types (Chat, ChatId, UserId, Vote, Scenario, Round, MessageId)
-utils/     → shared utilities (extract_cookie, custom Axum extractors)
+utils/     → shared utilities (custom Axum extractors, crypto, text helpers)
 ```
 `AppState` is the DI container holding all services.
 
@@ -338,7 +338,9 @@ where
   No server-side in-memory or DB storage for pending auth states.
 - Sessions stored in `sessions` table: `provider_sid`, `access_token`, `refresh_token`,
   `expires_at`. Cleanup via periodic task (interval configurable, default 10 min).
-- `AuthUser` domain type in `domain/models/auth_user.rs`: `{ user_id: UserId, session_id: String }`.
+- `AuthUser` domain type in `domain/models/auth_user.rs`: `{ user_id: UserId, session_id: Option<String> }`.
+  `session_id` is the DB session UUID for requests attached to a server session
+  (the cookie path) and `None` for stateless requests (Bearer).
   Used as an Axum extractor (impl `FromRequestParts` in `middleware/auth.rs`).
   Injected into request extensions by `auth_middleware`.
 - `AuthService` holds `OidcClient` in a `tokio::sync::OnceCell` — lazy init, OIDC server
@@ -354,14 +356,29 @@ where
   the JWT's `sid` claim, refreshes via OIDC, upserts new tokens, and returns new `AuthUser` +
   new `access_token` (`Refreshed`). Middleware sets `Set-Cookie` with `path=/api` on the
   response. A *failed* refresh surfaces as `Expired` → middleware returns 401.
-- CSRF middleware (`middleware/csrf.rs`): on POST/PUT/PATCH/DELETE, validates
-  `x-csrf-token` header matches the `csrf-token` cookie (JWT HS256 with `{jti, sid}`),
-  verifies JWT signature, and checks `sid` in JWT matches `AuthUser.session_id`.
-  Returns 401 on any failure. Cookie set in OIDC callback (non-HttpOnly, path=/).
+- Public `auth_middleware` (`middleware/auth.rs`) accepts two credential forms, Bearer
+   first: a valid `Authorization: Bearer <OIDC access token>` authenticates statelessly via
+   `AuthService::verify_api_token` (no session lookup, no refresh, `session_id: None`).
+   An `Authorization` header that is present but not a valid Bearer token (foreign
+   scheme, malformed, empty token, or a token that fails verification) is a 401 —
+   there is no fallback to cookies; the cookie flow is used only when no
+   `Authorization` header is sent at all. The OpenAI-compatible API
+   keeps its own middleware (`openai_auth_middleware`, also in `middleware/auth.rs`):
+   same Bearer mechanism, but with the OpenAI 401 envelope and no cookie path.
+- CSRF middleware (`middleware/csrf.rs`): applied after auth, enforced only for
+  session-bound requests (`AuthUser.session_id.is_some()`); stateless Bearer requests
+  skip it (a cross-site origin cannot forge the `Authorization` header). On
+  POST/PUT/PATCH/DELETE it validates the `x-csrf-token` header matches the `csrf-token`
+  cookie (JWT HS256 with `{jti, sid}`), verifies the JWT signature, and checks `sid` in
+  the JWT matches `AuthUser.session_id`; 401 on any failure. Cookie set in OIDC callback
+  (non-HttpOnly, path=/).
 - `access_token` cookie: `HttpOnly`, `path=/api`, `SameSite=Lax`, `Secure` if HTTPS.
 - `csrf-token` cookie: non-HttpOnly (JS reads it for header), `path=/`, `SameSite=Lax`.
-- Cookie extraction from multi-cookie headers: shared `extract_cookie(headers, name)` in
-  `utils/cookies.rs`. Iterates over `split(';')` to handle any cookie order.
+- Cookies are read via `axum_extra::extract::cookie::CookieJar` and Bearer tokens via
+  `axum_extra::TypedHeader<Authorization<Bearer>>` (both used as extractor parameters in
+  `auth_middleware` / `csrf_middleware` / `openai_auth_middleware`). `Authorization<Bearer>`
+  decoding is syntax-only (scheme + non-empty token); all token validation is
+  `AuthService::verify_api_token`.
 - Frontend: `apiFetch` with 401 interceptor → `POST /api/auth/login` → `{loginUrl}` →
   redirect to Keycloak. Dedup via `loginPromise`.
 - Session TTL: session expiry comes from the refresh token's own `exp` claim when present;
@@ -480,8 +497,9 @@ write time — 400 on bad input.
 
 Domain types:
 - `domain/models/kb_index.rs` — `IndexType`, `KbIndex`, `KbIndexes::parse`.
-- `domain/models/search_filter.rs` — `SearchFilter`, `from_llm_value` (parses the tool
-  `filters` argument), `validate` (against a `KbIndexes`), `scope`.
+- `domain/models/search_filter.rs` — `SearchFilter`, `from_json_value` (parses the
+  `filters` argument of the LLM tools and the public KB search API),
+  `validate` (against a `KbIndexes`), `scope`.
 
 Qdrant: the chunk payload stores the document `metadata` as a structured object under
 the payload key `metadata` (NOT a JSON string); the indexable path is always
@@ -509,6 +527,29 @@ indexes truncate sub-seconds). Filters are applied to both hybrid-search prefetc
 The system prompt (`prompts/global_system.md`) lists each KB's "Filterable metadata
 fields".
 
+## Public KB API (`/api/kb`)
+
+Authenticated public surface for KB browsing and search (the internal API remains the
+management surface). Same public auth as `/api/chats` (cookie session or Bearer); nested
+inside the `protected` router in `routes.rs` (shared `csrf_middleware` + `auth_middleware`
+layers, no separate router).
+
+- `GET /api/kb/list` → `{ kbs: [{ id, name }] }`.
+- `GET /api/kb/{id}` → full KB: `id, name, description` (raw Tera), `renderedDescription`,
+  `public, metadata, language, indexes, createdAt, updatedAt`. 404 if absent; a
+  description render error is 500.
+- `POST /api/kb/search` — `{ queries, kbIds?, limit?, candidateLimit?, rerankerLimit?,
+  rerankerThreshold? }` → search all KBs (or the `kbIds` subset; unknown id → 400).
+- `POST /api/kb/search/{kbId}` — `{ queries, filters?, + the same limits }`; `filters`
+  are validated against the KB's indexes (400 with field-specific messages). 404 if
+  absent.
+- Search responses: flat `chunks[]` globally sorted by score desc, per-KB `limit` cap
+  (response size up to `limit × N_KB`); chunk fields: `id, kbId, kbName, documentId,
+  title, url, content, score, metadata, chunkIndex, chunkTotal, query` (`query` = the
+  query that yielded the chunk's max rerank score). Optional params fall back to the
+  `search.*` config defaults via `SearchParams::try_new`.
+- Handlers in `handlers/kb/` (`kb.rs` — list/get, `search.rs` — search) with their own
+  DTOs, not shared with the internal API.
 
 ## OpenAI-compatible API (`/api/openai/v1`)
 
@@ -517,10 +558,12 @@ Enabled by default; mounted only when `openai_api.enabled` is true
 (`CHIROO_OPENAI_API__ENABLED`), otherwise the routes 404.
 
 - Auth: OIDC access token via `Authorization: Bearer` (dedicated middleware
-  `middleware/openai_auth.rs`, NOT the cookie/CSRF middleware). No `sk-`/static
+  `openai_auth_middleware` in `middleware/auth.rs`, NOT the cookie/CSRF
+  middleware). No `sk-`/static
   keys. The token is verified against the JWKS (signature, issuer, `exp`) via
   `OidcClient`, and the user is resolved strictly by `users.sso_id = sub`
-  (`AuthService::verify_api_token` → `ApiPrincipal` in request extensions).
+  (`AuthService::verify_api_token` → `AuthUser (session_id: None)` in request
+  extensions).
   No session lookup, no refresh, no cookies. Unknown `sub` → 401.
 - Wire format: OpenAI shapes, snake_case (no camelCase renames). Errors use the
   OpenAI envelope `{"error": {message, type, param, code}}`; 401s carry

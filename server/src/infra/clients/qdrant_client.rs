@@ -1275,7 +1275,7 @@ mod tests {
         }))
         .expect("valid indexes");
 
-        let filter = SearchFilter::from_llm_value(&serde_json::json!({
+        let filter = SearchFilter::from_json_value(&serde_json::json!({
             "reporter": "alice",
             "count": { "gte": 10, "lte": 20 },
             "updated_at": { "gte": "2026-01-01T00:00:00Z" },

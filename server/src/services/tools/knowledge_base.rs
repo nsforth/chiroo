@@ -235,7 +235,7 @@ fn parse_queries(input: &Value) -> Result<Vec<String>, String> {
 fn parse_filters(input: &Value) -> Result<SearchFilter, String> {
     match input.get("filters") {
         None | Some(Value::Null) => Ok(SearchFilter::default()),
-        Some(v) => SearchFilter::from_llm_value(v).map_err(|e| e.to_string()),
+        Some(v) => SearchFilter::from_json_value(v).map_err(|e| e.to_string()),
     }
 }
 

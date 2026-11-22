@@ -27,7 +27,7 @@ pub struct SearchFilter {
 }
 
 impl SearchFilter {
-    pub fn from_llm_value(value: &Value) -> Result<Self, AppError> {
+    pub fn from_json_value(value: &Value) -> Result<Self, AppError> {
         let map = value
             .as_object()
             .ok_or_else(|| AppError::BadRequest("invalid filters: must be a JSON object".into()))?;
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn from_llm_value_scalar_is_eq() {
-        let filter = SearchFilter::from_llm_value(&json!({ "reporter": "alice" }))
+        let filter = SearchFilter::from_json_value(&json!({ "reporter": "alice" }))
             .expect("scalar must parse");
         assert_eq!(
             filter.conditions(),
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn from_llm_value_object_operators() {
-        let filter = SearchFilter::from_llm_value(&json!({
+        let filter = SearchFilter::from_json_value(&json!({
             "updated_at": {
                 "gte": "2026-01-01T00:00:00Z",
                 "lte": "2026-06-30T00:00:00Z",
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn from_llm_value_unknown_operator_rejected() {
-        let err = SearchFilter::from_llm_value(&json!({ "x": { "neq": 1 } }))
+        let err = SearchFilter::from_json_value(&json!({ "x": { "neq": 1 } }))
             .expect_err("unknown operator must be rejected");
         let msg = bad_request_message(err);
         assert!(msg.contains("\"x\""), "error must name the field: {msg}");
@@ -287,12 +287,12 @@ mod tests {
 
     #[test]
     fn from_llm_value_empty_operators_object_rejected() {
-        let err = SearchFilter::from_llm_value(&json!({ "reporter": {} }))
+        let err = SearchFilter::from_json_value(&json!({ "reporter": {} }))
             .expect_err("empty operators object must be rejected");
         let msg = bad_request_message(err);
         assert!(msg.contains("reporter"), "error must name the field: {msg}");
 
-        let err = SearchFilter::from_llm_value(&json!({ "a": { "eq": "x" }, "b": {} }))
+        let err = SearchFilter::from_json_value(&json!({ "a": { "eq": "x" }, "b": {} }))
             .expect_err("empty operators object alongside valid one must be rejected");
         let msg = bad_request_message(err);
         assert!(msg.contains("b"), "error must name the field: {msg}");
@@ -300,19 +300,19 @@ mod tests {
 
     #[test]
     fn from_llm_value_non_object_rejected() {
-        assert!(SearchFilter::from_llm_value(&json!(["x"])).is_err());
-        assert!(SearchFilter::from_llm_value(&json!("x")).is_err());
-        assert!(SearchFilter::from_llm_value(&json!(1)).is_err());
+        assert!(SearchFilter::from_json_value(&json!(["x"])).is_err());
+        assert!(SearchFilter::from_json_value(&json!("x")).is_err());
+        assert!(SearchFilter::from_json_value(&json!(1)).is_err());
     }
 
     #[test]
     fn from_llm_value_null_value_rejected() {
-        let err = SearchFilter::from_llm_value(&json!({ "x": null }))
+        let err = SearchFilter::from_json_value(&json!({ "x": null }))
             .expect_err("null value must be rejected");
         let msg = bad_request_message(err);
         assert!(msg.contains("\"x\""), "error must name the field: {msg}");
 
-        let err = SearchFilter::from_llm_value(&json!({ "x": { "eq": [1] } }))
+        let err = SearchFilter::from_json_value(&json!({ "x": { "eq": [1] } }))
             .expect_err("array value must be rejected");
         let msg = bad_request_message(err);
         assert!(msg.contains("\"x\""), "error must name the field: {msg}");
@@ -320,14 +320,14 @@ mod tests {
 
     #[test]
     fn from_llm_value_empty_object_is_empty() {
-        let filter = SearchFilter::from_llm_value(&json!({})).expect("empty object must parse");
+        let filter = SearchFilter::from_json_value(&json!({})).expect("empty object must parse");
         assert!(filter.is_empty());
     }
 
     #[test]
     fn validate_unknown_field_rejected() {
         let allowed = indexes(&json!({ "topic": { "type": "keyword" } }));
-        let mut filter = SearchFilter::from_llm_value(&json!({ "missing": "x" })).expect("parse");
+        let mut filter = SearchFilter::from_json_value(&json!({ "missing": "x" })).expect("parse");
         let err = filter
             .validate(&allowed)
             .expect_err("unknown field must be rejected");
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn validate_no_fields_in_kb_rejected() {
         let allowed = indexes(&json!({}));
-        let mut filter = SearchFilter::from_llm_value(&json!({ "x": 1 })).expect("parse");
+        let mut filter = SearchFilter::from_json_value(&json!({ "x": 1 })).expect("parse");
         let err = filter
             .validate(&allowed)
             .expect_err("field on empty KB must be rejected");
@@ -361,7 +361,7 @@ mod tests {
     fn validate_range_on_keyword_rejected() {
         let allowed = indexes(&json!({ "topic": { "type": "keyword" } }));
         let mut filter =
-            SearchFilter::from_llm_value(&json!({ "topic": { "gt": "x" } })).expect("parse");
+            SearchFilter::from_json_value(&json!({ "topic": { "gt": "x" } })).expect("parse");
         let err = filter
             .validate(&allowed)
             .expect_err("range on keyword must be rejected");
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn validate_uuid_format_checked() {
         let allowed = indexes(&json!({ "id": { "type": "uuid" } }));
-        let mut bad = SearchFilter::from_llm_value(&json!({ "id": "not-a-uuid" })).expect("parse");
+        let mut bad = SearchFilter::from_json_value(&json!({ "id": "not-a-uuid" })).expect("parse");
         let msg = bad_request_message(
             bad.validate(&allowed)
                 .expect_err("invalid uuid must be rejected"),
@@ -383,7 +383,7 @@ mod tests {
         assert!(msg.contains("\"id\""), "error must name the field: {msg}");
 
         let mut good =
-            SearchFilter::from_llm_value(&json!({ "id": "0f37c00d-9f18-45b9-b37c-3ab17f4b8b6a" }))
+            SearchFilter::from_json_value(&json!({ "id": "0f37c00d-9f18-45b9-b37c-3ab17f4b8b6a" }))
                 .expect("parse");
         assert!(good.validate(&allowed).is_ok());
     }
@@ -392,7 +392,7 @@ mod tests {
     fn validate_uppercase_uuid_normalized_to_lowercase() {
         let allowed = indexes(&json!({ "id": { "type": "uuid" } }));
         let mut filter =
-            SearchFilter::from_llm_value(&json!({ "id": "0F37C00D-9F18-45B9-B37C-3AB17F4B8B6A" }))
+            SearchFilter::from_json_value(&json!({ "id": "0F37C00D-9F18-45B9-B37C-3AB17F4B8B6A" }))
                 .expect("parse");
         filter
             .validate(&allowed)
@@ -407,14 +407,15 @@ mod tests {
     #[test]
     fn validate_datetime_format_checked() {
         let allowed = indexes(&json!({ "when": { "type": "datetime" } }));
-        let mut bad = SearchFilter::from_llm_value(&json!({ "when": "yesterday" })).expect("parse");
+        let mut bad =
+            SearchFilter::from_json_value(&json!({ "when": "yesterday" })).expect("parse");
         let msg = bad_request_message(
             bad.validate(&allowed)
                 .expect_err("invalid datetime must be rejected"),
         );
         assert!(msg.contains("\"when\""), "error must name the field: {msg}");
 
-        let mut good = SearchFilter::from_llm_value(&json!({ "when": "2026-01-01T00:00:00Z" }))
+        let mut good = SearchFilter::from_json_value(&json!({ "when": "2026-01-01T00:00:00Z" }))
             .expect("parse");
         assert!(good.validate(&allowed).is_ok());
     }
@@ -422,7 +423,7 @@ mod tests {
     #[test]
     fn validate_integer_rejects_float_value() {
         let allowed = indexes(&json!({ "count": { "type": "integer" } }));
-        let mut filter = SearchFilter::from_llm_value(&json!({ "count": 1.5 })).expect("parse");
+        let mut filter = SearchFilter::from_json_value(&json!({ "count": 1.5 })).expect("parse");
         let msg = bad_request_message(
             filter
                 .validate(&allowed)
@@ -433,7 +434,7 @@ mod tests {
             "error must name the field: {msg}"
         );
 
-        let mut good = SearchFilter::from_llm_value(&json!({ "count": 3 })).expect("parse");
+        let mut good = SearchFilter::from_json_value(&json!({ "count": 3 })).expect("parse");
         assert!(good.validate(&allowed).is_ok());
     }
 
@@ -447,7 +448,7 @@ mod tests {
             "when": { "type": "datetime" },
             "id": { "type": "uuid" },
         }));
-        let mut filter = SearchFilter::from_llm_value(&json!({
+        let mut filter = SearchFilter::from_json_value(&json!({
             "topic": "rust",
             "count": { "gte": 1, "lte": 10 },
             "ratio": { "gt": 0.5 },
@@ -461,7 +462,7 @@ mod tests {
 
     #[test]
     fn scope_drops_unknown_fields_and_fills_index_type() {
-        let filter = SearchFilter::from_llm_value(
+        let filter = SearchFilter::from_json_value(
             &json!({ "topic": "rust", "count": { "gte": 1 }, "other": 5 }),
         )
         .expect("parse");

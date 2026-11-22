@@ -5,11 +5,13 @@ use crate::handlers::chats::{
     create_chat, delete_chat, get_chat, get_chats, get_votes, send_message, update_title,
     update_visibility, vote,
 };
+use crate::handlers::kb::{get_kb, list_kbs, search_all, search_in_kb};
 use crate::handlers::localization::get_localizations;
 use crate::handlers::models::{get_scenario_icon, list_models};
+use crate::handlers::openai::openai_router;
 use crate::handlers::session::get_session;
 use crate::middleware::admin::admin_middleware;
-use crate::middleware::auth::auth_middleware;
+use crate::middleware::auth::{auth_middleware, openai_auth_middleware};
 use crate::middleware::csrf::csrf_middleware;
 use crate::AppState;
 use axum::{
@@ -31,6 +33,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/assets/{kind}", get(get_branding_asset));
 
     let chat_router = chat_router();
+    let kb_router = kb_router();
 
     let admin_router =
         Router::new()
@@ -45,6 +48,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/api/models", get(list_models))
         .route("/api/scenarios/{id}/icon", get(get_scenario_icon))
         .nest("/api/chats", chat_router)
+        .nest("/api/kb", kb_router)
         .nest("/api/admin", admin_router)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -56,9 +60,9 @@ pub fn app_router(state: AppState) -> Router {
         ));
 
     let openai_router = if state.config.openai_api_enabled() {
-        crate::handlers::openai::openai_router().route_layer(middleware::from_fn_with_state(
+        openai_router().route_layer(middleware::from_fn_with_state(
             state.clone(),
-            crate::middleware::openai_auth::openai_auth_middleware,
+            openai_auth_middleware,
         ))
     } else {
         Router::new()
@@ -87,6 +91,14 @@ fn chat_router() -> Router<AppState> {
         .route("/visibility/{id}", patch(update_visibility))
         .route("/votes/{id}", get(get_votes))
         .route("/votes/{id}", post(vote))
+}
+
+fn kb_router() -> Router<AppState> {
+    Router::new()
+        .route("/list", get(list_kbs))
+        .route("/{id}", get(get_kb))
+        .route("/search", post(search_all))
+        .route("/search/{kbId}", post(search_in_kb))
 }
 
 async fn root() -> &'static str {

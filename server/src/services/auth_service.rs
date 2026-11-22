@@ -6,7 +6,6 @@ use deadpool_diesel::postgres::Pool;
 use secrecy::{ExposeSecret, SecretBox};
 
 use crate::config::OidcConfig;
-use crate::domain::models::api_principal::ApiPrincipal;
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::session::ProviderSessionId;
 use crate::domain::models::user::User;
@@ -98,7 +97,7 @@ impl AuthService {
                     {
                         Ok(Some(session)) => AuthResult::Valid(AuthUser {
                             user_id: session.user_id,
-                            session_id: session.id.0.to_string(),
+                            session_id: Some(session.id.0.to_string()),
                         }),
                         _ => AuthResult::Invalid,
                     }
@@ -121,11 +120,11 @@ impl AuthService {
         result
     }
 
-    /// Verify an OIDC access token presented as a Bearer credential for the
-    /// OpenAI-compatible API. Resolves the user strictly by `users.sso_id = sub`.
-    /// No session lookup, no refresh, no cookies.
+    /// Verify a stateless Bearer credential (OpenAI-compatible and public API).
+    /// Resolves the user strictly by `users.sso_id = sub`. No session lookup,
+    /// no refresh, no cookies: the returned `AuthUser` has no `session_id`.
     #[instrument(skip(self, token))]
-    pub async fn verify_api_token(&self, token: &SecretBox<str>) -> Result<ApiPrincipal, AppError> {
+    pub async fn verify_api_token(&self, token: &SecretBox<str>) -> Result<AuthUser, AppError> {
         let client = self.get_client().await?;
         let claims = match client.verify_access_token(token).await {
             TokenStatus::Valid(claims) => claims,
@@ -135,7 +134,10 @@ impl AuthService {
             .await?
             .map(Into::into)
             .ok_or_else(|| AppError::Unauthorized)?;
-        let result = Ok(ApiPrincipal { user_id: user.id });
+        let result = Ok(AuthUser {
+            user_id: user.id,
+            session_id: None,
+        });
         match &result {
             Ok(_) => info!(status = result.status()),
             Err(e) => info!(error = e.to_string(), status = result.status()),
@@ -196,7 +198,7 @@ impl AuthService {
 
         let auth_user = AuthUser {
             user_id: session.user_id,
-            session_id: session.id.0.to_string(),
+            session_id: Some(session.id.0.to_string()),
         };
 
         info!(status = "success");
@@ -242,7 +244,7 @@ impl AuthService {
 
         let auth_user = AuthUser {
             user_id: session.user_id,
-            session_id: session.id.0.to_string(),
+            session_id: Some(session.id.0.to_string()),
         };
 
         Ok((result.access_token, auth_user))

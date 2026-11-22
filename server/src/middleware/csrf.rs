@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use axum_extra::extract::cookie::CookieJar;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,6 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
-use crate::utils::extract_cookie;
 use crate::AppState;
 
 const CSRF_COOKIE_NAME: &str = "csrf-token";
@@ -58,48 +58,59 @@ fn is_mutating(method: &Method) -> bool {
     )
 }
 
-pub async fn csrf_middleware(
-    State(state): State<AppState>,
-    request: axum::extract::Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    if !is_mutating(request.method()) {
-        return Ok(next.run(request).await);
-    }
+/// Returns `true` when the request passes the CSRF check: the `csrf-token`
+/// cookie and the `x-csrf-token` header carry the same JWT, the JWT verifies
+/// with the OIDC state secret, and its `sid` matches the `AuthUser` session.
+fn check_csrf(state: &AppState, jar: &CookieJar, request: &axum::extract::Request) -> bool {
+    let cookie_token = match jar.get(CSRF_COOKIE_NAME) {
+        Some(c) => c.value().to_string(),
+        None => return false,
+    };
 
-    let cookie_token = extract_cookie(request.headers(), CSRF_COOKIE_NAME);
-    let header_token = request
+    let header_token = match request
         .headers()
         .get(CSRF_HEADER_NAME)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    let cookie_token = match cookie_token {
+        .map(|s| s.to_string())
+    {
         Some(t) => t,
-        None => return Ok(unauthorized_response()),
-    };
-
-    let header_token = match header_token {
-        Some(t) => t,
-        None => return Ok(unauthorized_response()),
+        None => return false,
     };
 
     if cookie_token != header_token {
-        return Ok(unauthorized_response());
+        return false;
     }
 
     let secret: &str = state.config.oidc_config().state_secret().expose_secret();
     let claims = match verify_csrf_token(&cookie_token, secret) {
         Ok(c) => c,
-        Err(_) => return Ok(unauthorized_response()),
+        Err(_) => return false,
     };
 
-    let auth_user = request.extensions().get::<AuthUser>();
+    request
+        .extensions()
+        .get::<AuthUser>()
+        .is_some_and(|user| user.session_id.as_deref() == Some(claims.sid.as_str()))
+}
 
-    match auth_user {
-        Some(user) if user.session_id == claims.sid => Ok(next.run(request).await),
-        _ => return Ok(unauthorized_response()),
+/// CSRF protection, applied after authentication. Only requests attached to
+/// a server session (the cookie path) are enforced: stateless requests
+/// (Bearer tokens) skip the check entirely, since a cross-site origin cannot
+/// forge the `Authorization` header, so there is nothing to protect against.
+pub async fn csrf_middleware(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let bound_to_session = request
+        .extensions()
+        .get::<AuthUser>()
+        .is_some_and(|user| user.session_id.is_some());
+    if bound_to_session && is_mutating(request.method()) && !check_csrf(&state, &jar, &request) {
+        return unauthorized_response();
     }
+    next.run(request).await
 }
 
 fn unauthorized_response() -> Response {
