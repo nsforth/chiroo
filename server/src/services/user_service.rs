@@ -169,23 +169,26 @@ mod integration {
         let service = make_service(&pool);
         let sso_id = format!("test-{}", Uuid::new_v4());
 
+        let uname = format!("jane-{}", sso_id);
+        let renamed = format!("jane-doe-{}", sso_id);
+
         let user = service
             .create_user(
                 &sso_id,
                 "oidc",
-                "jane",
+                &uname,
                 Some("Jane Doe"),
                 Some("jane@example.com"),
             )
             .await
             .expect("create_user");
-        assert_eq!(user.username, "jane");
+        assert_eq!(user.username, uname);
         assert_eq!(user.name.as_deref(), Some("Jane Doe"));
         assert_eq!(user.email.as_deref(), Some("jane@example.com"));
         assert!(!user.admin, "create_user must create a non-admin");
 
         let updated = service
-            .create_user(&sso_id, "oidc", "jane-doe", None, None)
+            .create_user(&sso_id, "oidc", &renamed, None, None)
             .await
             .expect("upsert");
         assert_eq!(
@@ -193,7 +196,7 @@ mod integration {
             "upsert should keep the same user id"
         );
         assert_eq!(
-            updated.username, "jane-doe",
+            updated.username, renamed,
             "second call should update username"
         );
         assert_eq!(updated.name, None, "second call should update name");
@@ -203,7 +206,7 @@ mod integration {
         assert!(elevated.admin, "set_admin must grant admin access");
 
         let after_upsert = service
-            .create_user(&sso_id, "oidc", "jane-doe", None, None)
+            .create_user(&sso_id, "oidc", &renamed, None, None)
             .await
             .expect("upsert after elevation");
         assert!(
@@ -232,7 +235,7 @@ mod integration {
         let sso_id = format!("test-{}", Uuid::new_v4());
 
         let user = service
-            .create_user(&sso_id, "oidc", "jane", None, None)
+            .create_user(&sso_id, "oidc", &format!("keep-{}", sso_id), None, None)
             .await
             .expect("create_user");
 
@@ -273,7 +276,7 @@ mod integration {
         let sso_id = format!("test-{}", Uuid::new_v4());
 
         let user = service
-            .create_user(&sso_id, "oidc", "jane", None, None)
+            .create_user(&sso_id, "oidc", &format!("purge-{}", sso_id), None, None)
             .await
             .expect("create_user");
 

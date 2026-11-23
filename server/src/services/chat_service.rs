@@ -316,8 +316,8 @@ mod integration {
 
         assert_eq!(
             chat.title.as_deref(),
-            Some("A much longer f..."),
-            "title should be the first 15 chars plus ellipsis"
+            Some("A much longer first message than fifteen character..."),
+            "title should be the first 50 chars plus ellipsis"
         );
 
         service
