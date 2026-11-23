@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useStorage } from '@vueuse/core'
 import { apiFetch } from '../api'
 import { useChats } from '../composables/useChats'
+import { useChatDraft } from '../composables/useChatDraft'
 import { useCsrf } from '../composables/useCsrf'
 import { useUserSession } from '../composables/useUserSession'
 import Navbar from '../components/Navbar.vue'
@@ -19,7 +20,7 @@ const model = useStorage<string>('model', 'simple')
 const { user } = useUserSession()
 const toast = useToast()
 const { t } = useI18n()
-const input = ref('')
+const { input, submit, commit, restore } = useChatDraft('draft.new-chat')
 const loading = ref(false)
 const router = useRouter()
 
@@ -35,7 +36,6 @@ const greeting = computed(() => {
 })
 
 async function createChat(prompt: string) {
-  input.value = prompt
   loading.value = true
   try {
     const data: unknown = await apiFetch('/api/chats', {
@@ -46,9 +46,11 @@ async function createChat(prompt: string) {
     const parsed = chatListItemSchema.safeParse(data)
     if (!parsed.success) throw new Error('invalid response')
 
+    commit()
     await fetchChats()
     router.push(`/chat/${parsed.data.id}`)
   } catch {
+    restore()
     toast.add({
       description: t('errors.failedToCreateChat'),
       icon: 'i-lucide-alert-circle',
@@ -60,7 +62,10 @@ async function createChat(prompt: string) {
 }
 
 function onSubmit() {
-  createChat(input.value)
+  if (loading.value) return
+  const text = submit()
+  if (text === null) return
+  void createChat(text)
 }
 </script>
 
@@ -90,7 +95,6 @@ function onSubmit() {
 
         <UChatPrompt
           v-model="input"
-          :status="loading ? 'streaming' : 'ready'"
           :placeholder="t('placeholders.chatInputPrompt')"
           class="[view-transition-name:chat-prompt]"
           variant="subtle"
@@ -102,6 +106,7 @@ function onSubmit() {
               <ModelSelect v-model="model" />
 
               <UChatPromptSubmit
+                :status="loading ? 'streaming' : 'ready'"
                 color="neutral"
                 size="sm"
               />

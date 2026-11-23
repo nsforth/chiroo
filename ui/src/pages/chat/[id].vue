@@ -6,6 +6,7 @@ import { DefaultChatTransport } from 'ai'
 import type { UIMessage } from 'ai'
 import { useI18n } from 'vue-i18n'
 import { useChats } from '../../composables/useChats'
+import { useChatDraft } from '../../composables/useChatDraft'
 import { useCsrf } from '../../composables/useCsrf'
 import { useNotifications } from '../../composables/useNotifications'
 import { useUserSession } from '../../composables/useUserSession'
@@ -57,7 +58,7 @@ if (isOwner.value) {
   }).catch(() => {})
 }
 
-const input = ref('')
+const { input, submit, commit, restore } = useChatDraft(`draft.chat.${route.params.id}`)
 
 const chat = new Chat({
   id: data?.id,
@@ -109,14 +110,23 @@ const chat = new Chat({
   }
 })
 
+// sendMessage swallows request errors into onError/chat.error; the message is
+// only lost when the POST itself failed (the stream never started).
+let streamStarted = false
+watch(() => chat.status, (status) => {
+  if (status === 'streaming') streamStarted = true
+})
+
 function handleSubmit(e: Event) {
   e.preventDefault()
-  if (input.value.trim()) {
-    chat.sendMessage({
-      text: input.value
-    })
-    input.value = ''
-  }
+  if (chat.status === 'submitted' || chat.status === 'streaming') return
+  const text = submit()
+  if (text === null) return
+  streamStarted = false
+  void chat.sendMessage({ text }).then(() => {
+    if (chat.error && !streamStarted) restore()
+    else commit()
+  })
 }
 
 const statusVisible = computed(() => isStreamingStatusVisible(chat.status))

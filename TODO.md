@@ -212,6 +212,14 @@ same second). Needs a decision: truncate at document save (only fields declared 
 `indexes`), truncate/validate filter values, and keep DB metadata ↔ Qdrant payload consistent
 on reindex — currently they can drift.
 
+### Cleanup of stale `draft.chat.*` localStorage keys
+
+Chat input drafts are stored per chat (`useChatDraft`, keys `draft.new-chat` and
+`draft.chat.<chatId>`). A successful submit clears the key, but drafts that were never
+sent (and keys of deleted chats) linger in localStorage. Add a light cleanup (e.g. prune
+keys whose chat id is no longer in the chat list, or keep the last N drafts by write
+time). Deferred — implement only if accumulation becomes noticeable.
+
 ---
 
 ## Testing
