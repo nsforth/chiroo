@@ -1,8 +1,12 @@
 use async_openai::types::chat::{
-    ChatCompletionToolChoiceOption, ReasoningEffort, ToolChoiceOptions,
+    ChatCompletionNamedToolChoice, ChatCompletionToolChoiceOption, FunctionName, ReasoningEffort,
+    ToolChoiceOptions,
 };
 
-use crate::domain::models::sampling::{SamplingParams, SamplingPreset};
+use crate::{
+    domain::models::sampling::{SamplingParams, SamplingPreset},
+    services::scenarios::all_tools,
+};
 
 use super::{RoundDefinition, ScenarioDefinition};
 
@@ -13,13 +17,17 @@ pub fn deep_research() -> ScenarioDefinition {
         rounds: vec![
             RoundDefinition {
                 prompt_template: "deep_research/search.md".into(),
-                tool_names: vec!["search_in_all_kbs".into()],
+                tool_names: all_tools(),
                 max_llm_calls: 1,
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 sampling: SamplingParams::default(),
                 extra_body: None,
-                tool_choice: Some(ChatCompletionToolChoiceOption::Mode(
-                    ToolChoiceOptions::Required,
+                tool_choice: Some(ChatCompletionToolChoiceOption::Function(
+                    ChatCompletionNamedToolChoice {
+                        function: FunctionName {
+                            name: "search_in_all_kbs".into(),
+                        },
+                    },
                 )),
                 enable_thinking: true,
                 preserve_thinking: true,
@@ -27,11 +35,7 @@ pub fn deep_research() -> ScenarioDefinition {
             },
             RoundDefinition {
                 prompt_template: "deep_research/explore.md".into(),
-                tool_names: vec![
-                    "search_in_all_kbs".into(),
-                    "search_in_kb".into(),
-                    "extract_document".into(),
-                ],
+                tool_names: all_tools(),
                 max_llm_calls: 10,
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 sampling: SamplingParams::default(),
@@ -45,7 +49,7 @@ pub fn deep_research() -> ScenarioDefinition {
             },
             RoundDefinition {
                 prompt_template: "deep_research/answer.md".into(),
-                tool_names: vec![],
+                tool_names: all_tools(),
                 max_llm_calls: 1,
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 sampling: SamplingParams::default(),

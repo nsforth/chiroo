@@ -871,9 +871,28 @@ async fn run_one_llm_call(
                                 completed_tools: result.completed_tools,
                                 usage: None,
                             },
-                            FinishReason::Stop => StepResult::Stop {
-                                message: result.message,
-                                usage: None,
+                            FinishReason::Stop => {
+                                // Classify by content, not by the reported reason. A
+                                // forced named-function `tool_choice` is finalized with
+                                // finish_reason "stop" while the response still carries
+                                // the tool call — this is vLLM's intentional
+                                // OpenAI-compatibility behavior (vllm-project/vllm#25054),
+                                // where OpenAI itself historically reported "stop" for
+                                // named tool choice. Whether the label is "stop" or
+                                // "tool_calls", a response with tool calls means the
+                                // tools must be executed, so route it to ToolCalls.
+                                if result.completed_tools.is_empty() {
+                                    StepResult::Stop {
+                                        message: result.message,
+                                        usage: None,
+                                    }
+                                } else {
+                                    StepResult::ToolCalls {
+                                        message: result.message,
+                                        completed_tools: result.completed_tools,
+                                        usage: None,
+                                    }
+                                }
                             },
                             _ => {
                                 let reason_str = format!("{reason:?}");

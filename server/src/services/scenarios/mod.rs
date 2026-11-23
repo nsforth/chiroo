@@ -131,6 +131,19 @@ pub fn create_tools(
         .collect()
 }
 
+/// The full known tool set, shared by every round of every scenario.
+///
+/// The `tools` array is rendered into the prompt's system block, so keeping it
+/// constant across rounds and scenarios lets the provider's prefix cache survive
+/// round boundaries. Per-round tool access is controlled via `tool_choice` (not
+/// rendered, no cache impact).
+pub fn all_tools() -> Vec<String> {
+    TOOL_PROJECTOR_NAMES
+        .iter()
+        .map(|name| name.to_string())
+        .collect()
+}
+
 /// One instance per known tool name, used to project stored tool outputs for the LLM.
 pub fn create_tool_projectors(
     search_service: &SearchService,
@@ -260,10 +273,12 @@ mod tests {
     }
 
     #[test]
-    fn simple_round_1_is_search() {
+    fn simple_round_1_forces_search_tool() {
         let scenario = simple();
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "simple/search.md");
+        // All rounds share the same tool set to keep the provider prefix
+        // cache warm across round boundaries; access is limited via tool_choice.
         assert!(r1.tool_names.contains(&"search_in_all_kbs".into()));
         assert_eq!(r1.reasoning_effort, Some(ReasoningEffort::None));
         assert_eq!(r1.max_llm_calls, 1);
@@ -274,15 +289,19 @@ mod tests {
         assert_eq!(
             r1.tool_choice,
             Some(
-                async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
-                    async_openai::types::chat::ToolChoiceOptions::Required
+                async_openai::types::chat::ChatCompletionToolChoiceOption::Function(
+                    async_openai::types::chat::ChatCompletionNamedToolChoice {
+                        function: async_openai::types::chat::FunctionName {
+                            name: "search_in_all_kbs".to_string(),
+                        }
+                    }
                 )
             )
         );
     }
 
     #[test]
-    fn simple_round_2_is_extract() {
+    fn simple_round_2_forces_extract_tool() {
         let scenario = simple();
         let r2 = &scenario.rounds[1];
         assert_eq!(r2.prompt_template, "simple/extract.md");
@@ -293,19 +312,24 @@ mod tests {
         assert_eq!(
             r2.tool_choice,
             Some(
-                async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
-                    async_openai::types::chat::ToolChoiceOptions::Required
+                async_openai::types::chat::ChatCompletionToolChoiceOption::Function(
+                    async_openai::types::chat::ChatCompletionNamedToolChoice {
+                        function: async_openai::types::chat::FunctionName {
+                            name: "extract_document".to_string(),
+                        }
+                    }
                 )
             )
         );
     }
 
     #[test]
-    fn simple_round_3_is_answer_no_tools() {
+    fn simple_round_3_is_answer_no_tool_calls() {
         let scenario = simple();
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "simple/answer.md");
-        assert!(r3.tool_names.is_empty());
+        // Tools stay listed (for prefix-cache stability) but `none` forbids calls.
+        assert!(!r3.tool_names.is_empty());
         assert_eq!(r3.reasoning_effort, Some(ReasoningEffort::None));
         assert!(!r3.hidden);
         assert_eq!(
@@ -319,6 +343,15 @@ mod tests {
     }
 
     #[test]
+    fn simple_all_rounds_share_the_same_tool_set() {
+        let scenario = simple();
+        let all = all_tools();
+        for round in &scenario.rounds {
+            assert_eq!(round.tool_names, all);
+        }
+    }
+
+    #[test]
     fn deep_research_scenario_has_three_rounds() {
         let scenario = deep_research();
         assert_eq!(scenario.name, "deep_research");
@@ -326,11 +359,20 @@ mod tests {
     }
 
     #[test]
-    fn deep_research_round_1_is_mandatory_search() {
+    fn deep_research_round_1_forces_search_tool() {
         let scenario = deep_research();
         let r1 = &scenario.rounds[0];
         assert_eq!(r1.prompt_template, "deep_research/search.md");
-        assert_eq!(r1.tool_names, vec!["search_in_all_kbs"]);
+        // All rounds share the same tool set to keep the provider prefix
+        // cache warm across round boundaries; access is limited via tool_choice.
+        assert_eq!(
+            r1.tool_names,
+            vec![
+                "search_in_all_kbs".to_string(),
+                "search_in_kb".to_string(),
+                "extract_document".to_string(),
+            ]
+        );
         assert!(r1.reasoning_effort.is_some());
         assert_eq!(r1.max_llm_calls, 1);
         assert!(r1.enable_thinking);
@@ -339,11 +381,28 @@ mod tests {
         assert_eq!(
             r1.tool_choice,
             Some(
-                async_openai::types::chat::ChatCompletionToolChoiceOption::Mode(
-                    async_openai::types::chat::ToolChoiceOptions::Required
+                async_openai::types::chat::ChatCompletionToolChoiceOption::Function(
+                    async_openai::types::chat::ChatCompletionNamedToolChoice {
+                        function: async_openai::types::chat::FunctionName {
+                            name: "search_in_all_kbs".to_string(),
+                        }
+                    }
                 )
             )
         );
+    }
+
+    #[test]
+    fn deep_research_all_rounds_share_the_same_tool_set() {
+        let scenario = deep_research();
+        let all = vec![
+            "search_in_all_kbs".to_string(),
+            "search_in_kb".to_string(),
+            "extract_document".to_string(),
+        ];
+        for round in &scenario.rounds {
+            assert_eq!(round.tool_names, all);
+        }
     }
 
     #[test]
@@ -361,11 +420,12 @@ mod tests {
     }
 
     #[test]
-    fn deep_research_round_3_is_answer_no_tools() {
+    fn deep_research_round_3_is_answer_no_tool_calls() {
         let scenario = deep_research();
         let r3 = &scenario.rounds[2];
         assert_eq!(r3.prompt_template, "deep_research/answer.md");
-        assert!(r3.tool_names.is_empty());
+        // Tools stay listed (for prefix-cache stability) but `none` forbids calls.
+        assert!(!r3.tool_names.is_empty());
         assert!(!r3.hidden);
         assert_eq!(
             r3.tool_choice,
