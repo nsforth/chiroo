@@ -3,7 +3,7 @@ info:
   title: Chiroo Public API
   version: 1.0.0
   description: |
-    Public API served by the main server (default `http://localhost:3000`).
+    Public API served by the main server (default `http://localhost:5173`).
 
     Authentication:
 
@@ -26,8 +26,7 @@ info:
   license:
     name: MIT
 servers:
-  - url: http://localhost:3000
-  - url: http://localhost:5173
+  - url: __CHIROO_PUBLIC_URL__
 
 tags:
   - name: health
