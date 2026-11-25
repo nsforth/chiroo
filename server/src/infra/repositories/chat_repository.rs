@@ -22,6 +22,7 @@ pub struct ChatDb {
     pub title: Option<String>,
     pub owner: Uuid,
     pub public: bool,
+    pub search_config: Option<serde_json::Value>,
     pub created_at: NaiveDateTime,
 }
 
@@ -30,13 +31,19 @@ pub struct ChatDb {
 pub struct NewChatDb {
     pub title: Option<String>,
     pub owner: Uuid,
+    pub search_config: Option<serde_json::Value>,
 }
 
 impl NewChatDb {
-    pub fn new(owner_id: Uuid, title: Option<String>) -> Self {
+    pub fn new(
+        owner_id: Uuid,
+        title: Option<String>,
+        search_config: Option<serde_json::Value>,
+    ) -> Self {
         NewChatDb {
             owner: owner_id,
             title,
+            search_config,
         }
     }
 }
@@ -196,6 +203,9 @@ impl Into<Chat> for ChatDb {
             title: self.title,
             owner: UserId(self.owner),
             public: self.public,
+            search_config: self
+                .search_config
+                .and_then(|v| serde_json::from_value(v).ok()),
             created_at: self.created_at,
         }
     }

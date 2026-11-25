@@ -44,6 +44,7 @@ pub async fn create_chat_completion(
             history,
             converted.client_system,
             auth_user.user_id,
+            state.ai_service.search_params(),
         )
         .await
     {

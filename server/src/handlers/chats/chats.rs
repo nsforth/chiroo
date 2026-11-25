@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::models::auth_user::AuthUser;
 use crate::domain::models::chat::{Chat, ChatId};
+use crate::domain::models::chat_search_config::ChatSearchConfig;
 use crate::domain::models::scenario::Scenario;
 use crate::domain::models::user::UserId;
 use crate::errors::AppError;
@@ -20,6 +21,8 @@ pub struct CreateChatRequest {
     #[serde(rename = "firstMessage")]
     pub first_message: Option<String>,
     pub model: String,
+    #[serde(rename = "searchConfig")]
+    pub search_config: Option<ChatSearchConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,7 +123,12 @@ pub async fn create_chat(
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
     let chat = state
         .chat_service
-        .create_chat(new_chat.first_message, new_chat.model, auth_user.user_id)
+        .create_chat(
+            new_chat.first_message,
+            new_chat.model,
+            auth_user.user_id,
+            new_chat.search_config,
+        )
         .await?;
     Ok(Json(From::from(&chat)))
 }

@@ -134,13 +134,14 @@ async fn search_one_query(
         async move {
             let scoped = filters.scope(&kb.indexes);
             let chunks = client
-                .search_hybrid(
+                .search(
                     &kb_id,
                     dense_vector,
                     &query,
                     params.candidate_limit,
                     language.as_deref(),
                     Some(&scoped),
+                    params.mode,
                 )
                 .await?;
             // The dense and BM25 prefetches can both return the same point.

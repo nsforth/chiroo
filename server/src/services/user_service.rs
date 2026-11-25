@@ -241,7 +241,7 @@ mod integration {
 
         let chat = chat_repository::insert(
             &pool,
-            chat_repository::NewChatDb::new(user.id.0, Some("Chat".into())),
+            chat_repository::NewChatDb::new(user.id.0, Some("Chat".into()), None),
         )
         .await
         .expect("insert chat");
@@ -282,7 +282,7 @@ mod integration {
 
         let chat = chat_repository::insert(
             &pool,
-            chat_repository::NewChatDb::new(user.id.0, Some("Chat".into())),
+            chat_repository::NewChatDb::new(user.id.0, Some("Chat".into()), None),
         )
         .await
         .expect("insert chat");

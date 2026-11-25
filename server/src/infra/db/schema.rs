@@ -4,6 +4,7 @@ diesel::table! {
         title -> Nullable<Varchar>,
         owner -> Uuid,
         public -> Bool,
+        search_config -> Nullable<Json>,
         created_at -> Timestamptz,
     }
 }

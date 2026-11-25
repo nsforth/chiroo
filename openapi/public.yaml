@@ -1080,6 +1080,44 @@ components:
         firstMessage:
           type: string
           description: Initial user message; starts the first scenario when set
+        searchConfig:
+          $ref: "#/components/schemas/ChatSearchConfig"
+    ChatSearchConfig:
+      type: object
+      description: >
+        Per-chat search overrides for the knowledge-base search tools. Every
+        field is optional; unset fields fall back to the server-wide
+        `search.*` configuration defaults. Stored on the chat and used for all
+        searches while the chat exists.
+      properties:
+        mode:
+          type: string
+          enum: [hybrid, semantic, lexical]
+          description: >
+            Retrieval mode. `hybrid` = dense + BM25 fused with RRF (default),
+            `semantic` = dense vector search only, `lexical` = BM25 search only.
+        limit:
+          type: integer
+          minimum: 1
+          description: Final per-knowledge-base result cap
+        candidateLimit:
+          type: integer
+          minimum: 1
+          description: Candidate prefetch size per (query, knowledge base)
+        rerankerLimit:
+          type: integer
+          minimum: 1
+          description: Number of candidates passed to the reranker
+        rerankerThreshold:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: Minimum reranker score to keep a chunk
+        rerank:
+          type: boolean
+          description: >
+            Run the reranker. `false` skips it: chunks keep their hybrid
+            (RRF) score and the threshold is ignored.
     ChatDetailResponse:
       type: object
       required: [id, userId, visibility, createdAt, model, messages, isOwner]

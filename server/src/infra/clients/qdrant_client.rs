@@ -19,6 +19,7 @@ use serde_json::Value;
 use tracing::{debug, instrument};
 use uuid::Uuid;
 
+use crate::domain::models::chat_search_config::SearchMode;
 use crate::domain::models::document::DocumentId;
 use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId, SearchedChunk};
 use crate::domain::models::kb_index::{IndexType, KbIndexes};
@@ -445,8 +446,12 @@ impl QdrantClient {
         Ok(results)
     }
 
+    /// Search a KB collection. `mode` selects the retrieval leg(s):
+    /// `Hybrid` runs a dense + BM25 prefetch fused with RRF, `Semantic` runs a
+    /// dense-only nearest query on the default vector, `Lexical` runs a BM25-only
+    /// nearest query on the sparse vector.
     #[instrument(level = "debug", skip(self, dense_vector))]
-    pub async fn search_hybrid(
+    pub async fn search(
         &self,
         kb_id: &KnowledgeBaseId,
         dense_vector: Vec<f32>,
@@ -454,48 +459,70 @@ impl QdrantClient {
         limit: u64,
         language: Option<&str>,
         filter: Option<&SearchFilter>,
+        mode: SearchMode,
     ) -> Result<Vec<SearchedChunk>, AppError> {
         let name = self.collection_name(kb_id);
 
         let qfilter: Option<Filter> = filter.filter(|f| !f.is_empty()).map(build_search_filter);
 
-        let mut dense_prefetch = PrefetchQueryBuilder::default()
-            .query(dense_vector)
-            .limit(limit);
-
-        let bm25_doc = bm25_document(query_text, language);
-
-        let bm25_vector_input = qdrant_client::qdrant::VectorInput {
-            variant: Some(qdrant_client::qdrant::vector_input::Variant::Document(
-                bm25_doc,
-            )),
-        };
-        let bm25_query = qdrant_client::qdrant::Query {
-            variant: Some(qdrant_client::qdrant::query::Variant::Nearest(
-                bm25_vector_input,
-            )),
+        let bm25_query = || {
+            let bm25_doc = bm25_document(query_text, language);
+            let bm25_vector_input = qdrant_client::qdrant::VectorInput {
+                variant: Some(qdrant_client::qdrant::vector_input::Variant::Document(
+                    bm25_doc,
+                )),
+            };
+            qdrant_client::qdrant::Query {
+                variant: Some(qdrant_client::qdrant::query::Variant::Nearest(
+                    bm25_vector_input,
+                )),
+            }
         };
 
-        let mut sparse_prefetch = PrefetchQueryBuilder::default()
-            .query(bm25_query)
-            .using(SPARSE_VECTOR_NAME.to_string())
-            .limit(limit);
+        // Hybrid filters each prefetch; the single-leg modes filter the
+        // top-level query.
+        let builder = match mode {
+            SearchMode::Hybrid => {
+                let mut dense_prefetch = PrefetchQueryBuilder::default()
+                    .query(dense_vector)
+                    .limit(limit);
 
-        if let Some(qfilter) = qfilter {
-            dense_prefetch = dense_prefetch.filter(qfilter.clone());
-            sparse_prefetch = sparse_prefetch.filter(qfilter);
-        }
+                let mut sparse_prefetch = PrefetchQueryBuilder::default()
+                    .query(bm25_query())
+                    .using(SPARSE_VECTOR_NAME.to_string())
+                    .limit(limit);
 
-        let response = self
-            .client
-            .query(
+                if let Some(qfilter) = &qfilter {
+                    dense_prefetch = dense_prefetch.filter(qfilter.clone());
+                    sparse_prefetch = sparse_prefetch.filter(qfilter.clone());
+                }
+
                 QueryPointsBuilder::new(&name)
                     .add_prefetch(dense_prefetch)
                     .add_prefetch(sparse_prefetch)
                     .query(Fusion::Rrf)
-                    .with_payload(true)
-                    .limit(limit),
-            )
+            },
+            SearchMode::Semantic => {
+                let mut builder = QueryPointsBuilder::new(&name).query(dense_vector);
+                if let Some(qfilter) = qfilter {
+                    builder = builder.filter(qfilter);
+                }
+                builder
+            },
+            SearchMode::Lexical => {
+                let mut builder = QueryPointsBuilder::new(&name)
+                    .query(bm25_query())
+                    .using(SPARSE_VECTOR_NAME.to_string());
+                if let Some(qfilter) = qfilter {
+                    builder = builder.filter(qfilter);
+                }
+                builder
+            },
+        };
+
+        let response = self
+            .client
+            .query(builder.with_payload(true).limit(limit))
             .await
             .map_err(|e| {
                 let msg = e.to_string();
@@ -854,6 +881,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::QdrantClient;
+    use crate::domain::models::chat_search_config::SearchMode;
     use crate::domain::models::document::DocumentId;
     use crate::domain::models::document_chunk::{DocumentChunk, DocumentChunkId};
     use crate::domain::models::kb_index::{IndexType, KbIndexes};
@@ -961,13 +989,14 @@ mod tests {
             .expect("upsert chunks");
 
         let results = client
-            .search_hybrid(
+            .search(
                 &kb_id,
                 small_embedding(0.8),
                 "largest non-negative integer",
                 5,
                 None,
                 None,
+                SearchMode::Hybrid,
             )
             .await
             .expect("search hybrid");
@@ -1060,7 +1089,15 @@ mod tests {
             .expect("delete chunks");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "chunk", 5, None, None)
+            .search(
+                &kb_id,
+                small_embedding(0.5),
+                "chunk",
+                5,
+                None,
+                None,
+                SearchMode::Hybrid,
+            )
             .await
             .expect("search");
 
@@ -1100,7 +1137,15 @@ mod tests {
             .expect("delete by document");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.3), "chunk", 10, None, None)
+            .search(
+                &kb_id,
+                small_embedding(0.3),
+                "chunk",
+                10,
+                None,
+                None,
+                SearchMode::Hybrid,
+            )
             .await
             .expect("search");
 
@@ -1171,7 +1216,15 @@ mod tests {
             .expect("create collection");
 
         let results = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None, None)
+            .search(
+                &kb_id,
+                small_embedding(0.5),
+                "anything",
+                5,
+                None,
+                None,
+                SearchMode::Hybrid,
+            )
             .await
             .expect("search on empty collection");
 
@@ -1193,7 +1246,15 @@ mod tests {
         let client = make_client("search_nonexistent");
 
         let result = client
-            .search_hybrid(&kb_id, small_embedding(0.5), "anything", 5, None, None)
+            .search(
+                &kb_id,
+                small_embedding(0.5),
+                "anything",
+                5,
+                None,
+                None,
+                SearchMode::Hybrid,
+            )
             .await;
 
         assert!(

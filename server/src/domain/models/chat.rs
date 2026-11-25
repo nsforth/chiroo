@@ -1,3 +1,4 @@
+use crate::domain::models::chat_search_config::ChatSearchConfig;
 use crate::domain::models::user::UserId;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -11,5 +12,6 @@ pub struct Chat {
     pub title: Option<String>,
     pub owner: UserId,
     pub public: bool,
+    pub search_config: Option<ChatSearchConfig>,
     pub created_at: NaiveDateTime,
 }

@@ -1,4 +1,5 @@
 use crate::domain::models::chat::{Chat, ChatId};
+use crate::domain::models::chat_search_config::ChatSearchConfig;
 use crate::domain::models::messages::Message;
 use crate::domain::models::scenario::{Scenario, ScenarioStatus};
 use crate::domain::models::user::UserId;
@@ -54,17 +55,20 @@ impl ChatService {
         result
     }
 
-    /// Create a new chat with an optional first message.
-    /// The chat title is derived from the first message (first 15 chars + "...").
+    /// Create a new chat with an optional first message and optional per-chat
+    /// search configuration. The chat title is derived from the first message
+    /// (first 15 chars + "...").
     #[instrument(skip(self))]
     pub async fn create_chat(
         &self,
         first_message: Option<String>,
         model: String,
         user_id: UserId,
+        search_config: Option<ChatSearchConfig>,
     ) -> Result<Chat, AppError> {
         let title = first_message.as_deref().map(Message::make_title);
-        let new_chat = chat_repository::NewChatDb::new(user_id.0, title.clone());
+        let search_config = search_config.and_then(|cfg| serde_json::to_value(cfg).ok());
+        let new_chat = chat_repository::NewChatDb::new(user_id.0, title.clone(), search_config);
         let result: Result<Chat, AppError> = chat_repository::insert(&self.pool, new_chat)
             .await
             .map(Into::into)
@@ -97,7 +101,7 @@ impl ChatService {
         user_id: UserId,
     ) -> Result<Chat, AppError> {
         let title = Message::make_title(&first_message);
-        let new_chat = chat_repository::NewChatDb::new(user_id.0, Some(title.clone()));
+        let new_chat = chat_repository::NewChatDb::new(user_id.0, Some(title.clone()), None);
         let result: Result<Chat, AppError> = chat_repository::insert(&self.pool, new_chat)
             .await
             .map(Into::into)
@@ -254,7 +258,7 @@ mod integration {
         let user = make_user();
 
         let chat = service
-            .create_chat(Some("Hello there!".into()), "test-model".into(), user)
+            .create_chat(Some("Hello there!".into()), "test-model".into(), user, None)
             .await
             .expect("create_chat");
 
@@ -310,6 +314,7 @@ mod integration {
                 Some("A much longer first message than fifteen characters".into()),
                 "test-model".into(),
                 user,
+                None,
             )
             .await
             .expect("create_chat");
@@ -334,7 +339,7 @@ mod integration {
         let user = make_user();
 
         let chat = service
-            .create_chat(None, "test-model".into(), user)
+            .create_chat(None, "test-model".into(), user, None)
             .await
             .expect("create_chat");
         assert_eq!(chat.title, None);
@@ -361,7 +366,7 @@ mod integration {
         let intruder = make_user();
 
         let chat = service
-            .create_chat(None, "test-model".into(), owner)
+            .create_chat(None, "test-model".into(), owner, None)
             .await
             .expect("create_chat");
 
@@ -399,11 +404,11 @@ mod integration {
         let bob = make_user();
 
         let alice_chat = service
-            .create_chat(None, "test-model".into(), alice)
+            .create_chat(None, "test-model".into(), alice, None)
             .await
             .expect("create_chat");
         service
-            .create_chat(None, "test-model".into(), bob)
+            .create_chat(None, "test-model".into(), bob, None)
             .await
             .expect("create_chat");
 

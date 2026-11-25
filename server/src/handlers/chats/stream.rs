@@ -153,6 +153,18 @@ pub async fn send_message(
         .check_ownership(chat_id, auth_user.user_id)
         .await?;
 
+    // Resolve the per-chat search parameters (chat overrides over server
+    // defaults) so every search in this chat uses them.
+    let chat = state
+        .chat_service
+        .get_chat(chat_id, auth_user.user_id)
+        .await?;
+    let base_params = state.ai_service.search_params();
+    let search_params = match chat.search_config.as_ref() {
+        Some(cfg) => cfg.resolve(&base_params)?,
+        None => base_params,
+    };
+
     let SendMessageRequest {
         trigger,
         message_id,
@@ -195,8 +207,10 @@ pub async fn send_message(
         MessageTrigger::Continue => StreamRequest::Continue,
     };
 
-    let (scenario_id, assistant_message_id, scenario_name, domain_stream) =
-        state.ai_service.stream(chat_id, auth_user, request).await?;
+    let (scenario_id, assistant_message_id, scenario_name, domain_stream) = state
+        .ai_service
+        .stream(chat_id, auth_user, request, search_params)
+        .await?;
 
     let assistant_message_id = assistant_message_id.0.to_string();
     let scenario_id = scenario_id.0.to_string();

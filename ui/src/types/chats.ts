@@ -1,6 +1,29 @@
 import { z } from 'zod'
 import type { UIMessage } from 'ai'
 
+// ── Per-chat search settings (creation-time only) ───────────────────────────
+export type SearchMode = 'hybrid' | 'semantic' | 'lexical'
+
+// Full form state, including "unset" (null) numeric fields.
+export interface ChatSearchConfigInput {
+  mode: SearchMode
+  limit: number | null
+  candidateLimit: number | null
+  rerankerLimit: number | null
+  rerankerThreshold: number | null
+  rerank: boolean
+}
+
+// Request payload: only explicit overrides, so unset fields use server defaults.
+export interface ChatSearchConfigPayload {
+  mode?: SearchMode
+  limit?: number
+  candidateLimit?: number
+  rerankerLimit?: number
+  rerankerThreshold?: number
+  rerank?: boolean
+}
+
 export const chatListItemSchema = z.object({
   id: z.string(),
   title: z.string().nullish(),

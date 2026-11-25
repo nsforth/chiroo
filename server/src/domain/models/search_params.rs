@@ -1,8 +1,11 @@
+use crate::domain::models::chat_search_config::SearchMode;
 use crate::errors::AppError;
 
 /// Per-request search limits and thresholds. `limit` is applied per knowledge
 /// base, the other two per (query, knowledge base). `rerank: false` skips the
 /// reranker: chunks keep their hybrid (RRF) score and are merged by dedup only.
+/// `mode` selects the retrieval leg(s): hybrid (dense + BM25), semantic (dense
+/// only) or lexical (BM25 only).
 #[derive(Clone, Copy, Debug)]
 pub struct SearchParams {
     pub limit: usize,
@@ -10,6 +13,7 @@ pub struct SearchParams {
     pub reranker_limit: u32,
     pub reranker_threshold: f32,
     pub rerank: bool,
+    pub mode: SearchMode,
 }
 
 impl SearchParams {
@@ -46,7 +50,13 @@ impl SearchParams {
             reranker_limit,
             reranker_threshold,
             rerank,
+            mode: SearchMode::default(),
         })
+    }
+
+    pub fn with_mode(mut self, mode: SearchMode) -> Self {
+        self.mode = mode;
+        self
     }
 }
 

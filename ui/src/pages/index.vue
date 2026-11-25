@@ -11,6 +11,8 @@ import { useUserSession } from '../composables/useUserSession'
 import Navbar from '../components/Navbar.vue'
 import { useBranding } from '../composables/useBranding'
 import { chatListItemSchema } from '../types/chats'
+import type { ChatSearchConfigPayload } from '../types/chats'
+import SearchConfigForm from '../components/SearchConfigForm.vue'
 
 const { branding } = useBranding()
 
@@ -23,6 +25,7 @@ const { t } = useI18n()
 const { input, submit, commit, restore } = useChatDraft('draft.new-chat')
 const loading = ref(false)
 const router = useRouter()
+const searchConfigForm = ref<InstanceType<typeof SearchConfigForm> | null>(null)
 
 const greeting = computed(() => {
   const hour = new Date().getHours()
@@ -38,10 +41,18 @@ const greeting = computed(() => {
 async function createChat(prompt: string) {
   loading.value = true
   try {
+    const searchConfig = searchConfigForm.value?.getSearchConfig()
+    const body: {
+      firstMessage: string
+      model: string
+      searchConfig?: ChatSearchConfigPayload
+    } = { firstMessage: prompt, model: model.value }
+    if (searchConfig) body.searchConfig = searchConfig
+
     const data: unknown = await apiFetch('/api/chats', {
       method: 'POST',
       headers: { [headerName]: csrf() },
-      body: { firstMessage: prompt, model: model.value }
+      body
     })
     const parsed = chatListItemSchema.safeParse(data)
     if (!parsed.success) throw new Error('invalid response')
@@ -113,6 +124,8 @@ function onSubmit() {
             </div>
           </template>
         </UChatPrompt>
+
+        <SearchConfigForm ref="searchConfigForm" />
       </UContainer>
     </template>
   </UDashboardPanel>

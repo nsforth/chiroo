@@ -94,12 +94,18 @@ impl AiService {
         }
     }
 
+    /// The server-wide default search parameters (the per-chat fallback).
+    pub fn search_params(&self) -> SearchParams {
+        self.search_params
+    }
+
     #[instrument(skip(self, request, auth_user))]
     pub async fn stream(
         &self,
         chat_id: ChatId,
         auth_user: AuthUser,
         request: StreamRequest,
+        search_params: SearchParams,
     ) -> Result<
         (
             ScenarioId,
@@ -116,7 +122,7 @@ impl AiService {
             StreamRequest::Submit {
                 user_message,
                 model,
-            } => Ok(self.stream_new(chat_id, &model, user_message, user_name)),
+            } => Ok(self.stream_new(chat_id, &model, user_message, user_name, search_params)),
             StreamRequest::Edit {
                 user_message,
                 scenario_id,
@@ -126,7 +132,7 @@ impl AiService {
                     .get_scenario(chat_id, scenario_id)
                     .await?
                     .ok_or_else(|| AppError::NotFound("Scenario not found".to_string()))?;
-                self.rerun_scenario(chat_id, scenario, user_message, user_name)
+                self.rerun_scenario(chat_id, scenario, user_message, user_name, search_params)
                     .await
             },
             StreamRequest::Regenerate { scenario_id } => {
@@ -139,7 +145,7 @@ impl AiService {
                     .user_message()
                     .cloned()
                     .ok_or_else(|| AppError::NotFound("User message not found".to_string()))?;
-                self.rerun_scenario(chat_id, scenario, user_message, user_name)
+                self.rerun_scenario(chat_id, scenario, user_message, user_name, search_params)
                     .await
             },
             StreamRequest::Continue => {
@@ -154,7 +160,7 @@ impl AiService {
                     .ok_or_else(|| {
                         AppError::BadRequest("No incomplete scenario to continue".to_string())
                     })?;
-                Ok(self.stream_continue(chat_id, scenario, user_name))
+                Ok(self.stream_continue(chat_id, scenario, user_name, search_params))
             },
         };
         match &result {
@@ -170,6 +176,7 @@ impl AiService {
         scenario: Scenario,
         user_message: Message,
         user_name: String,
+        search_params: SearchParams,
     ) -> Result<
         (
             ScenarioId,
@@ -184,7 +191,7 @@ impl AiService {
         self.scenario_service
             .delete_scenarios_after(chat_id, scenario.created_at)
             .await?;
-        Ok(self.stream_new(chat_id, &model, user_message, user_name))
+        Ok(self.stream_new(chat_id, &model, user_message, user_name, search_params))
     }
 
     #[instrument(skip(self, user_message, user_name))]
@@ -194,6 +201,7 @@ impl AiService {
         model: &str,
         user_message: Message,
         user_name: String,
+        search_params: SearchParams,
     ) -> (
         ScenarioId,
         MessageId,
@@ -217,6 +225,7 @@ impl AiService {
             true,
             None,
             None,
+            search_params,
         );
         result
     }
@@ -232,6 +241,7 @@ impl AiService {
         chat_id: ChatId,
         scenario: Scenario,
         user_name: String,
+        search_params: SearchParams,
     ) -> (
         ScenarioId,
         MessageId,
@@ -253,6 +263,7 @@ impl AiService {
             false,
             None,
             None,
+            search_params,
         );
         result
     }
@@ -268,6 +279,7 @@ impl AiService {
         history: Vec<Message>,
         client_system: Option<String>,
         user_id: UserId,
+        search_params: SearchParams,
     ) -> Result<Scenario, AppError> {
         let user = self.user_service.get_user(user_id).await?;
         let user_name = user.name.clone().unwrap_or_else(|| user.username.clone());
@@ -290,6 +302,7 @@ impl AiService {
             true,
             Some(history),
             client_system,
+            search_params,
         );
 
         while let Some(event) = stream.next().await {
@@ -325,6 +338,7 @@ impl AiService {
         is_new: bool,
         provided_history: Option<Vec<Message>>,
         client_system: Option<String>,
+        search_params: SearchParams,
     ) -> (
         ScenarioId,
         MessageId,
@@ -339,7 +353,6 @@ impl AiService {
         let scenario_service = self.scenario_service.clone();
         let search_service = self.search_service.clone();
         let knowledge_service = self.knowledge_service.clone();
-        let search_params = self.search_params;
         let assistant_name = self.assistant_name.clone();
 
         let (tx, rx) = mpsc::channel(64);

@@ -169,7 +169,7 @@ mod integration {
     /// Create a chat with a scenario to vote on.
     async fn make_chat_with_scenario(pool: &Pool) -> (ChatId, ScenarioId) {
         let chat: crate::domain::models::chat::Chat =
-            chat_repository::insert(pool, NewChatDb::new(Uuid::new_v4(), None))
+            chat_repository::insert(pool, NewChatDb::new(Uuid::new_v4(), None, None))
                 .await
                 .expect("insert chat")
                 .into();
@@ -246,7 +246,7 @@ mod integration {
         let pool = get_or_create_test_pool().await;
         let service = make_service(&pool);
         let chat: crate::domain::models::chat::Chat =
-            chat_repository::insert(&pool, NewChatDb::new(Uuid::new_v4(), None))
+            chat_repository::insert(&pool, NewChatDb::new(Uuid::new_v4(), None, None))
                 .await
                 .expect("insert chat")
                 .into();
@@ -313,7 +313,7 @@ mod integration {
         .expect("upsert user");
 
         let chat: crate::domain::models::chat::Chat =
-            chat_repository::insert(&pool, NewChatDb::new(user.id, None))
+            chat_repository::insert(&pool, NewChatDb::new(user.id, None, None))
                 .await
                 .expect("insert chat")
                 .into();

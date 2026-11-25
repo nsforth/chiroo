@@ -102,6 +102,21 @@
     "renameDesc": "Choose a new title for this chat.",
     "chatTitlePlaceholder": "Chat title"
   },
+  "searchConfig": {
+    "title": "Search options",
+    "hint": "Overrides the server search defaults for this chat only. Leave a field empty to use the server default.",
+    "mode": "Retrieval mode",
+    "modeHybrid": "Hybrid (semantic + lexical)",
+    "modeSemantic": "Semantic only",
+    "modeLexical": "Lexical only",
+    "limit": "Result limit",
+    "candidateLimit": "Candidate limit",
+    "rerankerLimit": "Reranker limit",
+    "rerankerThreshold": "Reranker threshold",
+    "rerank": "Rerank",
+    "rerankLabel": "Use reranker",
+    "empty": "default"
+  },
   "userMenu": {
     "language": "Language",
     "appearance": "Appearance",

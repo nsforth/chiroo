@@ -1,5 +1,6 @@
 pub mod auth_user;
 pub mod chat;
+pub mod chat_search_config;
 pub mod document;
 pub mod document_chunk;
 pub mod kb_index;

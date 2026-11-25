@@ -182,7 +182,7 @@ mod integration {
 
     /// Create a bare chat row to hang scenarios off.
     async fn make_chat(pool: &Pool) -> Chat {
-        let chat_db = chat_repository::insert(&pool, NewChatDb::new(Uuid::new_v4(), None))
+        let chat_db = chat_repository::insert(&pool, NewChatDb::new(Uuid::new_v4(), None, None))
             .await
             .expect("insert chat");
         chat_db.into()
