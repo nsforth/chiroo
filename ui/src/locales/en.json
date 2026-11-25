@@ -115,6 +115,7 @@
     "rerankerThreshold": "Reranker threshold",
     "rerank": "Rerank",
     "rerankLabel": "Use reranker",
+    "reset": "Reset to defaults",
     "empty": "default"
   },
   "userMenu": {

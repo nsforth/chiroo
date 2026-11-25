@@ -121,6 +121,12 @@ pub async fn create_chat(
     auth_user: AuthUser,
     JsonExtractor(new_chat): JsonExtractor<CreateChatRequest>,
 ) -> Result<Json<ChatResponse>, ErrorResponse> {
+    // Validate the per-chat search overrides up front so an invalid value
+    // (e.g. `limit: 0`, `rerankerThreshold: 1.5`) is rejected with 400 at
+    // creation instead of failing on every subsequent message.
+    if let Some(ref cfg) = new_chat.search_config {
+        cfg.resolve(&state.ai_service.search_params())?;
+    }
     let chat = state
         .chat_service
         .create_chat(

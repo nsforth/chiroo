@@ -6,14 +6,23 @@ import type { ChatSearchConfigInput, ChatSearchConfigPayload } from '../types/ch
 
 const { t } = useI18n()
 
-const config = useStorage<ChatSearchConfigInput>('chat-search-config', {
+// "No override" state: unset fields fall back to the server defaults.
+const DEFAULTS: ChatSearchConfigInput = {
   mode: 'hybrid',
   limit: null,
   candidateLimit: null,
   rerankerLimit: null,
   rerankerThreshold: null,
   rerank: true
+}
+
+const config = useStorage<ChatSearchConfigInput>('chat-search-config', {
+  ...DEFAULTS
 })
+
+function resetToDefaults() {
+  config.value = { ...DEFAULTS }
+}
 
 const modeItems = computed(() => [
   { label: t('searchConfig.modeHybrid'), value: 'hybrid' },
@@ -149,6 +158,16 @@ defineExpose({ getSearchConfig })
         <p class="mt-3 text-xs text-dimmed">
           {{ t('searchConfig.hint') }}
         </p>
+        <div class="mt-2 flex justify-end">
+          <UButton
+            size="xs"
+            variant="link"
+            icon="i-lucide-rotate-ccw"
+            @click="resetToDefaults"
+          >
+            {{ t('searchConfig.reset') }}
+          </UButton>
+        </div>
       </template>
     </UCollapsible>
   </UCard>
